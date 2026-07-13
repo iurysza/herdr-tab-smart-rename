@@ -1,0 +1,48 @@
+id = "autoname"
+name = "AutoName"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Conservatively name Herdr workspaces and task tabs."
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "start"
+title = "AutoName: start"
+description = "Start the detached AutoName worker."
+contexts = ["global", "workspace"]
+command = ["node", "src/cli.mjs", "start"]
+
+[[actions]]
+id = "stop"
+title = "AutoName: stop"
+description = "Stop the AutoName worker."
+contexts = ["global", "workspace"]
+command = ["node", "src/cli.mjs", "stop"]
+
+[[actions]]
+id = "status"
+title = "AutoName: status"
+description = "Report worker status."
+contexts = ["global", "workspace"]
+command = ["node", "src/cli.mjs", "status"]
+
+[[actions]]
+id = "rename-now"
+title = "AutoName: rename now"
+description = "Evaluate the current workspace and tab now."
+contexts = ["workspace", "tab", "pane"]
+command = ["node", "src/cli.mjs", "once"]
+
+[[actions]]
+id = "reset-tab"
+title = "AutoName: reset tab"
+description = "Clear the current tab's manual lock and evaluate it."
+contexts = ["tab", "pane"]
+command = ["node", "src/cli.mjs", "reset-tab"]
+
+[[actions]]
+id = "reset-workspace"
+title = "AutoName: reset workspace"
+description = "Clear the current workspace's manual lock and evaluate it."
+contexts = ["workspace", "tab", "pane"]
+command = ["node", "src/cli.mjs", "reset-workspace"]

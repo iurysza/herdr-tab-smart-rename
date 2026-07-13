@@ -1,0 +1,14 @@
+{
+  "name": "herdr-autoname",
+  "version": "0.1.0",
+  "description": "Conservative automatic workspace and task tab names for Herdr",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "check": "for file in src/*.mjs; do node --check \"$file\" || exit; done",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
