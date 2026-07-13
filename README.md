@@ -79,7 +79,7 @@ Smart Rename owns only default labels and labels it previously generated.
 
 Before renaming, it records the expected label. A matching Herdr rename event confirms automatic ownership; any other rename locks the item as manual. Manual tabs skip process inspection, session reads, and Kimi calls until reset.
 
-Ownership survives worker restarts.
+Ownership survives worker restarts. Explicit `rename-now` and `rename-all` actions count as user approval to reclaim their target tabs, bypass model cooldown, and generate fresh names.
 
 ## Actions
 
@@ -88,8 +88,8 @@ Ownership survives worker restarts.
 | `start` | Start one detached worker. Repeated starts are harmless. |
 | `stop` | Stop the verified worker process. |
 | `status` | Report worker status. |
-| `rename-now` | Evaluate the current tab and workspace. |
-| `rename-all` | Evaluate every auto-owned tab sequentially. |
+| `rename-now` | Reclaim and rename the current tab immediately. |
+| `rename-all` | Reclaim and rename every tab sequentially. |
 | `reset-tab` | Return the current tab to automatic ownership and evaluate it. |
 | `reset-workspace` | Return the current workspace to automatic ownership and evaluate it. |
 
@@ -115,7 +115,7 @@ description = "smart rename current tab"
 key = "prefix+alt+t"
 type = "plugin_action"
 command = "autoname.rename-all"
-description = "smart rename all tabs"
+description = "force smart rename all tabs"
 ```
 
 ## Context and privacy

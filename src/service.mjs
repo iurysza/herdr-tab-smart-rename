@@ -192,27 +192,35 @@ export class AutoNameService {
     };
   }
 
-  async evaluateAll(initial = null) {
+  async evaluateAll(initial = null, options = {}) {
     const snap = initial ?? (await this.dependencies.snapshot(this.env));
     const results = [];
     for (const tab of snap.tabs) {
-      const result = await this.evaluate(tab.tab_id);
+      const result = await this.evaluate(tab.tab_id, options);
       if (result) results.push(result);
     }
     return results;
   }
 
   async evaluate(tabId, options = {}) {
-    const snap = options.snapshot ?? (await this.dependencies.snapshot(this.env));
     if (this.dryRun || !this.stateFile) {
+      const snap =
+        options.snapshot ?? (await this.dependencies.snapshot(this.env));
       const state = await loadState(this.stateFile);
       reconcileSnapshot(state, snap);
-      return this.evaluateWithState(state, () => Promise.resolve(), tabId, snap, options);
+      return this.evaluateWithState(
+        state,
+        () => Promise.resolve(),
+        tabId,
+        snap,
+        options,
+      );
     }
     return withStateTransaction(
       this.stateFile,
       this.stateLock,
       async (state, persist) => {
+        const snap = await this.dependencies.snapshot(this.env);
         reconcileSnapshot(state, snap);
         return this.evaluateWithState(state, persist, tabId, snap, options);
       },
@@ -274,12 +282,13 @@ export class AutoNameService {
         const contextReady =
           !weakCommandContext ||
           options.forceModel ||
+          options.forceRefresh ||
           observeStableContext(state, tab.tab_id, details.context);
         if (!contextReady) {
           reason = "waiting for stable command context";
         } else {
           const gate = shouldCallModel(state, tab.tab_id, details.context);
-          if (gate.allowed || options.forceModel) {
+          if (gate.allowed || options.forceModel || options.forceRefresh) {
             markModelAttempt(state, tab.tab_id);
             if (!this.dryRun) await persist();
             const suggestion = await this.pi.suggest(details.context);

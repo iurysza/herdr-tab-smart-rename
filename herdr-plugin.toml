@@ -29,14 +29,14 @@ command = ["node", "src/cli.mjs", "status"]
 [[actions]]
 id = "rename-now"
 title = "Smart Rename: current tab"
-description = "Evaluate the current workspace and tab now."
+description = "Reclaim and rename the current tab now."
 contexts = ["workspace", "tab", "pane"]
-command = ["node", "src/cli.mjs", "once"]
+command = ["node", "src/cli.mjs", "rename-now"]
 
 [[actions]]
 id = "rename-all"
 title = "Smart Rename: all tabs"
-description = "Evaluate every auto-owned tab sequentially."
+description = "Reclaim and rename every tab sequentially."
 contexts = ["global", "workspace", "tab", "pane"]
 command = ["node", "src/cli.mjs", "all"]
 

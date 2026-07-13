@@ -161,6 +161,51 @@ test("weak command context waits for stability before model abstention", async (
   }
 });
 
+test("forced evaluation bypasses unchanged-context model gating", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-force-"));
+  const paths = statePaths(dir);
+  const snap = liveSnapshot("1");
+  let modelCalls = 0;
+  const service = new AutoNameService({
+    stateFile: paths.state,
+    stateLock: paths.stateLock,
+    pi: {
+      suggest: async () => {
+        modelCalls += 1;
+        return { tab: "Forced Rename", reason: "task" };
+      },
+    },
+    dependencies: {
+      snapshot: async () => snap,
+      focusedPaneContext: async () => ({
+        focused: true,
+        process: { name: "pi", command: "pi", cwd: "/tmp/agents" },
+        recentOutput: "",
+        userMessages: ["Force a fresh tab name"],
+      }),
+      siblingPaneContext: async () => ({ focused: false }),
+      rename: async (kind, id, label) => {
+        if (kind === "tab" && id === "t1") snap.tabs[0].label = label;
+      },
+    },
+  });
+  try {
+    await service.initialize(snap);
+    await service.evaluate("t1", { snapshot: snap });
+    await service.acknowledge("tab", "t1", "Forced Rename");
+    const gated = await service.evaluate("t1", { snapshot: snap });
+    assert.equal(gated.reason, "unchanged or rate-limited context");
+    const forced = await service.evaluate("t1", {
+      snapshot: snap,
+      forceRefresh: true,
+    });
+    assert.equal(forced.usedModel, true);
+    assert.equal(modelCalls, 2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("manual ownership skips context reads and model calls", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-manual-"));
   const paths = statePaths(dir);
@@ -171,6 +216,7 @@ test("manual ownership skips context reads and model calls", async () => {
     stateLock: paths.stateLock,
     pi: { suggest: async () => { modelCalls += 1; throw new Error("unexpected"); } },
     dependencies: {
+      snapshot: async () => snap,
       focusedPaneContext: async () => { throw new Error("unexpected context read"); },
       siblingPaneContext: async () => { throw new Error("unexpected sibling read"); },
       rename: async () => { throw new Error("unexpected rename"); },
@@ -181,6 +227,79 @@ test("manual ownership skips context reads and model calls", async () => {
     const result = await service.evaluate("t1", { snapshot: snap });
     assert.equal(result.reason, "manual ownership");
     assert.equal(modelCalls, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("explicit refresh reclaims a manual tab", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-reclaim-"));
+  const paths = statePaths(dir);
+  const snap = liveSnapshot("Manual Task");
+  const service = new AutoNameService({
+    stateFile: paths.state,
+    stateLock: paths.stateLock,
+    pi: {
+      suggest: async () => ({ tab: "Fresh Task Name", reason: "current task" }),
+    },
+    dependencies: {
+      snapshot: async () => snap,
+      focusedPaneContext: async () => ({
+        focused: true,
+        process: { name: "pi", command: "pi", cwd: "/tmp/agents" },
+        recentOutput: "",
+        userMessages: ["Give this tab a fresh task name"],
+      }),
+      siblingPaneContext: async () => ({ focused: false }),
+      rename: async (kind, id, label) => {
+        if (kind === "tab" && id === "t1") snap.tabs[0].label = label;
+      },
+    },
+  });
+  try {
+    await service.initialize(snap);
+    const result = await service.evaluate("t1", {
+      resetKind: "tab",
+      forceRefresh: true,
+    });
+    assert.equal(result.candidate.tab, "Fresh Task Name");
+    assert.equal(result.changes.length, 1);
+    assert.equal((await loadState(paths.state)).tabs.t1.manual, false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("concurrent evaluations reconcile against fresh locked snapshots", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-race-"));
+  const paths = statePaths(dir);
+  let label = "1";
+  const current = () => liveSnapshot(label);
+  const service = new AutoNameService({
+    stateFile: paths.state,
+    stateLock: paths.stateLock,
+    pi: { suggest: async () => { throw new Error("unexpected model call"); } },
+    dependencies: {
+      snapshot: async () => current(),
+      focusedPaneContext: async () => ({
+        focused: true,
+        process: { name: "node", command: "node --test", cwd: "/tmp/agents" },
+        recentOutput: "",
+        userMessages: [],
+      }),
+      siblingPaneContext: async () => ({ focused: false }),
+      rename: async (kind, id, next) => {
+        if (kind === "tab" && id === "t1") label = next;
+      },
+    },
+  });
+  try {
+    await service.initialize(current());
+    await Promise.all([service.evaluate("t1"), service.evaluate("t1")]);
+    const record = (await loadState(paths.state)).tabs.t1;
+    assert.equal(record.manual, false);
+    assert.equal(record.autoLabel, "Run Tests");
+    assert.equal(record.expectedLabel, undefined);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -233,6 +352,7 @@ test("failed model calls persist attempt backoff only", async () => {
     stateLock: paths.stateLock,
     pi: { suggest: async () => { throw new Error("provider unavailable"); } },
     dependencies: {
+      snapshot: async () => snap,
       focusedPaneContext: async () => ({
         focused: true,
         process: { name: "pi", command: "pi", cwd: "/tmp/agents" },

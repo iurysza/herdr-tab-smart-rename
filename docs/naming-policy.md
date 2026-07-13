@@ -16,7 +16,7 @@ Smart Rename owns only default labels or labels it previously generated.
 - Any meaningful pre-existing label is manual.
 - Any rename that does not match Smart Rename's expected write becomes manual.
 - Manual workspaces and tabs are not inspected, sent to Kimi, or renamed.
-- Reset actions explicitly return ownership to Smart Rename.
+- Reset and explicit rename actions return their target tabs to Smart Rename ownership.
 
 ## Workspace names
 
@@ -90,9 +90,10 @@ Broad AI naming remains enabled for ordinary commands. Stability and abstention 
 
 - Relevant Herdr lifecycle events are debounced briefly.
 - A serialized sweep runs every 60 seconds for task changes without events.
-- Kimi attempts are limited to once per tab every 10 minutes.
-- An unchanged successful context fingerprint is not sent again.
-- Manual overrides remain locked across restarts.
+- Background Kimi attempts are limited to once per tab every 10 minutes.
+- Background evaluation does not resend an unchanged successful context fingerprint.
+- Explicit current-tab and all-tab actions bypass both limits and request fresh names.
+- Manual overrides remain locked across restarts. Explicit current/all rename actions are user-approved overrides: they reclaim their target tabs and bypass model cooldown.
 
 A strong deterministic process transition can rename immediately. A weak AI-derived transition should wait for stable evidence.
 

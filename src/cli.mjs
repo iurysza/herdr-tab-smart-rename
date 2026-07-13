@@ -109,14 +109,17 @@ async function renameAll() {
   });
   try {
     const initial = await service.initialize();
-    const results = await service.evaluateAll(initial);
+    const results = await service.evaluateAll(initial, {
+      resetKind: "tab",
+      forceRefresh: true,
+    });
     console.log(JSON.stringify(results, null, 2));
   } finally {
     pi.close();
   }
 }
 
-async function once(resetKind = null) {
+async function once(resetKind = null, forceRefresh = false) {
   const snap = await snapshot();
   const tabId = process.env.HERDR_TAB_ID || snap.focused_tab_id;
   const workspaceId =
@@ -145,7 +148,7 @@ async function once(resetKind = null) {
     const result = await service.evaluate(targetTab, {
       snapshot: snap,
       resetKind,
-      forceModel: resetKind === "tab",
+      forceRefresh,
     });
     console.log(JSON.stringify(result, null, 2));
   } finally {
@@ -157,18 +160,14 @@ try {
   if (command === "start") await start();
   else if (command === "stop") await stop();
   else if (command === "status") await status();
-  else if (
-    command === "once" ||
-    command === "rename-now" ||
-    command === "dry-run"
-  ) {
-    await once();
-  } else if (command === "all") await renameAll();
-  else if (command === "reset-tab") await once("tab");
-  else if (command === "reset-workspace") await once("workspace");
+  else if (command === "once" || command === "dry-run") await once();
+  else if (command === "rename-now") await once("tab", true);
+  else if (command === "all") await renameAll();
+  else if (command === "reset-tab") await once("tab", true);
+  else if (command === "reset-workspace") await once("workspace", true);
   else {
     throw new Error(
-      "usage: cli.mjs start|stop|status|once [--dry-run]|dry-run|all|reset-tab|reset-workspace",
+      "usage: cli.mjs start|stop|status|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-workspace",
     );
   }
 } catch (error) {
