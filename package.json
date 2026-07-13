@@ -1,7 +1,7 @@
 {
-  "name": "herdr-autoname",
+  "name": "herdr-tab-smart-rename",
   "version": "0.1.0",
-  "description": "Conservative automatic workspace and task tab names for Herdr",
+  "description": "Context-aware workspace and task tab names for Herdr",
   "type": "module",
   "private": true,
   "scripts": {

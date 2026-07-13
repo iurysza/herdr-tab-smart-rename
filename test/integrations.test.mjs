@@ -7,6 +7,7 @@ import {
   LIFECYCLE_SUBSCRIPTIONS,
   normalizeHerdrEvent,
   recentUserMessages,
+  sampledUserMessages,
 } from "../src/integrations.mjs";
 
 test("Herdr event envelopes normalize top-level event and data", () => {
@@ -35,6 +36,46 @@ test("Herdr event envelopes normalize top-level event and data", () => {
 test("subscriptions avoid catch-all output matching", () => {
   assert.equal(LIFECYCLE_SUBSCRIPTIONS.includes("tab.renamed"), true);
   assert.equal(LIFECYCLE_SUBSCRIPTIONS.includes("pane.output_matched"), false);
+});
+
+test("session sampler weights origin midpoint and recent requests", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "autoname-samples-"));
+  const agentDir = path.join(root, "agent");
+  const sessions = path.join(agentDir, "sessions", "project");
+  await mkdir(sessions, { recursive: true });
+  const session = path.join(sessions, "session.jsonl");
+  const user = (text) =>
+    JSON.stringify({
+      type: "message",
+      message: { role: "user", content: [{ type: "text", text }] },
+    });
+  await writeFile(
+    session,
+    [
+      user("Build automatic tab naming"),
+      "x".repeat(400_000),
+      user("Fix manual ownership"),
+      "x".repeat(400_000),
+      ...Array.from({ length: 5 }, (_, index) => user(`Recent request ${index + 1}`)),
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    const env = { ...process.env, HOME: root, PI_CODING_AGENT_DIR: agentDir };
+    assert.deepEqual(await sampledUserMessages(session, env), {
+      origin: ["Build automatic tab naming"],
+      middle: ["Fix manual ownership"],
+      recent: [
+        "Recent request 2",
+        "Recent request 3",
+        "Recent request 4",
+        "Recent request 5",
+      ],
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("session reader accepts only bounded regular Pi session tails", async () => {

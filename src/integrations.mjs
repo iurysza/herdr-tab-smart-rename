@@ -12,6 +12,8 @@ import {
 } from "./core.mjs";
 
 const execFileAsync = promisify(execFile);
+const SESSION_HEAD_BYTES = 64 * 1024;
+const SESSION_MIDDLE_BYTES = 256 * 1024;
 const SESSION_TAIL_BYTES = 512 * 1024;
 
 export const LIFECYCLE_SUBSCRIPTIONS = [
@@ -103,8 +105,8 @@ function sessionsRoot(env) {
   return path.join(agentDir, "sessions");
 }
 
-export async function recentUserMessages(sessionPath, limit = 6, env = process.env) {
-  if (!sessionPath || !path.isAbsolute(sessionPath)) return [];
+async function openSession(sessionPath, env) {
+  if (!sessionPath || !path.isAbsolute(sessionPath)) return null;
 
   let allowedRoot;
   let resolvedPath;
@@ -114,43 +116,110 @@ export async function recentUserMessages(sessionPath, limit = 6, env = process.e
       realpath(sessionPath),
     ]);
   } catch {
-    return [];
+    return null;
   }
-  if (!resolvedPath.startsWith(`${allowedRoot}${path.sep}`)) return [];
+  if (!resolvedPath.startsWith(`${allowedRoot}${path.sep}`)) return null;
 
   const info = await stat(resolvedPath).catch(() => null);
-  if (!info?.isFile()) return [];
+  if (!info?.isFile()) return null;
   const handle = await open(resolvedPath, "r").catch(() => null);
-  if (!handle) return [];
-  try {
-    const length = Math.min(info.size, SESSION_TAIL_BYTES);
-    const start = Math.max(0, info.size - length);
-    const buffer = Buffer.alloc(length);
-    await handle.read(buffer, 0, length, start);
-    let text = buffer.toString("utf8");
-    if (start > 0) {
-      const firstNewline = text.indexOf("\n");
-      text = firstNewline === -1 ? "" : text.slice(firstNewline + 1);
-    }
+  return handle ? { handle, size: info.size } : null;
+}
 
-    const messages = [];
-    for (let line of text.split("\n")) {
-      if (line.endsWith("\r")) line = line.slice(0, -1);
-      if (!line) continue;
-      try {
-        const entry = JSON.parse(line);
-        if (entry?.type !== "message" || entry.message?.role !== "user") continue;
-        const value = boundedText(contentText(entry.message.content), 2_000);
-        if (!value) continue;
-        messages.push(value);
-        if (messages.length > limit) messages.shift();
-      } catch {
-        // Ignore partial and non-JSON records.
-      }
+async function readSessionWindow(handle, size, start, length) {
+  const offset = Math.max(0, Math.min(start, size));
+  const count = Math.max(0, Math.min(length, size - offset));
+  const buffer = Buffer.alloc(count);
+  const { bytesRead } = await handle.read(buffer, 0, count, offset);
+  let text = buffer.subarray(0, bytesRead).toString("utf8");
+  if (offset > 0) {
+    const newline = text.indexOf("\n");
+    text = newline === -1 ? "" : text.slice(newline + 1);
+  }
+  if (offset + bytesRead < size) {
+    const newline = text.lastIndexOf("\n");
+    text = newline === -1 ? "" : text.slice(0, newline + 1);
+  }
+  return text;
+}
+
+function userMessagesFrom(text) {
+  const messages = [];
+  for (let line of text.split("\n")) {
+    if (line.endsWith("\r")) line = line.slice(0, -1);
+    if (!line) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (entry?.type !== "message" || entry.message?.role !== "user") continue;
+      const value = boundedText(contentText(entry.message.content), 2_000);
+      if (value) messages.push(value);
+    } catch {
+      // Ignore partial and non-JSON records.
     }
-    return messages;
+  }
+  return messages;
+}
+
+export async function recentUserMessages(sessionPath, limit = 6, env = process.env) {
+  const session = await openSession(sessionPath, env);
+  if (!session) return [];
+  try {
+    const start = Math.max(0, session.size - SESSION_TAIL_BYTES);
+    const text = await readSessionWindow(
+      session.handle,
+      session.size,
+      start,
+      SESSION_TAIL_BYTES,
+    );
+    return userMessagesFrom(text).slice(-limit);
   } finally {
-    await handle.close();
+    await session.handle.close();
+  }
+}
+
+export async function sampledUserMessages(sessionPath, env = process.env) {
+  const session = await openSession(sessionPath, env);
+  if (!session) return { origin: [], middle: [], recent: [] };
+  try {
+    const middleStart = Math.max(
+      0,
+      Math.floor((session.size - SESSION_MIDDLE_BYTES) / 2),
+    );
+    const tailStart = Math.max(0, session.size - SESSION_TAIL_BYTES);
+    const [headText, middleText, tailText] = await Promise.all([
+      readSessionWindow(
+        session.handle,
+        session.size,
+        0,
+        SESSION_HEAD_BYTES,
+      ),
+      readSessionWindow(
+        session.handle,
+        session.size,
+        middleStart,
+        SESSION_MIDDLE_BYTES,
+      ),
+      readSessionWindow(
+        session.handle,
+        session.size,
+        tailStart,
+        SESSION_TAIL_BYTES,
+      ),
+    ]);
+    const head = userMessagesFrom(headText);
+    const middle = userMessagesFrom(middleText);
+    const recent = userMessagesFrom(tailText);
+    const originMessage = head[0];
+    const middleMessage = middle[Math.floor(middle.length / 2)];
+    const seen = new Set([originMessage, middleMessage].filter(Boolean));
+    return {
+      origin: originMessage ? [originMessage] : [],
+      middle:
+        middleMessage && middleMessage !== originMessage ? [middleMessage] : [],
+      recent: recent.filter((message) => !seen.has(message)).slice(-4),
+    };
+  } finally {
+    await session.handle.close();
   }
 }
 
@@ -159,17 +228,22 @@ export async function focusedPaneContext(pane, env = process.env) {
     pane.agent === "pi" && pane.agent_session?.kind === "path"
       ? pane.agent_session.value
       : null;
-  const [process, recentOutput, userMessages] = await Promise.all([
+  const [process, recentOutput, sessionMessages] = await Promise.all([
     paneProcess(pane.pane_id, env),
     paneRecent(pane.pane_id, env),
-    recentUserMessages(sessionPath, 6, env),
+    sampledUserMessages(sessionPath, env),
   ]);
   return {
     focused: true,
     label: boundedText(pane.label, 80),
     process,
     recentOutput,
-    userMessages,
+    sessionMessages,
+    userMessages: [
+      ...sessionMessages.origin,
+      ...sessionMessages.middle,
+      ...sessionMessages.recent,
+    ],
   };
 }
 
@@ -235,7 +309,7 @@ export class PiRpc {
         "--no-themes",
         "--no-context-files",
         "--system-prompt",
-        `Name Herdr task tabs. Return JSON only: {"tab":"...","reason":"..."}. The tab is the persistent task only, never an agent/model/app/project prefix. Use 2-4 concrete Title Case words, maximum ${MAX_TAB_LENGTH} characters. Preserve acronyms. Prefer user requests. Ignore confirmations and operational follow-ups. Do not invent specificity.`,
+        `Name Herdr task tabs. Return JSON only: {"tab":"...","reason":"..."}, or {"tab":null,"reason":"no meaningful task"} when context has no clear task. The tab is the persistent task only, never an agent/model/app/project prefix. Use 2-4 concrete Title Case words, maximum ${MAX_TAB_LENGTH} characters. Preserve acronyms. Prefer user requests. A sessionTimeline contains origin, middle, and recent requests; use origin and middle for continuity, but recent wins when the task changed. Ignore confirmations and operational follow-ups. Do not invent specificity or repeat the project name as the task.`,
       ],
       { env: isolatedPiEnv(this.env), stdio: ["pipe", "pipe", "pipe"] },
     );

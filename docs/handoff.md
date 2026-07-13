@@ -1,4 +1,4 @@
-# Herdr AutoName handoff
+# Herdr Smart Rename handoff
 
 Updated: 2026-07-13
 
@@ -13,12 +13,12 @@ Keep Herdr workspace and tab labels meaningful without overwriting user-chosen n
 
 ## Current status
 
-Repository: <https://github.com/iurysza/herdr-autoname>
+Repository: <https://github.com/iurysza/herdr-tab-smart-rename>
 
 Local checkout:
 
 ```text
-/Users/iurysouza/projects/my-repos/herdr-autoname
+/Users/iurysouza/projects/my-repos/herdr-tab-smart-rename
 ```
 
 Implementation commits before this handoff document:
@@ -160,7 +160,7 @@ herdr plugin action invoke stop --plugin autoname
 herdr plugin log list --plugin autoname --limit 10
 
 # Non-mutating candidate from a Herdr pane
-cd ~/projects/my-repos/herdr-autoname
+cd ~/projects/my-repos/herdr-tab-smart-rename
 node src/cli.mjs dry-run
 ```
 

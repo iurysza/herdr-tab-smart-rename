@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   AutoNameService,
+  focusedPaneFor,
   loadState,
   statePaths,
   withStateTransaction,
@@ -44,6 +45,19 @@ function liveSnapshot(tabLabel = "1") {
   };
 }
 
+test("working agents outrank focused supporting commands", () => {
+  const snap = liveSnapshot();
+  snap.layouts[0].focused_pane_id = "server";
+  snap.panes[0].agent_status = "working";
+  snap.panes.push({
+    pane_id: "server",
+    tab_id: "t1",
+    workspace_id: "w1",
+    agent_status: "unknown",
+  });
+  assert.equal(focusedPaneFor(snap.tabs[0], snap).pane_id, "p1");
+});
+
 test("state transactions serialize concurrent writers", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-state-"));
   const paths = statePaths(dir);
@@ -56,6 +70,92 @@ test("state transactions serialize concurrent writers", async () => {
       ),
     );
     assert.equal((await loadState(paths.state)).count, 20);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("all-tab evaluation visits every tab sequentially", async () => {
+  const snap = liveSnapshot("1");
+  snap.tabs.push({
+    tab_id: "t2",
+    workspace_id: "w1",
+    label: "2",
+    number: 2,
+  });
+  snap.panes.push({
+    pane_id: "p2",
+    tab_id: "t2",
+    workspace_id: "w1",
+    cwd: "/tmp/agents",
+  });
+  snap.layouts.push({ tab_id: "t2", focused_pane_id: "p2" });
+  const visits = [];
+  const service = new AutoNameService({
+    dryRun: true,
+    pi: { suggest: async () => { throw new Error("unexpected model call"); } },
+    dependencies: {
+      snapshot: async () => snap,
+      focusedPaneContext: async (pane) => {
+        visits.push(pane.pane_id);
+        return {
+          focused: true,
+          process: { name: "node", command: "node --test", cwd: pane.cwd },
+          recentOutput: "",
+          userMessages: [],
+        };
+      },
+      siblingPaneContext: async () => ({ focused: false }),
+      rename: async () => { throw new Error("unexpected rename"); },
+    },
+  });
+
+  const results = await service.evaluateAll(snap);
+  assert.deepEqual(visits, ["p1", "p2"]);
+  assert.deepEqual(results.map((result) => result.tab), ["t1", "t2"]);
+  assert.deepEqual(
+    results.map((result) => result.candidate.tab),
+    ["Run Tests", "Run Tests"],
+  );
+});
+
+test("weak command context waits for stability before model abstention", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-stable-"));
+  const paths = statePaths(dir);
+  const snap = liveSnapshot("1");
+  delete snap.panes[0].agent;
+  let modelCalls = 0;
+  let renames = 0;
+  const service = new AutoNameService({
+    stateFile: paths.state,
+    stateLock: paths.stateLock,
+    pi: {
+      suggest: async () => {
+        modelCalls += 1;
+        return { tab: null, reason: "no meaningful task" };
+      },
+    },
+    dependencies: {
+      snapshot: async () => snap,
+      focusedPaneContext: async () => ({
+        focused: true,
+        process: { name: "zsh", command: "zsh", cwd: "/tmp/agents" },
+        recentOutput: "",
+        userMessages: [],
+      }),
+      siblingPaneContext: async () => ({ focused: false }),
+      rename: async () => { renames += 1; },
+    },
+  });
+  try {
+    await service.initialize(snap);
+    const first = await service.evaluate("t1", { snapshot: snap });
+    assert.equal(first.reason, "waiting for stable command context");
+    assert.equal(modelCalls, 0);
+    const second = await service.evaluate("t1", { snapshot: snap });
+    assert.equal(second.reason, "no meaningful task");
+    assert.equal(modelCalls, 1);
+    assert.equal(renames, 0);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

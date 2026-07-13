@@ -15,6 +15,7 @@ import {
   isDefaultLabel,
   markModelAttempt,
   markModelSuccess,
+  observeStableContext,
   prepareRename,
   reconcileItem,
   resetOwnership,
@@ -80,11 +81,18 @@ export async function withStateTransaction(stateFile, lockFile, operation) {
 }
 
 export function focusedPaneFor(tab, snap) {
+  const panes = snap.panes.filter((pane) => pane.tab_id === tab.tab_id);
   const layout = snap.layouts.find((item) => item.tab_id === tab.tab_id);
   const id = layout?.focused_pane_id ?? snap.focused_pane_id;
+  const focused = panes.find((pane) => pane.pane_id === id);
   return (
-    snap.panes.find((pane) => pane.pane_id === id && pane.tab_id === tab.tab_id) ??
-    snap.panes.find((pane) => pane.tab_id === tab.tab_id)
+    (focused?.agent ? focused : null) ??
+    panes.find(
+      (pane) =>
+        pane.agent && ["working", "blocked"].includes(pane.agent_status),
+    ) ??
+    focused ??
+    panes[0]
   );
 }
 
@@ -184,6 +192,16 @@ export class AutoNameService {
     };
   }
 
+  async evaluateAll(initial = null) {
+    const snap = initial ?? (await this.dependencies.snapshot(this.env));
+    const results = [];
+    for (const tab of snap.tabs) {
+      const result = await this.evaluate(tab.tab_id);
+      if (result) results.push(result);
+    }
+    return results;
+  }
+
   async evaluate(tabId, options = {}) {
     const snap = options.snapshot ?? (await this.dependencies.snapshot(this.env));
     if (this.dryRun || !this.stateFile) {
@@ -244,24 +262,34 @@ export class AutoNameService {
     if (!tabManual) {
       const details = await this.contextFor(tab, snap, workspaceName);
       const focusedContext = details.paneContexts.find((pane) => pane.focused);
-      const heuristic = focusedContext?.userMessages?.length
+      const hasUserTask = Boolean(focusedContext?.userMessages?.length);
+      const heuristic = hasUserTask
         ? null
         : heuristicTitle({ focusedPane: focusedContext });
       if (heuristic && !options.forceModel) {
         tabName = heuristic;
         reason = "process heuristic";
       } else {
-        const gate = shouldCallModel(state, tab.tab_id, details.context);
-        if (gate.allowed || options.forceModel) {
-          markModelAttempt(state, tab.tab_id);
-          if (!this.dryRun) await persist();
-          const suggestion = await this.pi.suggest(details.context);
-          markModelSuccess(state, tab.tab_id, details.context);
-          tabName = suggestion.tab;
-          reason = suggestion.reason;
-          usedModel = true;
+        const weakCommandContext = !hasUserTask && !details.focusedPane?.agent;
+        const contextReady =
+          !weakCommandContext ||
+          options.forceModel ||
+          observeStableContext(state, tab.tab_id, details.context);
+        if (!contextReady) {
+          reason = "waiting for stable command context";
         } else {
-          reason = "unchanged or rate-limited context";
+          const gate = shouldCallModel(state, tab.tab_id, details.context);
+          if (gate.allowed || options.forceModel) {
+            markModelAttempt(state, tab.tab_id);
+            if (!this.dryRun) await persist();
+            const suggestion = await this.pi.suggest(details.context);
+            markModelSuccess(state, tab.tab_id, details.context);
+            tabName = suggestion.tab;
+            reason = suggestion.reason;
+            usedModel = true;
+          } else {
+            reason = "unchanged or rate-limited context";
+          }
         }
       }
     }

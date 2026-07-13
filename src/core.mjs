@@ -6,7 +6,14 @@ export const MAX_CONTEXT_CHARS = 4_500;
 export const MODEL_RATE_MS = 10 * 60 * 1_000;
 
 export function emptyState() {
-  return { version: 1, workspaces: {}, tabs: {}, modelAttempts: {}, fingerprints: {} };
+  return {
+    version: 1,
+    workspaces: {},
+    tabs: {},
+    modelAttempts: {},
+    fingerprints: {},
+    pendingFingerprints: {},
+  };
 }
 
 export function isDefaultLabel(label, number) {
@@ -148,12 +155,31 @@ export function buildModelContext({ workspaceName, paneContexts }) {
   const requests = (focused.userMessages ?? [])
     .map((text) => boundedText(text, 700))
     .filter(Boolean)
-    .slice(-5);
+    .slice(-6);
+  const sessionMessages = focused.sessionMessages;
+  const hasSessionTimeline = ["origin", "middle", "recent"].some(
+    (section) => sessionMessages?.[section]?.length,
+  );
+  const taskEvidence = hasSessionTimeline
+    ? {
+        sessionTimeline: {
+          origin: (sessionMessages.origin ?? [])
+            .map((text) => boundedText(text, 700))
+            .filter(Boolean),
+          middle: (sessionMessages.middle ?? [])
+            .map((text) => boundedText(text, 700))
+            .filter(Boolean),
+          recent: (sessionMessages.recent ?? [])
+            .map((text) => boundedText(text, 700))
+            .filter(Boolean),
+        },
+      }
+    : { userRequests: requests };
 
   let context = requests.length
     ? {
         project: boundedText(workspaceName, 80),
-        userRequests: requests,
+        ...taskEvidence,
       }
     : {
         project: boundedText(workspaceName, 80),
@@ -174,7 +200,25 @@ export function buildModelContext({ workspaceName, paneContexts }) {
     context = requests.length
       ? {
           project: boundedText(workspaceName, 80),
-          userRequests: requests.slice(-3).map((text) => boundedText(text, 350)),
+          ...(hasSessionTimeline
+            ? {
+                sessionTimeline: {
+                  origin: (sessionMessages.origin ?? [])
+                    .slice(0, 1)
+                    .map((text) => boundedText(text, 300)),
+                  middle: (sessionMessages.middle ?? [])
+                    .slice(0, 1)
+                    .map((text) => boundedText(text, 300)),
+                  recent: (sessionMessages.recent ?? [])
+                    .slice(-3)
+                    .map((text) => boundedText(text, 350)),
+                },
+              }
+            : {
+                userRequests: requests
+                  .slice(-3)
+                  .map((text) => boundedText(text, 350)),
+              }),
         }
       : {
           project: boundedText(workspaceName, 80),
@@ -195,6 +239,14 @@ export function fingerprint(value) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
+export function observeStableContext(state, tabId, context) {
+  state.pendingFingerprints ??= {};
+  const mark = fingerprint(context);
+  if (state.pendingFingerprints[tabId] === mark) return true;
+  state.pendingFingerprints[tabId] = mark;
+  return false;
+}
+
 export function shouldCallModel(state, tabId, context, now = Date.now()) {
   const mark = fingerprint(context);
   return {
@@ -211,6 +263,7 @@ export function markModelAttempt(state, tabId, now = Date.now()) {
 
 export function markModelSuccess(state, tabId, context) {
   state.fingerprints[tabId] = fingerprint(context);
+  delete state.pendingFingerprints?.[tabId];
 }
 
 export function parseModelTitle(text) {
@@ -219,6 +272,9 @@ export function parseModelTitle(text) {
     .replace(/\s*```$/i, "")
     .trim();
   const parsed = JSON.parse(cleaned);
+  if (parsed.tab === null) {
+    return { tab: null, reason: sanitize(parsed.reason) };
+  }
   if (!validateTabLabel(parsed.tab)) {
     throw new Error(`invalid model tab label: ${JSON.stringify(parsed.tab)}`);
   }

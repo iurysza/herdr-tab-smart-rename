@@ -8,6 +8,7 @@ import {
   isDefaultLabel,
   markModelAttempt,
   markModelSuccess,
+  observeStableContext,
   parseModelTitle,
   prepareRename,
   reconcileItem,
@@ -83,6 +84,10 @@ test("tab labels require bounded Title Case words", () => {
     ).tab,
     "Fix Socket",
   );
+  assert.deepEqual(
+    parseModelTitle('{"tab":null,"reason":"no meaningful task"}'),
+    { tab: null, reason: "no meaningful task" },
+  );
 });
 
 test("workspace identity stays on meaningful workspace label", () => {
@@ -96,11 +101,15 @@ test("workspace identity stays on meaningful workspace label", () => {
   );
   assert.equal(
     workspaceCandidate(
-      { label: "1", number: 1, worktree: { repo_name: "herdr-autoname" } },
+      {
+        label: "1",
+        number: 1,
+        worktree: { repo_name: "herdr-tab-smart-rename" },
+      },
       {},
       null,
     ),
-    "Herdr Autoname",
+    "Herdr Tab Smart Rename",
   );
 });
 
@@ -128,11 +137,21 @@ test("model context is hard bounded and excludes current auto labels", () => {
         focused: true,
         process: { name: huge, command: huge, cwd: huge },
         recentOutput: huge,
-        userMessages: Array.from({ length: 10 }, () => huge),
+        sessionMessages: {
+          origin: [huge],
+          middle: [huge],
+          recent: Array.from({ length: 4 }, () => huge),
+        },
+        userMessages: Array.from({ length: 6 }, () => huge),
       },
     ],
   });
   assert.ok(JSON.stringify(context).length <= MAX_CONTEXT_CHARS);
+  assert.deepEqual(Object.keys(context.sessionTimeline), [
+    "origin",
+    "middle",
+    "recent",
+  ]);
   assert.equal("currentTab" in context, false);
   assert.equal("currentWorkspace" in context, false);
 });
@@ -148,6 +167,16 @@ test("sanitizer redacts common credential shapes", () => {
   const output = sanitize(input, "");
   assert.doesNotMatch(output, /abc\.def|verysecret|password@example|abcdefghijklmnop/);
   assert.match(output, /redacted/i);
+});
+
+test("weak model context must remain stable across two observations", () => {
+  const state = emptyState();
+  const context = { task: "inspect logs" };
+  assert.equal(observeStableContext(state, "t1", context), false);
+  assert.equal(observeStableContext(state, "t1", context), true);
+  assert.equal(observeStableContext(state, "t1", { task: "run tests" }), false);
+  markModelSuccess(state, "t1", context);
+  assert.equal(state.pendingFingerprints.t1, undefined);
 });
 
 test("failed attempts back off while successful fingerprints stay suppressed", () => {

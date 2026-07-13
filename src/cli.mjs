@@ -39,7 +39,7 @@ async function start() {
   try {
     const existing = await workerInfo(paths.pid, workerScript);
     if (existing) {
-      console.log(`AutoName already running (pid ${existing.pid})`);
+      console.log(`Smart Rename already running (pid ${existing.pid})`);
       return;
     }
 
@@ -63,7 +63,7 @@ async function start() {
       { mode: 0o600 },
     );
     await chmodAsync(paths.pid, 0o600);
-    console.log(`AutoName started (pid ${child.pid})`);
+    console.log(`Smart Rename started (pid ${child.pid})`);
   } finally {
     await release();
   }
@@ -73,14 +73,14 @@ async function stop() {
   const paths = statePaths(requireStateDir());
   const info = await workerInfo(paths.pid, workerScript);
   if (!info) {
-    console.log("AutoName is not running");
+    console.log("Smart Rename is not running");
     return;
   }
   process.kill(info.pid, "SIGTERM");
   for (let count = 0; count < 30; count += 1) {
     await new Promise((resolve) => setTimeout(resolve, 100));
     if (!(await workerInfo(paths.pid, workerScript))) {
-      console.log("AutoName stopped");
+      console.log("Smart Rename stopped");
       return;
     }
   }
@@ -91,10 +91,29 @@ async function status() {
   const paths = statePaths(requireStateDir());
   const info = await workerInfo(paths.pid, workerScript);
   if (!info) {
-    console.log("AutoName stopped");
+    console.log("Smart Rename stopped");
     return;
   }
-  console.log(`AutoName running (pid ${info.pid}, since ${info.startedAt})`);
+  console.log(`Smart Rename running (pid ${info.pid}, since ${info.startedAt})`);
+}
+
+async function renameAll() {
+  const stateDir = requireStateDir();
+  await ensurePrivateDir(stateDir);
+  const paths = statePaths(stateDir);
+  const pi = new PiRpc(process.env);
+  const service = new AutoNameService({
+    stateFile: paths.state,
+    stateLock: paths.stateLock,
+    pi,
+  });
+  try {
+    const initial = await service.initialize();
+    const results = await service.evaluateAll(initial);
+    console.log(JSON.stringify(results, null, 2));
+  } finally {
+    pi.close();
+  }
 }
 
 async function once(resetKind = null) {
@@ -144,14 +163,15 @@ try {
     command === "dry-run"
   ) {
     await once();
-  } else if (command === "reset-tab") await once("tab");
+  } else if (command === "all") await renameAll();
+  else if (command === "reset-tab") await once("tab");
   else if (command === "reset-workspace") await once("workspace");
   else {
     throw new Error(
-      "usage: cli.mjs start|stop|status|once [--dry-run]|dry-run|reset-tab|reset-workspace",
+      "usage: cli.mjs start|stop|status|once [--dry-run]|dry-run|all|reset-tab|reset-workspace",
     );
   }
 } catch (error) {
-  console.error(`AutoName: ${error.message}`);
+  console.error(`Smart Rename: ${error.message}`);
   process.exitCode = 1;
 }
