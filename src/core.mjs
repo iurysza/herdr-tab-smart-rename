@@ -43,7 +43,7 @@ export function reconcileItem(record, currentLabel, eligible = false) {
 
 export function acknowledgeRename(record, label) {
   const next = { ...(record ?? {}) };
-  if (next.expectedLabel === label) {
+  if (next.expectedLabel === label || next.autoLabel === label) {
     next.autoLabel = label;
     delete next.expectedLabel;
     next.manual = false;
@@ -104,7 +104,12 @@ export function validateTabLabel(label) {
   if (!value || value.length > MAX_TAB_LENGTH) return false;
   const words = value.split(/\s+/);
   if (words.length < 2 || words.length > 4) return false;
-  return words.every((word) => /^[A-Z0-9][A-Za-z0-9+.#/'-]*$/.test(word));
+  const lowercaseConnectors = new Set(["a", "an", "and", "for", "in", "of", "on", "to", "with"]);
+  return words.every(
+    (word, index) =>
+      /^[A-Z0-9][A-Za-z0-9+.#/'-]*$/.test(word) ||
+      (index > 0 && lowercaseConnectors.has(word)),
+  );
 }
 
 export function workspaceCandidate(workspace, stablePane, gitRoot) {

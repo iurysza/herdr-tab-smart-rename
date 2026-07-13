@@ -126,6 +126,7 @@ async function once(resetKind = null) {
     const result = await service.evaluate(targetTab, {
       snapshot: snap,
       resetKind,
+      forceModel: resetKind === "tab",
     });
     console.log(JSON.stringify(result, null, 2));
   } finally {

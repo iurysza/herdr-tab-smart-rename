@@ -50,6 +50,13 @@ test("rename acknowledgement and reset preserve manual ownership semantics", () 
     observedLabel: "Fix Socket Reconnect",
   });
   assert.equal(acknowledgeRename(prepared, "My Name").manual, true);
+  assert.equal(
+    acknowledgeRename(
+      { autoLabel: "Fix Socket Reconnect", manual: false },
+      "Fix Socket Reconnect",
+    ).manual,
+    false,
+  );
   const reset = resetOwnership({
     manual: true,
     autoLabel: "Old",
@@ -62,6 +69,7 @@ test("rename acknowledgement and reset preserve manual ownership semantics", () 
 
 test("tab labels require bounded Title Case words", () => {
   assert.equal(validateTabLabel("Fix Socket Reconnect"), true);
+  assert.equal(validateTabLabel("Optimize VAR for Explainers"), true);
   assert.equal(validateTabLabel("fix socket"), false);
   assert.equal(validateTabLabel("One"), false);
   assert.equal(validateTabLabel("This Label Has Far Too Many Words"), false);

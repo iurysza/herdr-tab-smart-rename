@@ -66,7 +66,7 @@ async function sweep() {
   if (stopped) return;
   const snap = await snapshot();
   for (const tab of snap.tabs) {
-    await evaluate(tab.tab_id, snap);
+    await evaluate(tab.tab_id);
   }
 }
 
