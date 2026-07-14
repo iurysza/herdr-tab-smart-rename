@@ -14,11 +14,11 @@ Smart Rename turns default workspace and tab numbers into short task labels whil
 5  ->  Dev Server
 ```
 
-Obvious processes use deterministic names. Ambiguous work can use Kimi Code by default or any OpenAI-compatible endpoint.
+Obvious processes get instant deterministic names. Ambiguous work can use Kimi Code or another OpenAI-compatible model.
 
 ## Install
 
-Requires Herdr 0.7.0+ and Bun 1.1.34+.
+Requires Herdr 0.7.0 or newer and Bun 1.1.34 or newer.
 
 ```sh
 herdr plugin install iurysza/herdr-tab-smart-rename
@@ -27,25 +27,15 @@ herdr plugin action invoke check-ai --plugin autoname
 herdr plugin action invoke start --plugin autoname
 ```
 
-`configure-ai` opens Herdr's private `provider.env`. For Kimi Code, add:
+`configure-ai` opens the private `provider.env` file. Kimi Code needs one line:
 
 ```dotenv
 SMART_RENAME_API_KEY=...
 ```
 
-No standalone key means deterministic naming still works, but model-backed renames do not.
+Without a key, deterministic names still work. Model-backed names do not.
 
-For a local checkout, install dependencies before linking; Herdr does not run build commands for local links.
-
-```sh
-bun install
-herdr plugin link "$PWD"
-herdr plugin action invoke start --plugin autoname
-```
-
-The plugin starts one detached worker only when asked. It does not install a launchd service.
-
-## Keybindings and actions
+## Use
 
 Suggested Herdr bindings:
 
@@ -63,37 +53,42 @@ command = "autoname.rename-all"
 description = "force smart rename all tabs"
 ```
 
-| Action | Behavior |
+| Action | What it does |
 | --- | --- |
-| `start` / `stop` / `status` | Control or inspect the singleton worker. |
-| `configure-ai` | Edit private provider configuration in an overlay. |
-| `check-ai` | Validate provider settings without making a request. |
-| `rename-now` | Reclaim and rename the current tab immediately. |
-| `rename-all` | Reclaim and rename every tab sequentially. |
-| `reset-tab` | Return the current tab to automatic ownership and evaluate it. |
-| `reset-workspace` | Return the current workspace to automatic ownership and evaluate it. |
+| `rename-now` | Rename the current tab now |
+| `rename-all` | Rename every tab in sequence |
+| `reset-tab` | Return the current tab to automatic naming |
+| `reset-workspace` | Return the current workspace to automatic naming |
+| `configure-ai` | Edit provider settings |
+| `check-ai` | Check settings without making a model request |
+| `start` / `stop` / `status` | Control or inspect Smart Rename |
 
-Invoke any action with `herdr plugin action invoke <action> --plugin autoname`.
-Explicit rename actions show start/result toasts, bypass model cooldown, and reclaim manual tabs as user-approved overrides.
+Run any action with:
 
-## Naming and ownership
+```sh
+herdr plugin action invoke <action> --plugin autoname
+```
 
-Smart Rename selects one dominant pane:
+Explicit rename actions reclaim manual tabs and request fresh names.
 
-1. Focused detected agent.
-2. Any working or blocked detected agent.
-3. Focused ordinary command.
-4. First pane.
+## Naming rules
 
-Recognized tests, dev servers, log followers, and remote shells become `Run Tests`, `Dev Server`, `View Logs`, and `Remote Shell`. Agent tasks and unclear commands may use the model. Weak command context must remain stable across two observations before a request.
+Smart Rename uses the most relevant pane in each tab:
 
-Labels use 2–4 Title Case words and at most 30 characters. Workspaces describe the project; tabs describe the task. Manual names always win until reset or an explicit rename action. Ownership survives worker restarts.
+1. the focused agent;
+2. another working or blocked agent;
+3. the focused command;
+4. the first pane.
 
-See [`docs/naming-policy.md`](docs/naming-policy.md) for the full behavior contract.
+Tests, development servers, log followers, and remote shells become `Run Tests`, `Dev Server`, `View Logs`, and `Remote Shell`. Agent tasks and unclear commands may use the configured model.
 
-## Provider and privacy
+Labels use 2 to 4 Title Case words and no more than 30 characters. Workspaces describe projects. Tabs describe tasks. Manual names always win until you reset or explicitly rename them.
 
-Kimi Code defaults:
+See the [naming policy](docs/naming-policy.md) for the full contract.
+
+## Choose a provider and model
+
+Kimi Code is the default:
 
 ```dotenv
 SMART_RENAME_PROVIDER=kimi-code
@@ -103,39 +98,28 @@ SMART_RENAME_REASONING_EFFORT=medium
 SMART_RENAME_TIMEOUT_MS=45000
 ```
 
-Set those values plus `SMART_RENAME_API_KEY` to use another OpenAI-compatible endpoint. `KIMI_API_KEY` is also accepted. `SMART_RENAME_REASONING_EFFORT` accepts `low`, `medium`, or `high`; Kimi defaults to `medium`, while other providers leave it unset unless configured. Kimi requests use its documented 32,768 output-token capability so reasoning cannot truncate the final JSON label. Process-level `SMART_RENAME_*` values override `provider.env`; the file reloads before every request.
+Set the endpoint, provider name, model, and `SMART_RENAME_API_KEY` to use another OpenAI-compatible provider. `KIMI_API_KEY` also works for Kimi. Reasoning effort accepts `low`, `medium`, or `high` when the provider supports it.
 
-Herdr keeps the config directory and file at `0700` and `0600`. Keys are never written to plugin state or logs. Model context is sanitized and capped at 4,500 serialized characters.
+Smart Rename reloads this file before every model request. You do not need to restart the worker after changing it.
 
-Pi is optional context collection only: for detected Pi panes, Smart Rename reads bounded user-request samples from the local session file. It never launches Pi or uses Pi authentication. Sibling panes contribute process summaries, not conversation content.
+## Privacy
 
-## Development
+Smart Rename sends only bounded, sanitized task context to the configured provider. It removes terminal controls, common credential forms, and local home paths before a request.
 
-```sh
-bun install --frozen-lockfile
-bun run check
-bun test
-bun pm pack --dry-run
-```
+For detected Pi panes, it can sample user requests from the local session file. It never starts Pi, reads Pi credentials, or uses Pi for inference. Sibling panes contribute process summaries only.
 
-The code follows the product flow: `domain.ts` owns pure naming policy, `text.ts` sanitizes input, `herdr.ts` and `pi-context.ts` collect context, `provider.ts` names ambiguous work, `storage.ts` preserves ownership safely, and `service.ts` orchestrates the path. `cli.ts`, `configure.ts`, and `worker.ts` are thin entrypoints.
-
-Preview the current tab without renaming or changing ownership:
-
-```sh
-bun src/cli.ts dry-run
-```
-
-A dry run may call the configured model and respects existing manual locks when plugin state is available.
-
-Runtime state and logs live under `~/.local/state/herdr/plugins/autoname/`. The worker reconnects after socket closure, serializes cross-process state updates, preserves expected labels before rename writes, and sweeps every 60 seconds for task changes without lifecycle events.
+Provider keys stay in Herdr's private plugin config directory. Smart Rename does not write them to state or logs.
 
 ## Troubleshooting
 
 - Worker stopped: `herdr plugin action invoke start --plugin autoname`
-- AI config missing: run `configure-ai`, then `check-ai`.
-- Manual label never changes: use `reset-tab` or an explicit rename action.
-- Unexpected label: run `bun src/cli.ts dry-run` and check the [naming policy](docs/naming-policy.md).
+- Provider missing: run `configure-ai`, save the key, then run `check-ai`.
+- Manual label stays unchanged: use `reset-tab` or an explicit rename action.
+- No model name appears: the model may have found no meaningful task.
 - Worker logs: `herdr plugin log list --plugin autoname --limit 10`
 
-Current limits: automatic socket discovery covers the local Herdr session only; closed ownership records and worker logs are not pruned.
+## Project documentation
+
+- [Semantic map](ai-artifacts/SEMANTIC_MAP.md)
+- [Architecture](ai-artifacts/ARCHITECTURE.md)
+- [Naming policy](docs/naming-policy.md)
