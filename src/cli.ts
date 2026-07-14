@@ -4,7 +4,7 @@ import { chmod as chmodAsync, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { type RenameResult } from "./domain.ts";
 import { run, snapshot } from "./herdr.ts";
-import { loadProviderConfig } from "./provider.ts";
+import { loadNamingPrompt, loadProviderConfig } from "./provider.ts";
 import { createService } from "./service.ts";
 import {
   acquireLock,
@@ -174,7 +174,7 @@ async function once(
   return result;
 }
 
-async function configureAi(): Promise<void> {
+async function openConfigPane(entrypoint: string): Promise<void> {
   await run(
     process.env.HERDR_BIN_PATH || "herdr",
     [
@@ -184,7 +184,7 @@ async function configureAi(): Promise<void> {
       "--plugin",
       "autoname",
       "--entrypoint",
-      "provider-config",
+      entrypoint,
       "--placement",
       "overlay",
     ],
@@ -192,9 +192,18 @@ async function configureAi(): Promise<void> {
   );
 }
 
+async function configureAi(): Promise<void> {
+  await openConfigPane("provider-config");
+}
+
+async function configurePrompt(): Promise<void> {
+  await openConfigPane("prompt-config");
+}
+
 async function checkAi(): Promise<void> {
   try {
     const config = await loadProviderConfig(process.env);
+    await loadNamingPrompt(config, process.env);
     const summary = `${config.provider}/${config.model}`;
     await notify("AI ready", summary);
     console.log(summary);
@@ -235,6 +244,7 @@ const defaultActions: NonNullable<DispatchOptions["actions"]> = {
   stop,
   status,
   "configure-ai": configureAi,
+  "configure-prompt": configurePrompt,
   "check-ai": checkAi,
   once: ({ dryRun }) => once(null, false, dryRun),
   "dry-run": () => once(null, false, true),
@@ -251,7 +261,7 @@ export async function dispatch(
   const action = command ? actions[command] : undefined;
   if (!action) {
     throw new Error(
-      "usage: cli.ts start|stop|status|configure-ai|check-ai|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-workspace",
+      "usage: cli.ts start|stop|status|configure-ai|configure-prompt|check-ai|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-workspace",
     );
   }
   return action({ dryRun });

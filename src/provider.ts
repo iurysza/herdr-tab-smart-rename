@@ -1,10 +1,10 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { generateText } from "ai";
 import { parse as parseEnv } from "dotenv";
 import { z } from "zod";
 import {
-  MAX_TAB_LENGTH,
   type NameSuggestion,
   type NamingContext,
   validateTabLabel,
@@ -12,16 +12,13 @@ import {
 import { sanitizeText } from "./text.ts";
 
 const PROVIDER_ENV_BYTES = 16 * 1024;
+const NAMING_PROMPT_BYTES = 32 * 1024;
+const PROVIDER_EXAMPLE_URL = new URL("../provider.env.example", import.meta.url);
+const BUNDLED_NAMING_PROMPT = fileURLToPath(
+  new URL("../docs/naming-policy.md", import.meta.url),
+);
 export const PROVIDER_ENV_NAME = "provider.env";
-export const PROVIDER_DEFAULTS = Object.freeze({
-  provider: "kimi-code",
-  baseURL: "https://api.kimi.com/coding/v1",
-  model: "kimi-for-coding",
-  timeoutMs: 45_000,
-  reasoningEffort: "medium" as const,
-});
-
-const NAMING_SYSTEM_PROMPT = `Name Herdr task tabs. Return JSON only: {"tab":"...","reason":"..."}, or {"tab":null,"reason":"no meaningful task"} when context has no clear task. The tab is the persistent task only, never an agent/model/app/project prefix. Use 2-4 concrete Title Case words, maximum ${MAX_TAB_LENGTH} characters. Preserve acronyms. Prefer user requests. A sessionTimeline contains origin, middle, and recent requests; use origin and middle for continuity, but recent wins when the task changed. Ignore confirmations and operational follow-ups. Do not invent specificity or repeat the project name as the task.`;
+export const NAMING_PROMPT_NAME = "naming-prompt.md";
 
 const ProviderConfigSchema = z.object({
   provider: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
@@ -35,6 +32,7 @@ const ProviderConfigSchema = z.object({
   model: z.string().min(1).refine((value) => !/[\r\n]/.test(value)),
   timeoutMs: z.number().int().min(1_000).max(300_000),
   reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
+  promptPath: z.string().min(1).optional(),
   apiKey: z.string().min(1),
 });
 
@@ -55,23 +53,106 @@ export function providerEnvPath(env: NodeJS.ProcessEnv = process.env): string | 
     : null;
 }
 
-async function readProviderEnv(filePath: string | null): Promise<Record<string, string>> {
-  if (!filePath) return {};
-  const file = Bun.file(filePath);
-  if (!(await file.exists())) return {};
-  if (file.size > PROVIDER_ENV_BYTES) {
-    throw new Error(`${PROVIDER_ENV_NAME} exceeds 16 KiB`);
+async function readBoundedText(
+  source: string | URL,
+  label: string,
+  maxBytes: number,
+  required = false,
+): Promise<string | null> {
+  const file = Bun.file(source);
+  if (!(await file.exists())) {
+    if (required) throw new Error(`${label} is missing`);
+    return null;
   }
-  return parseEnv(await file.text());
+  if (file.size > maxBytes) {
+    throw new Error(`${label} exceeds ${maxBytes / 1024} KiB`);
+  }
+  return file.text();
+}
+
+async function readProviderEnv(
+  filePath: string | URL | null,
+  required = false,
+): Promise<Record<string, string>> {
+  if (!filePath) return {};
+  const text = await readBoundedText(
+    filePath,
+    filePath === PROVIDER_EXAMPLE_URL ? "provider.env.example" : PROVIDER_ENV_NAME,
+    PROVIDER_ENV_BYTES,
+    required,
+  );
+  return text === null ? {} : parseEnv(text);
+}
+
+export async function providerExampleText(): Promise<string> {
+  return (
+    (await readBoundedText(
+      PROVIDER_EXAMPLE_URL,
+      "provider.env.example",
+      PROVIDER_ENV_BYTES,
+      true,
+    )) || ""
+  );
+}
+
+export async function bundledNamingPrompt(): Promise<string> {
+  return readNamingPrompt(BUNDLED_NAMING_PROMPT, true);
 }
 
 function pick(
   processEnv: NodeJS.ProcessEnv,
   fileEnv: Record<string, string>,
+  defaults: Record<string, string>,
   name: string,
-  fallback: string,
 ): string {
-  return processEnv[name] || fileEnv[name] || fallback;
+  return processEnv[name] || fileEnv[name] || defaults[name] || "";
+}
+
+function resolvePromptPath(value: string, env: NodeJS.ProcessEnv): string {
+  if (path.isAbsolute(value)) return value;
+  return path.resolve(env.HERDR_PLUGIN_CONFIG_DIR || process.cwd(), value);
+}
+
+function providerApiKey(
+  provider: string,
+  processEnv: NodeJS.ProcessEnv,
+  fileEnv: Record<string, string>,
+): string {
+  const providerKey =
+    provider === "openai"
+      ? "OPENAI_API_KEY"
+      : provider === "kimi-code"
+        ? "KIMI_API_KEY"
+        : null;
+  return (
+    processEnv.SMART_RENAME_API_KEY ||
+    fileEnv.SMART_RENAME_API_KEY ||
+    (providerKey ? processEnv[providerKey] || fileEnv[providerKey] : "") ||
+    ""
+  );
+}
+
+export async function configuredNamingPromptPath(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  const fileEnv = await readProviderEnv(providerEnvPath(env));
+  const configured = env.SMART_RENAME_PROMPT_PATH || fileEnv.SMART_RENAME_PROMPT_PATH;
+  if (configured) return resolvePromptPath(configured, env);
+  return env.HERDR_PLUGIN_CONFIG_DIR
+    ? path.join(env.HERDR_PLUGIN_CONFIG_DIR, NAMING_PROMPT_NAME)
+    : BUNDLED_NAMING_PROMPT;
+}
+
+async function readNamingPrompt(filePath: string, required = false): Promise<string> {
+  const text = await readBoundedText(
+    filePath,
+    path.basename(filePath),
+    NAMING_PROMPT_BYTES,
+    required,
+  );
+  const prompt = text?.trim();
+  if (!prompt) throw new Error(`${path.basename(filePath)} is empty`);
+  return prompt;
 }
 
 function configError(error: z.ZodError): Error {
@@ -82,7 +163,8 @@ function configError(error: z.ZodError): Error {
     model: "SMART_RENAME_MODEL is required",
     timeoutMs: "SMART_RENAME_TIMEOUT_MS must be 1000-300000",
     reasoningEffort: "SMART_RENAME_REASONING_EFFORT must be low, medium, or high",
-    apiKey: `AI key missing. Run configure-ai or set SMART_RENAME_API_KEY in ${PROVIDER_ENV_NAME}`,
+    promptPath: "SMART_RENAME_PROMPT_PATH is invalid",
+    apiKey: `AI key missing. Run configure-ai or set a provider key in ${PROVIDER_ENV_NAME}`,
   };
   return new Error(messages[field ?? ""] ?? "AI provider configuration is invalid");
 }
@@ -90,44 +172,57 @@ function configError(error: z.ZodError): Error {
 export async function loadProviderConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ProviderConfig> {
-  const fileEnv = await readProviderEnv(providerEnvPath(env));
-  const provider = pick(
-    env,
-    fileEnv,
-    "SMART_RENAME_PROVIDER",
-    PROVIDER_DEFAULTS.provider,
-  );
-  const reasoningEffort = pick(
-    env,
-    fileEnv,
-    "SMART_RENAME_REASONING_EFFORT",
-    provider === PROVIDER_DEFAULTS.provider
-      ? PROVIDER_DEFAULTS.reasoningEffort
-      : "",
-  );
+  const [defaults, fileEnv] = await Promise.all([
+    readProviderEnv(PROVIDER_EXAMPLE_URL, true),
+    readProviderEnv(providerEnvPath(env)),
+  ]);
+  const provider = pick(env, fileEnv, defaults, "SMART_RENAME_PROVIDER");
+  const configuredReasoning =
+    env.SMART_RENAME_REASONING_EFFORT || fileEnv.SMART_RENAME_REASONING_EFFORT;
+  const reasoningEffort =
+    configuredReasoning ||
+    (provider === defaults.SMART_RENAME_PROVIDER
+      ? defaults.SMART_RENAME_REASONING_EFFORT
+      : "");
+  const configuredPrompt =
+    env.SMART_RENAME_PROMPT_PATH || fileEnv.SMART_RENAME_PROMPT_PATH;
   const input = {
     provider,
-    baseURL: pick(env, fileEnv, "SMART_RENAME_BASE_URL", PROVIDER_DEFAULTS.baseURL),
-    model: pick(env, fileEnv, "SMART_RENAME_MODEL", PROVIDER_DEFAULTS.model),
-    timeoutMs: Number(
-      pick(
-        env,
-        fileEnv,
-        "SMART_RENAME_TIMEOUT_MS",
-        String(PROVIDER_DEFAULTS.timeoutMs),
-      ),
-    ),
+    baseURL: pick(env, fileEnv, defaults, "SMART_RENAME_BASE_URL"),
+    model: pick(env, fileEnv, defaults, "SMART_RENAME_MODEL"),
+    timeoutMs: Number(pick(env, fileEnv, defaults, "SMART_RENAME_TIMEOUT_MS")),
     ...(reasoningEffort ? { reasoningEffort } : {}),
-    apiKey:
-      env.SMART_RENAME_API_KEY ||
-      fileEnv.SMART_RENAME_API_KEY ||
-      env.KIMI_API_KEY ||
-      fileEnv.KIMI_API_KEY ||
-      "",
+    ...(configuredPrompt
+      ? { promptPath: resolvePromptPath(configuredPrompt, env) }
+      : {}),
+    apiKey: providerApiKey(provider, env, fileEnv),
   };
   const parsed = ProviderConfigSchema.safeParse(input);
   if (!parsed.success) throw configError(parsed.error);
   return parsed.data;
+}
+
+export async function loadNamingPrompt(
+  config: ProviderConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  if (config.promptPath) return readNamingPrompt(config.promptPath, true);
+
+  if (env.HERDR_PLUGIN_CONFIG_DIR) {
+    const privatePrompt = path.join(env.HERDR_PLUGIN_CONFIG_DIR, NAMING_PROMPT_NAME);
+    const text = await readBoundedText(
+      privatePrompt,
+      NAMING_PROMPT_NAME,
+      NAMING_PROMPT_BYTES,
+    );
+    if (text !== null) {
+      const prompt = text.trim();
+      if (!prompt) throw new Error(`${NAMING_PROMPT_NAME} is empty`);
+      return prompt;
+    }
+  }
+
+  return bundledNamingPrompt();
 }
 
 function parseSuggestion(text: string): NameSuggestion {
@@ -202,11 +297,12 @@ export class AiSdkNamer implements Namer {
 
   async suggest(context: NamingContext): Promise<NameSuggestion> {
     const config = await loadProviderConfig(this.#env);
+    const system = await loadNamingPrompt(config, this.#env);
     try {
       const text = await this.#complete({
         config,
         context,
-        system: NAMING_SYSTEM_PROMPT,
+        system,
         maxOutputTokens: 32_768,
         maxRetries: 1,
         abortSignal: AbortSignal.timeout(config.timeoutMs),

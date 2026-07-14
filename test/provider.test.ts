@@ -10,10 +10,12 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { ensureProviderFile } from "../src/configure.ts";
+import {
+  ensureNamingPromptFile,
+  ensureProviderFile,
+} from "../src/configure.ts";
 import {
   AiSdkNamer,
-  PROVIDER_DEFAULTS,
   loadProviderConfig,
   type CompletionRequest,
 } from "../src/provider.ts";
@@ -38,17 +40,19 @@ test("provider config preserves defaults and process-over-file precedence", asyn
   try {
     const defaults = await loadProviderConfig({
       ...fixture.env,
-      SMART_RENAME_API_KEY: "standalone-key",
+      OPENAI_API_KEY: "standalone-key",
     });
-    assert.deepEqual(
-      {
-        provider: defaults.provider,
-        baseURL: defaults.baseURL,
-        model: defaults.model,
-        timeoutMs: defaults.timeoutMs,
-        reasoningEffort: defaults.reasoningEffort,
-      },
-      PROVIDER_DEFAULTS,
+    assert.deepEqual(defaults, {
+      provider: "openai",
+      baseURL: "https://api.openai.com/v1",
+      model: "gpt-5.6-luna",
+      timeoutMs: 45_000,
+      reasoningEffort: "medium",
+      apiKey: "standalone-key",
+    });
+    await assert.rejects(
+      loadProviderConfig({ ...fixture.env, KIMI_API_KEY: "wrong-provider-key" }),
+      /AI key missing/,
     );
 
     await writeFile(
@@ -58,6 +62,7 @@ test("provider config preserves defaults and process-over-file precedence", asyn
         "SMART_RENAME_BASE_URL=https://file.example/v1",
         "SMART_RENAME_MODEL=file-model",
         "SMART_RENAME_TIMEOUT_MS=20000",
+        "SMART_RENAME_PROMPT_PATH=prompts/custom.md",
         "SMART_RENAME_API_KEY=file-key",
       ].join("\n"),
     );
@@ -74,6 +79,7 @@ test("provider config preserves defaults and process-over-file precedence", asyn
       baseURL: "https://process.example/v1",
       model: "process-model",
       timeoutMs: 30_000,
+      promptPath: path.join(fixture.root, "prompts/custom.md"),
       apiKey: "process-key",
     });
   } finally {
@@ -81,13 +87,17 @@ test("provider config preserves defaults and process-over-file precedence", asyn
   }
 });
 
-test("private provider config enforces permissions, key presence, and 16 KiB bound", async () => {
+test("private provider and prompt config enforce templates, permissions, and bounds", async () => {
   const fixture = await tempConfig();
   await rm(fixture.root, { recursive: true, force: true });
   try {
     const file = await ensureProviderFile(fixture.env);
+    const prompt = await ensureNamingPromptFile(fixture.env);
     assert.equal((await stat(fixture.root)).mode & 0o777, 0o700);
     assert.equal((await stat(file)).mode & 0o777, 0o600);
+    assert.equal((await stat(prompt)).mode & 0o777, 0o600);
+    assert.match(await readFile(file, "utf8"), /SMART_RENAME_MODEL=gpt-5\.6-luna/);
+    assert.match(await readFile(prompt, "utf8"), /^# Naming policy/);
     await assert.rejects(loadProviderConfig(fixture.env), /AI key missing.*provider\.env/i);
     await writeFile(file, "x".repeat(16 * 1024 + 1));
     await assert.rejects(loadProviderConfig(fixture.env), /exceeds 16 KiB/);
@@ -110,9 +120,11 @@ test("namer sends one bounded completion and validates model output", async () =
     reason: "current task",
   });
   assert.equal(requests.length, 1);
-  assert.equal(requests[0]?.config.model, "kimi-for-coding");
+  assert.equal(requests[0]?.config.model, "gpt-5.6-luna");
   assert.equal(requests[0]?.maxOutputTokens, 32_768);
   assert.equal(requests[0]?.config.reasoningEffort, "medium");
+  assert.match(requests[0]?.system || "", /^# Naming policy/);
+  assert.match(requests[0]?.system || "", /return exactly one JSON object/i);
   assert.ok(requests[0]?.abortSignal instanceof AbortSignal);
 
   const abstain = new AiSdkNamer(
@@ -130,16 +142,20 @@ test("namer sends one bounded completion and validates model output", async () =
   await assert.rejects(invalid.suggest(context), /invalid model tab label/);
 });
 
-test("namer reloads provider.env and redacts configured keys from failures", async () => {
+test("namer reloads provider.env and naming-prompt.md, then redacts failures", async () => {
   const fixture = await tempConfig();
+  const promptFile = path.join(fixture.root, "naming-prompt.md");
   const models: string[] = [];
+  const systems: string[] = [];
   try {
     await writeFile(
       fixture.file,
       "SMART_RENAME_API_KEY=first-key\nSMART_RENAME_MODEL=first-model\n",
     );
+    await writeFile(promptFile, "First naming prompt");
     const namer = new AiSdkNamer(fixture.env, async (request) => {
       models.push(request.config.model);
+      systems.push(request.system);
       return '{"tab":"First Task Name","reason":"task"}';
     });
     await namer.suggest(context);
@@ -147,8 +163,10 @@ test("namer reloads provider.env and redacts configured keys from failures", asy
       fixture.file,
       "SMART_RENAME_API_KEY=second-key\nSMART_RENAME_MODEL=second-model\n",
     );
+    await writeFile(promptFile, "Second naming prompt");
     await namer.suggest(context);
     assert.deepEqual(models, ["first-model", "second-model"]);
+    assert.deepEqual(systems, ["First naming prompt", "Second naming prompt"]);
 
     const key = "standalone-secret-value";
     const failing = new AiSdkNamer(
@@ -180,6 +198,7 @@ test("manifest and source use Bun without Pi model coupling", async () => {
   );
   assert.match(manifest, /command = \["bun", "src\/cli\.ts", "start"\]/);
   assert.match(manifest, /id = "provider-config"[\s\S]*placement = "overlay"/);
+  assert.match(manifest, /id = "prompt-config"[\s\S]*placement = "overlay"/);
 
   const src = new URL("../src/", import.meta.url);
   const source = (

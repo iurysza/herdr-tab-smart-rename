@@ -37,9 +37,16 @@ contexts = ["global", "workspace", "tab", "pane"]
 command = ["bun", "src/cli.ts", "configure-ai"]
 
 [[actions]]
+id = "configure-prompt"
+title = "Smart Rename: configure prompt"
+description = "Open the private naming prompt."
+contexts = ["global", "workspace", "tab", "pane"]
+command = ["bun", "src/cli.ts", "configure-prompt"]
+
+[[actions]]
 id = "check-ai"
 title = "Smart Rename: check AI config"
-description = "Validate the AI provider configuration without making a request."
+description = "Validate the provider and naming prompt without making a request."
 contexts = ["global", "workspace", "tab", "pane"]
 command = ["bun", "src/cli.ts", "check-ai"]
 
@@ -77,3 +84,10 @@ title = "Smart Rename AI"
 description = "Edit the private OpenAI-compatible provider configuration."
 placement = "overlay"
 command = ["bun", "src/configure.ts"]
+
+[[panes]]
+id = "prompt-config"
+title = "Smart Rename Prompt"
+description = "Edit the private naming prompt."
+placement = "overlay"
+command = ["bun", "src/configure.ts", "prompt"]

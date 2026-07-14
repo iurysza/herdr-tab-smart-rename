@@ -1,6 +1,8 @@
 # Naming policy
 
-This is the human-readable contract for Smart Rename. If the implementation and this file disagree, treat that as a bug.
+This is both the human-readable contract and the default AI system prompt for Smart Rename. If the implementation and this file disagree, treat that as a bug.
+
+The model's job is narrow: choose a tab label from sanitized context or abstain. Smart Rename itself enforces ownership, deterministic names, timing, and validation.
 
 ## Goals
 
@@ -99,13 +101,29 @@ A strong deterministic process transition can rename immediately. A weak AI-deri
 
 ## Model input
 
-The configured OpenAI-compatible model receives at most 4,500 serialized characters of sanitized context. Kimi Code is the default provider. Pi session sampling is context collection only; Smart Rename does not invoke Pi as a model provider.
+The configured OpenAI-compatible model receives at most 4,500 serialized characters of sanitized context. OpenAI GPT-5.6 Luna is the default model. Pi session sampling is context collection only; Smart Rename does not invoke Pi as a model provider.
 
 - Detected focused Pi agent: one origin request, one midpoint request, and up to four recent user requests.
 - Ordinary focused command: bounded process data and recent output.
 - Sibling panes: bounded process summaries only.
 - Environment values are never added.
 - Common credential shapes are redacted best-effort.
+
+## Model response
+
+When given naming context, return exactly one JSON object and no Markdown:
+
+```json
+{"tab":"Review Auth Changes","reason":"The user is reviewing authentication changes."}
+```
+
+When the context has no clear persistent task, abstain:
+
+```json
+{"tab":null,"reason":"no meaningful task"}
+```
+
+Prefer explicit user requests. Use origin and midpoint requests for continuity, but let recent requests win when the task changed. Ignore confirmations and operational follow-ups. Do not invent specificity or repeat the project name as the task.
 
 ## Feedback prompts
 
