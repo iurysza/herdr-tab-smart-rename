@@ -101,11 +101,12 @@ test("text sanitization delegates ANSI and secret removal to libraries", () => {
     "AWS_SECRET_ACCESS_KEY=verysecret",
     "https://user:password@example.com/path",
     "github_pat_abcdefghijklmnop",
+    `sk-kimi-${"*".repeat(32)}tPJd`,
   ].join(" ");
   const output = sanitizeText(input, "");
   assert.doesNotMatch(
     output,
-    /\u001b|abc\.def|verysecret|password@example|abcdefghijklmnop/,
+    /\u001b|abc\.def|verysecret|password@example|abcdefghijklmnop|tPJd/,
   );
   assert.match(output, /redacted/i);
 });

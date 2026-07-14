@@ -26,6 +26,11 @@ const LEGACY_TOKEN_SHAPES: SecretPattern[] = [
     regex:
       /\b(?:sk-[A-Za-z0-9_-]{12,}|ghp_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,}|AKIA[A-Z0-9]{12,})\b/,
   },
+  {
+    id: "masked-prefixed-token",
+    label: "masked prefixed token",
+    regex: /\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]*\*{4,}[A-Za-z0-9_-]*\b/,
+  },
 ];
 
 export function sanitizeText(
