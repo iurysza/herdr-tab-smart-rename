@@ -6,74 +6,74 @@ description = "Context-aware names for Herdr workspaces and task tabs."
 platforms = ["linux", "macos"]
 
 [[build]]
-command = ["npm", "ci", "--omit=dev"]
+command = ["bun", "install", "--production", "--frozen-lockfile"]
 
 [[actions]]
 id = "start"
 title = "Smart Rename: start"
 description = "Start the detached Smart Rename worker."
 contexts = ["global", "workspace"]
-command = ["node", "src/cli.mjs", "start"]
+command = ["bun", "src/cli.ts", "start"]
 
 [[actions]]
 id = "stop"
 title = "Smart Rename: stop"
 description = "Stop the Smart Rename worker."
 contexts = ["global", "workspace"]
-command = ["node", "src/cli.mjs", "stop"]
+command = ["bun", "src/cli.ts", "stop"]
 
 [[actions]]
 id = "status"
 title = "Smart Rename: status"
 description = "Report worker status."
 contexts = ["global", "workspace"]
-command = ["node", "src/cli.mjs", "status"]
+command = ["bun", "src/cli.ts", "status"]
 
 [[actions]]
 id = "configure-ai"
 title = "Smart Rename: configure AI"
 description = "Open the private AI provider configuration."
 contexts = ["global", "workspace", "tab", "pane"]
-command = ["node", "src/cli.mjs", "configure-ai"]
+command = ["bun", "src/cli.ts", "configure-ai"]
 
 [[actions]]
 id = "check-ai"
 title = "Smart Rename: check AI config"
 description = "Validate the AI provider configuration without making a request."
 contexts = ["global", "workspace", "tab", "pane"]
-command = ["node", "src/cli.mjs", "check-ai"]
+command = ["bun", "src/cli.ts", "check-ai"]
 
 [[actions]]
 id = "rename-now"
 title = "Smart Rename: current tab"
 description = "Reclaim and rename the current tab now."
 contexts = ["workspace", "tab", "pane"]
-command = ["node", "src/cli.mjs", "rename-now"]
+command = ["bun", "src/cli.ts", "rename-now"]
 
 [[actions]]
 id = "rename-all"
 title = "Smart Rename: all tabs"
 description = "Reclaim and rename every tab sequentially."
 contexts = ["global", "workspace", "tab", "pane"]
-command = ["node", "src/cli.mjs", "all"]
+command = ["bun", "src/cli.ts", "all"]
 
 [[actions]]
 id = "reset-tab"
 title = "Smart Rename: reset tab"
 description = "Clear the current tab's manual lock and evaluate it."
 contexts = ["tab", "pane"]
-command = ["node", "src/cli.mjs", "reset-tab"]
+command = ["bun", "src/cli.ts", "reset-tab"]
 
 [[actions]]
 id = "reset-workspace"
 title = "Smart Rename: reset workspace"
 description = "Clear the current workspace's manual lock and evaluate it."
 contexts = ["workspace", "tab", "pane"]
-command = ["node", "src/cli.mjs", "reset-workspace"]
+command = ["bun", "src/cli.ts", "reset-workspace"]
 
 [[panes]]
 id = "provider-config"
 title = "Smart Rename AI"
 description = "Edit the private OpenAI-compatible provider configuration."
 placement = "overlay"
-command = ["node", "src/configure.mjs"]
+command = ["bun", "src/configure.ts"]

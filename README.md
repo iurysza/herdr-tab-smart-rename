@@ -18,7 +18,7 @@ Obvious processes use deterministic names. Ambiguous work can use Kimi Code by d
 
 ## Install
 
-Requires Herdr 0.7.0+ and Node.js 20+.
+Requires Herdr 0.7.0+ and Bun 1.1.34+.
 
 ```sh
 herdr plugin install iurysza/herdr-tab-smart-rename
@@ -38,7 +38,7 @@ No standalone key means deterministic naming still works, but model-backed renam
 For a local checkout, install dependencies before linking; Herdr does not run build commands for local links.
 
 ```sh
-npm install
+bun install
 herdr plugin link "$PWD"
 herdr plugin action invoke start --plugin autoname
 ```
@@ -99,10 +99,11 @@ Kimi Code defaults:
 SMART_RENAME_PROVIDER=kimi-code
 SMART_RENAME_BASE_URL=https://api.kimi.com/coding/v1
 SMART_RENAME_MODEL=kimi-for-coding
+SMART_RENAME_REASONING_EFFORT=medium
 SMART_RENAME_TIMEOUT_MS=45000
 ```
 
-Set those values plus `SMART_RENAME_API_KEY` to use another OpenAI-compatible endpoint. `KIMI_API_KEY` is also accepted. Process-level `SMART_RENAME_*` values override `provider.env`; the file reloads before every request.
+Set those values plus `SMART_RENAME_API_KEY` to use another OpenAI-compatible endpoint. `KIMI_API_KEY` is also accepted. `SMART_RENAME_REASONING_EFFORT` accepts `low`, `medium`, or `high`; Kimi defaults to `medium`, while other providers leave it unset unless configured. Kimi requests use its documented 32,768 output-token capability so reasoning cannot truncate the final JSON label. Process-level `SMART_RENAME_*` values override `provider.env`; the file reloads before every request.
 
 Herdr keeps the config directory and file at `0700` and `0600`. Keys are never written to plugin state or logs. Model context is sanitized and capped at 4,500 serialized characters.
 
@@ -111,16 +112,18 @@ Pi is optional context collection only: for detected Pi panes, Smart Rename read
 ## Development
 
 ```sh
-npm ci --omit=dev
-npm run check
-npm test
-npm pack --dry-run
+bun install --frozen-lockfile
+bun run check
+bun test
+bun pm pack --dry-run
 ```
+
+The code follows the product flow: `domain.ts` owns pure naming policy, `text.ts` sanitizes input, `herdr.ts` and `pi-context.ts` collect context, `provider.ts` names ambiguous work, `storage.ts` preserves ownership safely, and `service.ts` orchestrates the path. `cli.ts`, `configure.ts`, and `worker.ts` are thin entrypoints.
 
 Preview the current tab without renaming or changing ownership:
 
 ```sh
-node src/cli.mjs dry-run
+bun src/cli.ts dry-run
 ```
 
 A dry run may call the configured model and respects existing manual locks when plugin state is available.
@@ -132,7 +135,7 @@ Runtime state and logs live under `~/.local/state/herdr/plugins/autoname/`. The 
 - Worker stopped: `herdr plugin action invoke start --plugin autoname`
 - AI config missing: run `configure-ai`, then `check-ai`.
 - Manual label never changes: use `reset-tab` or an explicit rename action.
-- Unexpected label: run `node src/cli.mjs dry-run` and check the [naming policy](docs/naming-policy.md).
+- Unexpected label: run `bun src/cli.ts dry-run` and check the [naming policy](docs/naming-policy.md).
 - Worker logs: `herdr plugin log list --plugin autoname --limit 10`
 
 Current limits: automatic socket discovery covers the local Herdr session only; closed ownership records and worker logs are not pruned.

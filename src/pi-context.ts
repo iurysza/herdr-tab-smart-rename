@@ -1,34 +1,58 @@
-import { open, realpath, stat } from "node:fs/promises";
+import { open, realpath, stat, type FileHandle } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { boundedText } from "./core.mjs";
+import { z } from "zod";
+import { type SessionTimeline } from "./domain.ts";
+import { boundedText } from "./text.ts";
 
 const SESSION_HEAD_BYTES = 64 * 1024;
 const SESSION_MIDDLE_BYTES = 256 * 1024;
 const SESSION_TAIL_BYTES = 512 * 1024;
 
-function contentText(content) {
-  if (typeof content === "string") return content;
-  return Array.isArray(content)
-    ? content
-        .filter((part) => part?.type === "text" && typeof part.text === "string")
-        .map((part) => part.text)
-        .join(" ")
-    : "";
+const UserMessageSchema = z.object({
+  type: z.literal("message"),
+  message: z.object({
+    role: z.literal("user"),
+    content: z.union([
+      z.string(),
+      z.array(
+        z.looseObject({
+          type: z.string(),
+          text: z.string().optional(),
+        }),
+      ),
+    ]),
+  }),
+});
+
+interface OpenSession {
+  handle: FileHandle;
+  size: number;
 }
 
-function sessionsRoot(env) {
+function contentText(content: z.infer<typeof UserMessageSchema>["message"]["content"]): string {
+  if (typeof content === "string") return content;
+  return content
+    .filter((part) => part.type === "text" && part.text)
+    .map((part) => part.text)
+    .join(" ");
+}
+
+function sessionsRoot(env: NodeJS.ProcessEnv): string {
   const agentDir =
     env.PI_CODING_AGENT_DIR ||
     path.join(env.HOME || os.homedir(), ".pi", "agent");
   return path.join(agentDir, "sessions");
 }
 
-async function openSession(sessionPath, env) {
+async function openSession(
+  sessionPath: string | null,
+  env: NodeJS.ProcessEnv,
+): Promise<OpenSession | null> {
   if (!sessionPath || !path.isAbsolute(sessionPath)) return null;
 
-  let allowedRoot;
-  let resolvedPath;
+  let allowedRoot: string;
+  let resolvedPath: string;
   try {
     [allowedRoot, resolvedPath] = await Promise.all([
       realpath(sessionsRoot(env)),
@@ -45,7 +69,12 @@ async function openSession(sessionPath, env) {
   return handle ? { handle, size: info.size } : null;
 }
 
-async function readSessionWindow(handle, size, start, length) {
+async function readSessionWindow(
+  handle: FileHandle,
+  size: number,
+  start: number,
+  length: number,
+): Promise<string> {
   const offset = Math.max(0, Math.min(start, size));
   const count = Math.max(0, Math.min(length, size - offset));
   const buffer = Buffer.alloc(count);
@@ -62,15 +91,15 @@ async function readSessionWindow(handle, size, start, length) {
   return text;
 }
 
-function userMessagesFrom(text) {
-  const messages = [];
-  for (let line of text.split("\n")) {
-    if (line.endsWith("\r")) line = line.slice(0, -1);
+function userMessagesFrom(text: string): string[] {
+  const messages: string[] = [];
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
     if (!line) continue;
     try {
-      const entry = JSON.parse(line);
-      if (entry?.type !== "message" || entry.message?.role !== "user") continue;
-      const value = boundedText(contentText(entry.message.content), 2_000);
+      const entry = UserMessageSchema.safeParse(JSON.parse(line));
+      if (!entry.success) continue;
+      const value = boundedText(contentText(entry.data.message.content), 2_000);
       if (value) messages.push(value);
     } catch {
       // Ignore partial and non-JSON records.
@@ -80,10 +109,10 @@ function userMessagesFrom(text) {
 }
 
 export async function recentUserMessages(
-  sessionPath,
+  sessionPath: string,
   limit = 6,
-  env = process.env,
-) {
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string[]> {
   const session = await openSession(sessionPath, env);
   if (!session) return [];
   try {
@@ -100,8 +129,10 @@ export async function recentUserMessages(
   }
 }
 
-/** @returns {Promise<{origin: string[], middle: string[], recent: string[]}>} */
-export async function sampledUserMessages(sessionPath, env = process.env) {
+export async function sampledUserMessages(
+  sessionPath: string | null,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<SessionTimeline> {
   const session = await openSession(sessionPath, env);
   if (!session) return { origin: [], middle: [], recent: [] };
   try {

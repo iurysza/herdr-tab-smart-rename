@@ -1,33 +1,39 @@
-#!/usr/bin/env node
-import { spawn } from "node:child_process";
+#!/usr/bin/env bun
 import { chmod, closeSync, openSync } from "node:fs";
 import { chmod as chmodAsync, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { createService } from "./app.mjs";
-import { sanitize } from "./core.mjs";
-import { run, snapshot } from "./integrations.mjs";
-import { loadProviderConfig } from "./provider.mjs";
-import { ensurePrivateDir, statePaths } from "./service.mjs";
-import { acquireLock, workerInfo } from "./singleton.mjs";
+import { type RenameResult } from "./domain.ts";
+import { run, snapshot } from "./herdr.ts";
+import { loadProviderConfig } from "./provider.ts";
+import { createService } from "./service.ts";
+import {
+  acquireLock,
+  ensurePrivateDir,
+  statePaths,
+  workerInfo,
+} from "./storage.ts";
+import { sanitizeText } from "./text.ts";
 
-const root =
-  process.env.HERDR_PLUGIN_ROOT ||
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const workerScript = path.join(root, "src", "worker.mjs");
+const root = process.env.HERDR_PLUGIN_ROOT || path.resolve(import.meta.dir, "..");
+const workerScript = path.join(root, "src", "worker.ts");
 
-function requireStateDir() {
-  if (!process.env.HERDR_PLUGIN_STATE_DIR) {
+function requireStateDir(): string {
+  const stateDir = process.env.HERDR_PLUGIN_STATE_DIR;
+  if (!stateDir) {
     throw new Error(
       "HERDR_PLUGIN_STATE_DIR is required (Herdr sets it for plugin actions)",
     );
   }
-  return process.env.HERDR_PLUGIN_STATE_DIR;
+  return stateDir;
 }
 
-async function notify(title, body = "", sound = "none") {
+async function notify(
+  title: string,
+  body = "",
+  sound: "none" | "request" = "none",
+): Promise<void> {
   const args = ["notification", "show", title];
-  const safeBody = sanitize(body).slice(0, 120);
+  const safeBody = sanitizeText(body).slice(0, 120);
   if (safeBody) args.push("--body", safeBody);
   args.push("--position", "bottom-right", "--sound", sound);
   await run(process.env.HERDR_BIN_PATH || "herdr", args, {
@@ -36,19 +42,21 @@ async function notify(title, body = "", sound = "none") {
   }).catch(() => {});
 }
 
-function currentResultNotice(result) {
+function currentResultNotice(result: RenameResult | null): {
+  title: string;
+  body: string;
+} {
   const change = result?.changes.find((item) => item.kind === "tab");
   if (change) {
     return { title: "Tab renamed", body: `${change.from} -> ${change.to}` };
   }
-  const reason = String(result?.reason ?? "");
-  const body = reason.includes("meaningful task")
+  const body = result?.reason.includes("meaningful task")
     ? "No task found"
     : "Name unchanged";
   return { title: "No change", body };
 }
 
-async function start() {
+async function start(): Promise<void> {
   const stateDir = requireStateDir();
   await ensurePrivateDir(stateDir);
   const paths = statePaths(stateDir);
@@ -65,11 +73,13 @@ async function start() {
 
     const logFd = openSync(paths.log, "a", 0o600);
     chmod(paths.log, 0o600, () => {});
-    const child = spawn(process.execPath, [workerScript], {
+    const child = Bun.spawn([process.execPath, workerScript], {
       cwd: root,
       env: process.env,
       detached: true,
-      stdio: ["ignore", logFd, logFd],
+      stdin: "ignore",
+      stdout: logFd,
+      stderr: logFd,
     });
     child.unref();
     closeSync(logFd);
@@ -89,7 +99,7 @@ async function start() {
   }
 }
 
-async function stop() {
+async function stop(): Promise<void> {
   const paths = statePaths(requireStateDir());
   const info = await workerInfo(paths.pid, workerScript);
   if (!info) {
@@ -98,7 +108,7 @@ async function stop() {
   }
   process.kill(info.pid, "SIGTERM");
   for (let count = 0; count < 30; count += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await Bun.sleep(100);
     if (!(await workerInfo(paths.pid, workerScript))) {
       console.log("Smart Rename stopped");
       return;
@@ -107,7 +117,7 @@ async function stop() {
   throw new Error(`worker ${info.pid} did not stop`);
 }
 
-async function status() {
+async function status(): Promise<void> {
   const paths = statePaths(requireStateDir());
   const info = await workerInfo(paths.pid, workerScript);
   if (!info) {
@@ -117,7 +127,7 @@ async function status() {
   console.log(`Smart Rename running (pid ${info.pid}, since ${info.startedAt})`);
 }
 
-async function renameAll() {
+async function renameAll(): Promise<RenameResult[]> {
   const stateDir = requireStateDir();
   await ensurePrivateDir(stateDir);
   const service = createService({ stateDir });
@@ -130,26 +140,33 @@ async function renameAll() {
   return results;
 }
 
-async function once(resetKind = null, forceRefresh = false, dryRun = false) {
-  const snap = await snapshot();
-  const tabId = process.env.HERDR_TAB_ID || snap.focused_tab_id;
+async function once(
+  resetKind: "workspace" | "tab" | null = null,
+  forceRefresh = false,
+  dryRun = false,
+): Promise<RenameResult | null> {
+  const current = await snapshot();
+  const tabId = process.env.HERDR_TAB_ID || current.focused_tab_id;
   const workspaceId =
-    process.env.HERDR_WORKSPACE_ID || snap.focused_workspace_id;
+    process.env.HERDR_WORKSPACE_ID || current.focused_workspace_id;
   if (!tabId || !workspaceId) throw new Error("No current Herdr tab/workspace");
 
   const stateDir = dryRun
     ? process.env.HERDR_PLUGIN_STATE_DIR
     : requireStateDir();
   if (stateDir) await ensurePrivateDir(stateDir);
-  const service = createService({ stateDir, dryRun });
-  await service.initialize(snap);
+  const service = createService({
+    ...(stateDir ? { stateDir } : {}),
+    dryRun,
+  });
+  await service.initialize(current);
   const targetTab =
     resetKind === "workspace"
-      ? snap.workspaces.find((item) => item.workspace_id === workspaceId)
+      ? current.workspaces.find((item) => item.workspace_id === workspaceId)
           ?.active_tab_id || tabId
       : tabId;
   const result = await service.evaluate(targetTab, {
-    snapshot: snap,
+    snapshot: current,
     resetKind,
     forceRefresh,
   });
@@ -157,7 +174,7 @@ async function once(resetKind = null, forceRefresh = false, dryRun = false) {
   return result;
 }
 
-async function configureAi() {
+async function configureAi(): Promise<void> {
   await run(
     process.env.HERDR_BIN_PATH || "herdr",
     [
@@ -175,26 +192,26 @@ async function configureAi() {
   );
 }
 
-async function checkAi() {
+async function checkAi(): Promise<void> {
   try {
     const config = await loadProviderConfig(process.env);
     const summary = `${config.provider}/${config.model}`;
     await notify("AI ready", summary);
     console.log(summary);
   } catch (error) {
-    await notify("Config missing", error.message, "request");
+    const message = errorMessage(error);
+    await notify("Config missing", message, "request");
     throw error;
   }
 }
 
-async function renameNow() {
+async function renameNow(): Promise<void> {
   await notify("Renaming tab");
-  const result = await once("tab", true);
-  const notice = currentResultNotice(result);
+  const notice = currentResultNotice(await once("tab", true));
   await notify(notice.title, notice.body);
 }
 
-async function renameEveryTab() {
+async function renameEveryTab(): Promise<void> {
   await notify("Renaming tabs");
   const results = await renameAll();
   const renamed = results.reduce(
@@ -208,7 +225,12 @@ async function renameEveryTab() {
   );
 }
 
-const defaultActions = {
+interface DispatchOptions {
+  dryRun?: boolean;
+  actions?: Record<string, (options: { dryRun: boolean }) => unknown>;
+}
+
+const defaultActions: NonNullable<DispatchOptions["actions"]> = {
   start,
   stop,
   status,
@@ -222,38 +244,35 @@ const defaultActions = {
   "reset-workspace": () => once("workspace", true),
 };
 
-/**
- * Dispatch one CLI action without executing at module import time.
- *
- * @param {string} command
- * @param {{dryRun?: boolean, actions?: Record<string, Function>}} options
- */
 export async function dispatch(
-  command,
-  { dryRun = false, actions = defaultActions } = {},
-) {
-  const action = actions[command];
+  command: string | undefined,
+  { dryRun = false, actions = defaultActions }: DispatchOptions = {},
+): Promise<unknown> {
+  const action = command ? actions[command] : undefined;
   if (!action) {
     throw new Error(
-      "usage: cli.mjs start|stop|status|configure-ai|check-ai|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-workspace",
+      "usage: cli.ts start|stop|status|configure-ai|check-ai|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-workspace",
     );
   }
   return action({ dryRun });
 }
 
-async function main(argv = process.argv.slice(2)) {
+async function main(argv = process.argv.slice(2)): Promise<void> {
   const command = argv[0];
   try {
     await dispatch(command, { dryRun: argv.includes("--dry-run") });
   } catch (error) {
+    const message = errorMessage(error);
     if (command === "rename-now" || command === "all") {
-      await notify("Rename failed", error.message, "request");
+      await notify("Rename failed", message, "request");
     }
-    console.error(`Smart Rename: ${error.message}`);
+    console.error(`Smart Rename: ${message}`);
     process.exitCode = 1;
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  await main();
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
+
+if (import.meta.main) await main();

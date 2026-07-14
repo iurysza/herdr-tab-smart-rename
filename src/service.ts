@@ -1,16 +1,6 @@
-import { randomUUID } from "node:crypto";
-import {
-  chmod,
-  mkdir,
-  readFile,
-  rename as moveFile,
-  writeFile,
-} from "node:fs/promises";
-import path from "node:path";
 import {
   acknowledgeRename,
   buildModelContext,
-  emptyState,
   heuristicTitle,
   isDefaultLabel,
   markModelAttempt,
@@ -21,93 +11,95 @@ import {
   resetOwnership,
   shouldCallModel,
   workspaceCandidate,
-} from "./core.mjs";
+  type PaneContext,
+  type RenameChange,
+  type RenameResult,
+  type SmartRenameState,
+} from "./domain.ts";
 import {
   focusedPaneContext,
   gitRoot,
   rename,
   siblingPaneContext,
   snapshot,
-} from "./integrations.mjs";
-import { acquireLock } from "./singleton.mjs";
+  type HerdrPane,
+  type HerdrSnapshot,
+  type HerdrTab,
+  type HerdrWorkspace,
+} from "./herdr.ts";
+import { AiSdkNamer, type Namer } from "./provider.ts";
+import {
+  loadState,
+  statePaths,
+  withStateTransaction,
+} from "./storage.ts";
 
-/** @typedef {{suggest(context: import("./core.mjs").NamingContext): Promise<import("./core.mjs").NameSuggestion>}} Namer */
-
-/**
- * @typedef {object} ServiceDependencies
- * @property {(env?: NodeJS.ProcessEnv) => Promise<object>} snapshot
- * @property {(cwd?: string) => Promise<string | null>} gitRoot
- * @property {(pane: object, env?: NodeJS.ProcessEnv) => Promise<object>} focusedPaneContext
- * @property {(pane: object, env?: NodeJS.ProcessEnv) => Promise<object>} siblingPaneContext
- * @property {(kind: "workspace" | "tab", id: string, label: string, env?: NodeJS.ProcessEnv) => Promise<void>} rename
- */
-
-export function statePaths(stateDir) {
-  return {
-    state: path.join(stateDir, "state.json"),
-    pid: path.join(stateDir, "worker.json"),
-    startLock: path.join(stateDir, "start.lock"),
-    stateLock: path.join(stateDir, "state.lock"),
-    log: path.join(stateDir, "worker.log"),
-  };
+export interface ServiceDependencies {
+  snapshot(env?: NodeJS.ProcessEnv): Promise<HerdrSnapshot>;
+  gitRoot(cwd?: string): Promise<string | null>;
+  focusedPaneContext(
+    pane: HerdrPane,
+    env?: NodeJS.ProcessEnv,
+  ): Promise<PaneContext>;
+  siblingPaneContext(
+    pane: HerdrPane,
+    env?: NodeJS.ProcessEnv,
+  ): Promise<PaneContext>;
+  rename(
+    kind: "workspace" | "tab",
+    id: string,
+    label: string,
+    env?: NodeJS.ProcessEnv,
+  ): Promise<void>;
 }
 
-export async function ensurePrivateDir(directory) {
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  await chmod(directory, 0o700);
+export interface EvaluateOptions {
+  snapshot?: HerdrSnapshot;
+  resetKind?: "workspace" | "tab" | null;
+  forceModel?: boolean;
+  forceRefresh?: boolean;
 }
 
-export async function loadState(file) {
-  if (!file) return emptyState();
-  try {
-    const parsed = JSON.parse(await readFile(file, "utf8"));
-    return { ...emptyState(), ...parsed };
-  } catch (error) {
-    if (error.code === "ENOENT") return emptyState();
-    throw error;
-  }
+interface ServiceOptions {
+  stateFile?: string | null;
+  stateLock?: string | null;
+  namer: Namer;
+  env?: NodeJS.ProcessEnv;
+  dryRun?: boolean;
+  dependencies?: Partial<ServiceDependencies>;
 }
 
-export async function saveState(file, state) {
-  await ensurePrivateDir(path.dirname(file));
-  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  await moveFile(temporary, file);
-  await chmod(file, 0o600);
-}
+const defaultDependencies: ServiceDependencies = {
+  snapshot,
+  gitRoot,
+  focusedPaneContext,
+  siblingPaneContext,
+  rename,
+};
 
-export async function withStateTransaction(stateFile, lockFile, operation) {
-  const release = await acquireLock(lockFile);
-  try {
-    const state = await loadState(stateFile);
-    const persist = () => saveState(stateFile, state);
-    const result = await operation(state, persist);
-    await persist();
-    return result;
-  } finally {
-    await release();
-  }
-}
-
-export function focusedPaneFor(tab, snap) {
+export function focusedPaneFor(
+  tab: HerdrTab,
+  snap: HerdrSnapshot,
+): HerdrPane | undefined {
   const panes = snap.panes.filter((pane) => pane.tab_id === tab.tab_id);
   const layout = snap.layouts.find((item) => item.tab_id === tab.tab_id);
   const id = layout?.focused_pane_id ?? snap.focused_pane_id;
   const focused = panes.find((pane) => pane.pane_id === id);
   return (
-    (focused?.agent ? focused : null) ??
+    (focused?.agent ? focused : undefined) ??
     panes.find(
       (pane) =>
-        pane.agent && ["working", "blocked"].includes(pane.agent_status),
+        pane.agent && ["working", "blocked"].includes(pane.agent_status ?? ""),
     ) ??
     focused ??
     panes[0]
   );
 }
 
-export function reconcileSnapshot(state, snap) {
+export function reconcileSnapshot(
+  state: SmartRenameState,
+  snap: HerdrSnapshot,
+): SmartRenameState {
   for (const workspace of snap.workspaces) {
     state.workspaces[workspace.workspace_id] = reconcileItem(
       state.workspaces[workspace.workspace_id],
@@ -125,67 +117,68 @@ export function reconcileSnapshot(state, snap) {
   return state;
 }
 
-const defaultDependencies = {
-  snapshot,
-  gitRoot,
-  focusedPaneContext,
-  siblingPaneContext,
-  rename,
-};
-
 export class AutoNameService {
-  /**
-   * @param {{
-   *   stateFile?: string | null,
-   *   stateLock?: string | null,
-   *   namer: Namer,
-   *   env?: NodeJS.ProcessEnv,
-   *   dryRun?: boolean,
-   *   dependencies?: Partial<ServiceDependencies>,
-   * }} options
-   */
+  readonly #stateFile: string | null;
+  readonly #stateLock: string | null;
+  readonly #namer: Namer;
+  readonly #env: NodeJS.ProcessEnv;
+  readonly #dryRun: boolean;
+  readonly #dependencies: ServiceDependencies;
+
   constructor({
-    stateFile,
-    stateLock,
+    stateFile = null,
+    stateLock = null,
     namer,
     env = process.env,
     dryRun = false,
     dependencies = {},
-  }) {
-    this.stateFile = stateFile;
-    this.stateLock = stateLock;
-    this.namer = namer;
-    this.env = env;
-    this.dryRun = dryRun;
-    this.dependencies = { ...defaultDependencies, ...dependencies };
+  }: ServiceOptions) {
+    this.#stateFile = stateFile;
+    this.#stateLock = stateLock;
+    this.#namer = namer;
+    this.#env = env;
+    this.#dryRun = dryRun;
+    this.#dependencies = { ...defaultDependencies, ...dependencies };
   }
 
-  async initialize(snap = null) {
-    const current = snap ?? (await this.dependencies.snapshot(this.env));
-    if (this.dryRun || !this.stateFile) return current;
-    await withStateTransaction(this.stateFile, this.stateLock, async (state) => {
+  async initialize(initial?: HerdrSnapshot | null): Promise<HerdrSnapshot> {
+    const current = initial ?? (await this.#dependencies.snapshot(this.#env));
+    if (this.#dryRun || !this.#stateFile || !this.#stateLock) return current;
+    await withStateTransaction(this.#stateFile, this.#stateLock, (state) => {
       reconcileSnapshot(state, current);
     });
     return current;
   }
 
-  async acknowledge(kind, id, label) {
-    if (!this.stateFile) return;
-    await withStateTransaction(this.stateFile, this.stateLock, async (state) => {
+  async acknowledge(
+    kind: "workspace" | "tab",
+    id: string,
+    label: string,
+  ): Promise<void> {
+    if (!this.#stateFile || !this.#stateLock) return;
+    await withStateTransaction(this.#stateFile, this.#stateLock, (state) => {
       const collection = kind === "tab" ? state.tabs : state.workspaces;
       collection[id] = acknowledgeRename(collection[id], label);
     });
   }
 
-  async contextFor(tab, snap, workspaceName) {
+  private async contextFor(
+    tab: HerdrTab,
+    snap: HerdrSnapshot,
+    workspaceName: string,
+  ): Promise<{
+    focusedPane: HerdrPane | undefined;
+    paneContexts: PaneContext[];
+    context: ReturnType<typeof buildModelContext>;
+  }> {
     const focusedPane = focusedPaneFor(tab, snap);
     const panes = snap.panes.filter((pane) => pane.tab_id === tab.tab_id);
-    const paneContexts = [];
+    const paneContexts: PaneContext[] = [];
     for (const pane of panes) {
       paneContexts.push(
         pane.pane_id === focusedPane?.pane_id
-          ? await this.dependencies.focusedPaneContext(pane, this.env)
-          : await this.dependencies.siblingPaneContext(pane, this.env),
+          ? await this.#dependencies.focusedPaneContext(pane, this.#env)
+          : await this.#dependencies.siblingPaneContext(pane, this.#env),
       );
     }
     return {
@@ -195,7 +188,10 @@ export class AutoNameService {
     };
   }
 
-  async workspaceDetails(workspace, snap) {
+  private async workspaceDetails(
+    workspace: HerdrWorkspace,
+    snap: HerdrSnapshot,
+  ): Promise<{ stablePane: HerdrPane | undefined; workspaceName: string }> {
     const stablePane = snap.panes.find(
       (pane) => pane.workspace_id === workspace.workspace_id,
     );
@@ -203,7 +199,7 @@ export class AutoNameService {
       !workspace.worktree?.repo_name &&
       isDefaultLabel(workspace.label, workspace.number);
     const root = needsFallback
-      ? await this.dependencies.gitRoot(
+      ? await this.#dependencies.gitRoot(
           stablePane?.foreground_cwd ?? stablePane?.cwd,
         )
       : null;
@@ -213,9 +209,12 @@ export class AutoNameService {
     };
   }
 
-  async evaluateAll(initial = null, options = {}) {
-    const snap = initial ?? (await this.dependencies.snapshot(this.env));
-    const results = [];
+  async evaluateAll(
+    initial?: HerdrSnapshot | null,
+    options: EvaluateOptions = {},
+  ): Promise<RenameResult[]> {
+    const snap = initial ?? (await this.#dependencies.snapshot(this.#env));
+    const results: RenameResult[] = [];
     for (const tab of snap.tabs) {
       const result = await this.evaluate(tab.tab_id, options);
       if (result) results.push(result);
@@ -223,37 +222,45 @@ export class AutoNameService {
     return results;
   }
 
-  /** @returns {Promise<import("./core.mjs").RenameResult | null>} */
-  async evaluate(tabId, options = {}) {
-    if (this.dryRun || !this.stateFile) {
+  async evaluate(
+    tabId: string,
+    options: EvaluateOptions = {},
+  ): Promise<RenameResult | null> {
+    if (this.#dryRun || !this.#stateFile || !this.#stateLock) {
       const snap =
-        options.snapshot ?? (await this.dependencies.snapshot(this.env));
-      const state = await loadState(this.stateFile);
+        options.snapshot ?? (await this.#dependencies.snapshot(this.#env));
+      const state = await loadState(this.#stateFile);
       reconcileSnapshot(state, snap);
       return this.evaluateWithState(
         state,
-        () => Promise.resolve(),
+        async () => {},
         tabId,
         snap,
         options,
       );
     }
     return withStateTransaction(
-      this.stateFile,
-      this.stateLock,
+      this.#stateFile,
+      this.#stateLock,
       async (state, persist) => {
-        const snap = await this.dependencies.snapshot(this.env);
+        const snap = await this.#dependencies.snapshot(this.#env);
         reconcileSnapshot(state, snap);
         return this.evaluateWithState(state, persist, tabId, snap, options);
       },
     );
   }
 
-  async evaluateWithState(state, persist, tabId, snap, options) {
+  private async evaluateWithState(
+    state: SmartRenameState,
+    persist: () => Promise<void>,
+    tabId: string,
+    snap: HerdrSnapshot,
+    options: EvaluateOptions,
+  ): Promise<RenameResult | null> {
     let tab = snap.tabs.find((item) => item.tab_id === tabId);
     if (!tab) return null;
     let workspace = snap.workspaces.find(
-      (item) => item.workspace_id === tab.workspace_id,
+      (item) => item.workspace_id === tab!.workspace_id,
     );
     if (!workspace) return null;
 
@@ -273,7 +280,7 @@ export class AutoNameService {
 
     if (workspaceManual && tabManual) {
       return {
-        dryRun: this.dryRun,
+        dryRun: this.#dryRun,
         workspace: workspace.workspace_id,
         tab: tab.tab_id,
         candidate: { workspace: null, tab: null },
@@ -285,17 +292,17 @@ export class AutoNameService {
     }
 
     const { workspaceName } = await this.workspaceDetails(workspace, snap);
-    let tabName = null;
+    let tabName: string | null = null;
     let reason = tabManual ? "manual tab ownership" : "";
     let usedModel = false;
 
     if (!tabManual) {
       const details = await this.contextFor(tab, snap, workspaceName);
       const focusedContext = details.paneContexts.find((pane) => pane.focused);
-      const hasUserTask = Boolean(focusedContext?.userMessages?.length);
+      const hasUserTask = Boolean(focusedContext?.userMessages.length);
       const heuristic = hasUserTask
         ? null
-        : heuristicTitle({ focusedPane: focusedContext });
+        : heuristicTitle(focusedContext ? { focusedPane: focusedContext } : {});
       if (heuristic && !options.forceModel) {
         tabName = heuristic;
         reason = "process heuristic";
@@ -312,8 +319,8 @@ export class AutoNameService {
           const gate = shouldCallModel(state, tab.tab_id, details.context);
           if (gate.allowed || options.forceModel || options.forceRefresh) {
             markModelAttempt(state, tab.tab_id);
-            if (!this.dryRun) await persist();
-            const suggestion = await this.namer.suggest(details.context);
+            if (!this.#dryRun) await persist();
+            const suggestion = await this.#namer.suggest(details.context);
             markModelSuccess(state, tab.tab_id, details.context);
             tabName = suggestion.tab;
             reason = suggestion.reason;
@@ -325,13 +332,13 @@ export class AutoNameService {
       }
     }
 
-    if (!this.dryRun) {
-      const latest = await this.dependencies.snapshot(this.env);
+    if (!this.#dryRun) {
+      const latest = await this.#dependencies.snapshot(this.#env);
       reconcileSnapshot(state, latest);
       tab = latest.tabs.find((item) => item.tab_id === tabId);
       if (!tab) return null;
       workspace = latest.workspaces.find(
-        (item) => item.workspace_id === tab.workspace_id,
+        (item) => item.workspace_id === tab!.workspace_id,
       );
       if (!workspace) return null;
       workspaceRecord = state.workspaces[workspace.workspace_id];
@@ -340,7 +347,7 @@ export class AutoNameService {
       tabManual = tabRecord?.manual ?? false;
     }
 
-    const changes = [];
+    const changes: RenameChange[] = [];
     if (!workspaceManual && workspaceName && workspace.label !== workspaceName) {
       changes.push({
         kind: "workspace",
@@ -358,21 +365,23 @@ export class AutoNameService {
       });
     }
 
-    if (!this.dryRun) {
+    if (!this.#dryRun) {
       for (const change of changes) {
-        const collection = change.kind === "tab" ? state.tabs : state.workspaces;
-        const previous = { ...collection[change.id] };
-        collection[change.id] = prepareRename(collection[change.id], change.to);
+        const collection =
+          change.kind === "tab" ? state.tabs : state.workspaces;
+        const previous = collection[change.id];
+        collection[change.id] = prepareRename(previous, change.to);
         await persist();
         try {
-          await this.dependencies.rename(
+          await this.#dependencies.rename(
             change.kind,
             change.id,
             change.to,
-            this.env,
+            this.#env,
           );
         } catch (error) {
-          collection[change.id] = previous;
+          if (previous) collection[change.id] = previous;
+          else delete collection[change.id];
           await persist();
           throw error;
         }
@@ -380,7 +389,7 @@ export class AutoNameService {
     }
 
     return {
-      dryRun: this.dryRun,
+      dryRun: this.#dryRun,
       workspace: workspace.workspace_id,
       tab: tab.tab_id,
       candidate: { workspace: workspaceName, tab: tabName },
@@ -390,4 +399,30 @@ export class AutoNameService {
       changes,
     };
   }
+}
+
+interface CompositionOptions {
+  stateDir?: string | null;
+  env?: NodeJS.ProcessEnv;
+  dryRun?: boolean;
+  namer?: Namer;
+  dependencies?: Partial<ServiceDependencies>;
+}
+
+export function createService({
+  stateDir = null,
+  env = process.env,
+  dryRun = false,
+  namer = new AiSdkNamer(env),
+  dependencies = {},
+}: CompositionOptions = {}): AutoNameService {
+  const paths = stateDir ? statePaths(stateDir) : null;
+  return new AutoNameService({
+    stateFile: paths?.state ?? null,
+    stateLock: paths?.stateLock ?? null,
+    namer,
+    env,
+    dryRun,
+    dependencies,
+  });
 }
