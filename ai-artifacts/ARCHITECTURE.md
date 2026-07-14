@@ -38,7 +38,7 @@ flowchart LR
 | `storage.ts` | Manage state paths, private permissions, atomic files, locks, worker identity, and stale recovery |
 | `text.ts` | Sanitize and bound text before prompts, state messages, and notifications |
 
-`herdr-plugin.toml` registers 10 actions and two overlay panes. It also installs production dependencies with Bun.
+`herdr-plugin.toml` registers `tab-smart-rename` with 10 actions and two overlay panes. It also installs production dependencies with Bun.
 
 ## Integration Points (APIs, queues, external services)
 
@@ -133,4 +133,4 @@ flowchart TD
 - One worker serves the local Herdr socket. Named or remote socket discovery is not automatic.
 - Closed ownership records and worker logs are not pruned or rotated.
 
-Updated-at: 965b2ab6bf3c83760aea70fa6de27bc0972e0fcf
+Updated-at: a26492444fd10f33fb76e8d22f9ecc2969a8dd73
