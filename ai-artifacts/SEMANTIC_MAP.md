@@ -15,7 +15,8 @@ Smart Rename turns live Herdr activity into stable workspace names and current-t
 | Name suggestion | A validated label and reason, or `null` when evidence does not describe a task | `provider.ts` |
 | Rename result | Candidate names, ownership state, model usage, reason, and applied changes | `domain.ts`, `service.ts` |
 | Churn gate | Fingerprints, stability observations, and model cooldowns that prevent repeated calls | `domain.ts` |
-| Provider configuration | Endpoint, model, key, timeout, and optional reasoning effort reloaded for each request | `provider.ts`, `configure.ts` |
+| Provider configuration | Tracked defaults plus private endpoint, model, key, timeout, reasoning, and prompt-path overrides | `provider.env.example`, `provider.ts`, `configure.ts` |
+| Naming prompt | Bundled policy or user-owned instructions reloaded before each model request | `docs/naming-policy.md`, `provider.ts` |
 
 ## Technical Layers
 
@@ -39,7 +40,7 @@ flowchart TB
 | Domain | `domain.ts` | Hold pure naming, ownership, validation, context, and churn rules |
 | Herdr integration | `herdr.ts` | Run Herdr commands, validate snapshots, inspect panes, rename labels, and frame socket events |
 | Pi context | `pi-context.ts` | Read bounded user requests from allowed Pi session files |
-| Provider | `provider.ts` | Load configuration, call one OpenAI-compatible model, and validate its answer |
+| Provider | `provider.ts` | Merge exposed defaults and overrides, reload the naming prompt, call one OpenAI-compatible model, and validate its answer |
 | Persistence | `storage.ts` | Validate state, write atomically, serialize processes, and verify the singleton worker |
 | Text safety | `text.ts` | Strip terminal controls, redact secrets, normalize paths, and bound text |
 
@@ -52,6 +53,7 @@ flowchart TB
 - Concurrency: one cross-process state lock covers reconciliation, model gates, expected writes, and rename rollback.
 - Resilience: the worker serializes tasks, debounces tab events, sweeps every 60 seconds, and reconnects after socket closure.
 - Provider independence: Pi supplies optional context only. Model authentication comes from Smart Rename's private provider file.
+- User customization: provider and prompt files reload per request; fixed schemas still reject unsafe or malformed output.
 - Feedback: explicit actions emit start, success, no-change, and sanitized failure notifications.
 
 ## Data Flow Paths
@@ -94,11 +96,19 @@ sequenceDiagram
 
 ### Provider configuration
 
-1. `configure-ai` opens `provider.env` in Herdr's overlay pane.
-2. `provider.ts` reads at most 16 KiB for every request.
-3. Process values override file values.
-4. Zod validates the merged configuration.
-5. The AI SDK sends one non-streaming OpenAI-compatible request.
+1. `provider.env.example` supplies the tracked OpenAI Luna defaults.
+2. `configure-ai` copies that template to private `provider.env` on first use and opens it in Herdr's overlay pane.
+3. Process values override private-file values; private-file values override the tracked defaults.
+4. `provider.ts` reads at most 16 KiB and validates the merged configuration with Zod.
+5. It loads an explicit prompt path, private `naming-prompt.md`, or bundled `docs/naming-policy.md` in that order.
+6. The AI SDK sends one non-streaming OpenAI-compatible request.
+
+### Prompt customization
+
+1. `configure-prompt` copies the bundled naming policy to private `naming-prompt.md` on first use.
+2. `SMART_RENAME_PROMPT_PATH` may select another absolute or config-relative file.
+3. The selected prompt is limited to 32 KiB and reloaded before every request.
+4. The model response must still pass JSON, Zod, and label-policy validation.
 
 ## Data Boundaries and Transformations
 
@@ -109,10 +119,11 @@ sequenceDiagram
 | Pane process | Herdr process-info JSON | field selection, sanitization, length limits | `ProcessInfo` |
 | Pane output | recent terminal text | ANSI removal, secret redaction, whitespace normalization, 1,000-character cap | safe output evidence |
 | Pi session | path-backed JSONL | root check, regular-file check, bounded head/middle/tail windows, user-message validation | `SessionTimeline` |
-| Provider file | private dotenv text | 16 KiB bound, dotenv parse, process override, Zod validation | `ProviderConfig` |
-| Model prompt | pane evidence | dominant-pane selection, sanitization, timeline weighting, 4,500-character hard cap | `NamingContext` |
+| Provider files | tracked and private dotenv text | 16 KiB bounds, dotenv parse, precedence merge, provider-specific key selection, Zod validation | `ProviderConfig` |
+| Naming prompt | bundled policy, private copy, or configured path | precedence selection, 32 KiB bound, non-empty check | system instruction text |
+| Model context | pane evidence | dominant-pane selection, sanitization, timeline weighting, 4,500-character hard cap | `NamingContext` |
 | Model response | provider text | JSON fence removal, JSON parse, Zod validation, title policy | `NameSuggestion` |
 | State file | JSON on disk | lock, Zod validation, reconciliation, atomic temporary-file rename | `SmartRenameState` |
 | Herdr rename | candidate label | expected-write persistence before command | confirmed automatic ownership or rollback |
 
-Updated-at: 89a7d226f3817e0cb9bee32cc2ed5c5992c09ae9
+Updated-at: 183b38764a2a8d920afb57fa523d9db37f8e2e6c

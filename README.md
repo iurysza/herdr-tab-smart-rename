@@ -1,9 +1,3 @@
-
-
-
-
-
-
 <p align="center">
   <img src="assets/herdr-tab-smart-rename-banner.png" width="720" alt="Magic wand naming a Herdr tab">
 </p>
@@ -20,8 +14,7 @@ Smart Rename turns default workspace and tab numbers into short task labels whil
 5  ->  Dev Server
 ```
 
-Uses an OpenAI-compatible model to rename the tab based on its content. Great for when you cant remember wth was this agent doing in the first place.
-
+Smart Rename labels tabs from their current work—useful when you cannot remember what an agent was doing. Recognized processes get instant deterministic names; ambiguous work uses OpenAI GPT-5.6 Luna by default or another OpenAI-compatible model.
 
 ## Demo
 
@@ -38,13 +31,13 @@ herdr plugin action invoke check-ai --plugin autoname
 herdr plugin action invoke start --plugin autoname
 ```
 
-`configure-ai` opens the private `provider.env` file. Kimi Code needs one line:
+`configure-ai` opens `~/.config/herdr/plugins/config/autoname/provider.env`. Add your OpenAI key:
 
 ```dotenv
-SMART_RENAME_API_KEY=...
+OPENAI_API_KEY=...
 ```
 
-Without a key, deterministic names still work. Model-backed names do not.
+The file starts from [`provider.env.example`](provider.env.example), so the endpoint, model, reasoning, and timeout are ready to use. Without a key, deterministic names still work. Model-backed names do not.
 
 ## Use
 
@@ -71,7 +64,8 @@ description = "force smart rename all tabs"
 | `reset-tab` | Return the current tab to automatic naming |
 | `reset-workspace` | Return the current workspace to automatic naming |
 | `configure-ai` | Edit provider settings |
-| `check-ai` | Check settings without making a model request |
+| `configure-prompt` | Edit the naming instructions |
+| `check-ai` | Check provider and prompt settings without making a model request |
 | `start` / `stop` / `status` | Control or inspect Smart Rename |
 
 Run any action with:
@@ -95,23 +89,35 @@ Tests, development servers, log followers, and remote shells become `Run Tests`,
 
 Labels use 2 to 4 Title Case words and no more than 30 characters. Workspaces describe projects. Tabs describe tasks. Manual names always win until you reset or explicitly rename them.
 
-See the [naming policy](docs/naming-policy.md) for the full contract.
+The [naming policy](docs/naming-policy.md) is both the human-readable contract and the default AI system prompt.
+
+## Customize the naming prompt
+
+Run `configure-prompt` to create and open your private copy:
+
+```sh
+herdr plugin action invoke configure-prompt --plugin autoname
+```
+
+Your copy lives at `~/.config/herdr/plugins/config/autoname/naming-prompt.md` and survives plugin updates. To keep the bundled policy instead, do nothing. To use another file, set `SMART_RENAME_PROMPT_PATH` in `provider.env`; relative paths resolve from the plugin config directory.
+
+Smart Rename reloads the prompt before every model request. Output still must satisfy the built-in JSON and label validation.
 
 ## Choose a provider and model
 
-Kimi Code is the default:
+The defaults are exposed in [`provider.env.example`](provider.env.example):
 
 ```dotenv
-SMART_RENAME_PROVIDER=kimi-code
-SMART_RENAME_BASE_URL=https://api.kimi.com/coding/v1
-SMART_RENAME_MODEL=kimi-for-coding
+SMART_RENAME_PROVIDER=openai
+SMART_RENAME_BASE_URL=https://api.openai.com/v1
+SMART_RENAME_MODEL=gpt-5.6-luna
 SMART_RENAME_REASONING_EFFORT=medium
 SMART_RENAME_TIMEOUT_MS=45000
 ```
 
-Set the endpoint, provider name, model, and `SMART_RENAME_API_KEY` to use another OpenAI-compatible provider. `KIMI_API_KEY` also works for Kimi. Reasoning effort accepts `low`, `medium`, or `high` when the provider supports it.
+Set those values and `SMART_RENAME_API_KEY` to use another OpenAI-compatible provider. `OPENAI_API_KEY` works for OpenAI; `KIMI_API_KEY` works when `SMART_RENAME_PROVIDER=kimi-code`. Reasoning effort accepts `low`, `medium`, or `high` when the model supports it.
 
-Smart Rename reloads this file before every model request. You do not need to restart the worker after changing it.
+Smart Rename reloads `provider.env` before every model request. You do not need to restart the worker after changing it.
 
 ## Privacy
 

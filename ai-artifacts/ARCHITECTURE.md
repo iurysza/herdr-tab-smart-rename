@@ -18,6 +18,8 @@ flowchart LR
     S --> N[OpenAI-compatible namer]
     S --> F[Private state and locks]
     H --> P[Optional Pi session files]
+    PC[provider.env] --> N
+    NP[naming-prompt.md or bundled policy] --> N
     N --> API[Configured AI endpoint]
 ```
 
@@ -26,17 +28,17 @@ flowchart LR
 | Component | Responsibility |
 | --- | --- |
 | `cli.ts` | Dispatch plugin actions, control the worker, run explicit evaluations, and show notifications |
-| `configure.ts` | Create the private provider file and open it in the user's editor |
+| `configure.ts` | Seed private provider and prompt files from tracked templates, then open them in the user's editor |
 | `worker.ts` | Subscribe to events, debounce evaluations, run sweeps, serialize work, reconnect, and shut down cleanly |
 | `service.ts` | Coordinate snapshots, ownership, context, naming, persistence, and rename writes |
 | `domain.ts` | Define contracts and pure policy for labels, ownership, heuristics, prompts, fingerprints, and cooldowns |
 | `herdr.ts` | Validate and translate Herdr CLI and socket data |
 | `pi-context.ts` | Sample bounded user requests from approved Pi session files |
-| `provider.ts` | Resolve provider configuration, call the AI SDK, and validate model output |
+| `provider.ts` | Resolve file-based defaults and overrides, reload the naming prompt, call the AI SDK, and validate model output |
 | `storage.ts` | Manage state paths, private permissions, atomic files, locks, worker identity, and stale recovery |
 | `text.ts` | Sanitize and bound text before prompts, state messages, and notifications |
 
-`herdr-plugin.toml` registers 9 actions and one overlay pane. It also installs production dependencies with Bun.
+`herdr-plugin.toml` registers 10 actions and two overlay panes. It also installs production dependencies with Bun.
 
 ## Integration Points (APIs, queues, external services)
 
@@ -49,17 +51,20 @@ flowchart LR
 ### AI provider
 
 - protocol: OpenAI-compatible chat completion through Vercel AI SDK
-- default endpoint: Kimi Code
-- configuration: private `provider.env`, reloaded for every call
+- default endpoint and model: OpenAI API with `gpt-5.6-luna`
+- provider defaults: tracked `provider.env.example`
+- user configuration: private `provider.env`, reloaded for every call
+- system prompt: bundled `docs/naming-policy.md`, overridden by private `naming-prompt.md` or `SMART_RENAME_PROMPT_PATH`
 - request: one non-streaming call, 45-second default timeout, one retry, and a 32,768 output-token ceiling
-- reasoning: Kimi defaults to medium; other providers opt in
+- reasoning: medium by default; provider overrides may omit or replace it
 
 ### Local files and processes
 
 - Pi session JSONL: optional task context for detected Pi panes
 - Git: repository root fallback for workspace identity
 - state directory: ownership records, model gates, worker PID, locks, and logs
-- editor process: provider configuration pane
+- config directory: private `provider.env` and optional `naming-prompt.md`
+- editor process: provider and prompt configuration panes
 
 There is no external queue. The worker uses an in-memory promise chain to serialize tasks and a file lock to serialize state across the worker and CLI actions.
 
@@ -94,7 +99,7 @@ flowchart TD
     F -- yes --> G[Use deterministic label]
     F -- no --> H{Stable and outside cooldown?}
     H -- no --> Z
-    H -- yes --> I[Call configured namer]
+    H -- yes --> I[Reload provider and prompt, then call namer]
     I --> J{Valid task label?}
     J -- no --> Z
     J -- yes --> K[Persist expected write]
@@ -120,11 +125,12 @@ flowchart TD
 - Zod schemas add boundary code but prevent external JSON from becoming trusted TypeScript data by assertion.
 - A coarse state lock simplifies cross-process correctness. It also serializes model-backed evaluations.
 - Deterministic labels avoid model latency and cost. Broad AI naming remains available for ambiguous tasks.
-- The 4,500-character prompt cap limits exposure and cost but can omit older context.
-- Kimi is an always-thinking model. Its documented output capacity avoids truncated JSON, though simple labels may still take several seconds.
+- The 4,500-character context cap limits exposure and cost but can omit older evidence.
+- GPT-5.6 Luna suits short, high-volume naming, while medium reasoning trades some latency for label quality.
+- Editable prompts enable personal naming style but may produce rejected output; schema and label validation remain fixed safety boundaries.
 - Provider configuration is portable across OpenAI-compatible endpoints, but reasoning support varies by provider.
 - Pi is a context source, not an inference dependency. Smart Rename never reads Pi credentials or starts Pi.
 - One worker serves the local Herdr socket. Named or remote socket discovery is not automatic.
 - Closed ownership records and worker logs are not pruned or rotated.
 
-Updated-at: 89a7d226f3817e0cb9bee32cc2ed5c5992c09ae9
+Updated-at: 183b38764a2a8d920afb57fa523d9db37f8e2e6c
