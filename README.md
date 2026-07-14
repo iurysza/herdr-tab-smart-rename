@@ -1,6 +1,9 @@
 
 
 
+
+
+
 <p align="center">
   <img src="assets/herdr-tab-smart-rename-banner.png" width="720" alt="Magic wand naming a Herdr tab">
 </p>
@@ -22,7 +25,7 @@ Uses an OpenAI-compatible model to rename the tab based on its content. Great fo
 
 ## Demo
 
-https://github.com/user-attachments/assets/25d6b133-bea5-4244-a1d7-45cc51b2c2c8
+https://github.com/user-attachments/assets/c9d12c33-e458-4a29-986c-c403d64aff02
 
 ## Install
 
