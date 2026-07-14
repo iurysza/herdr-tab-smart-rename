@@ -29,30 +29,27 @@ function requireStateDir() {
   return process.env.HERDR_PLUGIN_STATE_DIR;
 }
 
-async function notify(title, body, sound = "none") {
-  const safeBody = sanitize(body).slice(0, 240);
-  await run(
-    process.env.HERDR_BIN_PATH || "herdr",
-    [
-      "notification",
-      "show",
-      title,
-      "--body",
-      safeBody,
-      "--position",
-      "bottom-right",
-      "--sound",
-      sound,
-    ],
-    { env: process.env, timeout: 3_000 },
-  ).catch(() => {});
+async function notify(title, body = "", sound = "none") {
+  const args = ["notification", "show", title];
+  const safeBody = sanitize(body).slice(0, 120);
+  if (safeBody) args.push("--body", safeBody);
+  args.push("--position", "bottom-right", "--sound", sound);
+  await run(process.env.HERDR_BIN_PATH || "herdr", args, {
+    env: process.env,
+    timeout: 3_000,
+  }).catch(() => {});
 }
 
-function currentResultBody(result) {
+function currentResultNotice(result) {
   const change = result?.changes.find((item) => item.kind === "tab");
-  return change
-    ? `${change.from} -> ${change.to}`
-    : `No rename: ${result?.reason || "no meaningful task"}`;
+  if (change) {
+    return { title: "Tab renamed", body: `${change.from} -> ${change.to}` };
+  }
+  const reason = String(result?.reason ?? "");
+  const body = reason.includes("meaningful task")
+    ? "No task found"
+    : "Name unchanged";
+  return { title: "No change", body };
 }
 
 async function start() {
@@ -191,11 +188,12 @@ try {
   else if (command === "status") await status();
   else if (command === "once" || command === "dry-run") await once();
   else if (command === "rename-now") {
-    await notify("Smart Rename", "Renaming current tab...");
+    await notify("Renaming tab");
     const result = await once("tab", true);
-    await notify("Smart Rename complete", currentResultBody(result));
+    const notice = currentResultNotice(result);
+    await notify(notice.title, notice.body);
   } else if (command === "all") {
-    await notify("Smart Rename", "Renaming all tabs...");
+    await notify("Renaming tabs");
     const results = await renameAll();
     const renamed = results.reduce(
       (count, result) =>
@@ -203,8 +201,8 @@ try {
       0,
     );
     await notify(
-      "Smart Rename complete",
-      `Renamed ${renamed} of ${results.length} tabs`,
+      renamed ? "Tabs renamed" : "No changes",
+      `${renamed}/${results.length}`,
     );
   }
   else if (command === "reset-tab") await once("tab", true);
@@ -216,7 +214,7 @@ try {
   }
 } catch (error) {
   if (command === "rename-now" || command === "all") {
-    await notify("Smart Rename failed", error.message, "request");
+    await notify("Rename failed", error.message, "request");
   }
   console.error(`Smart Rename: ${error.message}`);
   process.exitCode = 1;
