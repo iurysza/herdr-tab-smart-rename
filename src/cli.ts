@@ -30,7 +30,7 @@ function requireStateDir(): string {
 async function notify(
   title: string,
   body = "",
-  sound: "none" | "request" = "none",
+  sound: "none" | "done" | "request" = "none",
 ): Promise<void> {
   const args = ["notification", "show", title];
   const safeBody = sanitizeText(body).slice(0, 120);
@@ -42,18 +42,33 @@ async function notify(
   }).catch(() => {});
 }
 
-function currentResultNotice(result: RenameResult | null): {
+export function currentResultNotice(result: RenameResult | null): {
   title: string;
   body: string;
+  sound: "done" | "request";
 } {
   const change = result?.changes.find((item) => item.kind === "tab");
   if (change) {
-    return { title: "Tab renamed", body: `${change.from} -> ${change.to}` };
+    return {
+      title: "Tab renamed",
+      body: `${change.from} -> ${change.to}`,
+      sound: "done",
+    };
   }
-  const body = result?.reason.includes("meaningful task")
-    ? "No task found"
-    : "Name unchanged";
-  return { title: "No change", body };
+  if (!result) {
+    return {
+      title: "Tab not renamed",
+      body: "No eligible tab",
+      sound: "request",
+    };
+  }
+  return {
+    title: "Tab not renamed",
+    body: result.candidate.tab
+      ? `Already named ${result.candidate.tab}`
+      : "No meaningful task found",
+    sound: "request",
+  };
 }
 
 async function start(): Promise<void> {
@@ -217,7 +232,7 @@ async function checkAi(): Promise<void> {
 async function renameNow(): Promise<void> {
   await notify("Renaming tab");
   const notice = currentResultNotice(await once("tab", true));
-  await notify(notice.title, notice.body);
+  await notify(notice.title, notice.body, notice.sound);
 }
 
 async function renameEveryTab(): Promise<void> {
@@ -229,8 +244,9 @@ async function renameEveryTab(): Promise<void> {
     0,
   );
   await notify(
-    renamed ? "Tabs renamed" : "No changes",
+    renamed ? "Tabs renamed" : "No tabs renamed",
     `${renamed}/${results.length}`,
+    renamed ? "done" : "request",
   );
 }
 

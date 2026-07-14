@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { dispatch } from "../src/cli.ts";
+import { currentResultNotice, dispatch } from "../src/cli.ts";
+import { type RenameResult } from "../src/domain.ts";
 import { acquireLock, pidAlive, workerInfo } from "../src/storage.ts";
 
 test("CLI dispatch routes actions without executing on import", async () => {
@@ -19,6 +20,49 @@ test("CLI dispatch routes actions without executing on import", async () => {
     ["once", { dryRun: true }],
   ]);
   await assert.rejects(dispatch("unknown", { actions }), /^Error: usage:/);
+
+  const result: RenameResult = {
+    dryRun: false,
+    workspace: "w1",
+    tab: "t1",
+    candidate: { workspace: null, tab: null },
+    reason: "no meaningful task",
+    usedModel: true,
+    ownership: { workspaceManual: false, tabManual: false },
+    changes: [],
+  };
+  assert.deepEqual(currentResultNotice(result), {
+    title: "Tab not renamed",
+    body: "No meaningful task found",
+    sound: "request",
+  });
+  assert.deepEqual(
+    currentResultNotice({
+      ...result,
+      candidate: { workspace: null, tab: "Review Auth Changes" },
+      reason: "current task",
+    }),
+    {
+      title: "Tab not renamed",
+      body: "Already named Review Auth Changes",
+      sound: "request",
+    },
+  );
+  assert.deepEqual(
+    currentResultNotice({
+      ...result,
+      candidate: { workspace: null, tab: "Review Auth Changes" },
+      reason: "current task",
+      changes: [
+        { kind: "tab", id: "t1", from: "1", to: "Review Auth Changes" },
+      ],
+    }),
+    {
+      title: "Tab renamed",
+      body: "1 -> Review Auth Changes",
+      sound: "done",
+    },
+  );
 });
 
 test("locks recover dead owners and workers require exact Bun scripts", async () => {
