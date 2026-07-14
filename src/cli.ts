@@ -3,7 +3,7 @@ import { chmod, closeSync, openSync } from "node:fs";
 import { chmod as chmodAsync, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { type RenameResult } from "./domain.ts";
-import { run, snapshot } from "./herdr.ts";
+import { beginTabProgress, run, snapshot } from "./herdr.ts";
 import { loadNamingPrompt, loadProviderConfig } from "./provider.ts";
 import { createService } from "./service.ts";
 import {
@@ -155,11 +155,19 @@ async function renameAll(): Promise<RenameResult[]> {
   return results;
 }
 
-async function once(
-  resetKind: "workspace" | "tab" | null = null,
+interface OnceOptions {
+  resetKind?: "workspace" | "tab" | null;
+  forceRefresh?: boolean;
+  dryRun?: boolean;
+  progress?: boolean;
+}
+
+async function once({
+  resetKind = null,
   forceRefresh = false,
   dryRun = false,
-): Promise<RenameResult | null> {
+  progress = false,
+}: OnceOptions = {}): Promise<RenameResult | null> {
   const current = await snapshot();
   const tabId = process.env.HERDR_TAB_ID || current.focused_tab_id;
   const workspaceId =
@@ -172,6 +180,7 @@ async function once(
   if (stateDir) await ensurePrivateDir(stateDir);
   const service = createService({
     ...(stateDir ? { stateDir } : {}),
+    ...(progress ? { modelActivity: beginTabProgress } : {}),
     dryRun,
   });
   await service.initialize(current);
@@ -231,7 +240,9 @@ async function checkAi(): Promise<void> {
 
 async function renameNow(): Promise<void> {
   await notify("Renaming tab");
-  const notice = currentResultNotice(await once("tab", true));
+  const notice = currentResultNotice(
+    await once({ resetKind: "tab", forceRefresh: true, progress: true }),
+  );
   await notify(notice.title, notice.body, notice.sound);
 }
 
@@ -262,12 +273,13 @@ const defaultActions: NonNullable<DispatchOptions["actions"]> = {
   "configure-ai": configureAi,
   "configure-prompt": configurePrompt,
   "check-ai": checkAi,
-  once: ({ dryRun }) => once(null, false, dryRun),
-  "dry-run": () => once(null, false, true),
+  once: ({ dryRun }) => once({ dryRun }),
+  "dry-run": () => once({ dryRun: true }),
   "rename-now": renameNow,
   all: renameEveryTab,
-  "reset-tab": () => once("tab", true),
-  "reset-workspace": () => once("workspace", true),
+  "reset-tab": () => once({ resetKind: "tab", forceRefresh: true }),
+  "reset-workspace": () =>
+    once({ resetKind: "workspace", forceRefresh: true }),
 };
 
 export async function dispatch(

@@ -94,6 +94,23 @@ export type HerdrEvent = z.infer<typeof EventEnvelopeSchema>["data"] & {
   type: string;
 };
 
+const TAB_PROGRESS_MARKER = "\u2063";
+const TAB_PROGRESS_FRAMES = ["◇", "◈", "◆", "◈"] as const;
+const TAB_PROGRESS_INTERVAL_MS = 120;
+
+export function tabProgressBase(label: string): string | null {
+  if (!label.startsWith(TAB_PROGRESS_MARKER)) return null;
+  const separator = label.indexOf(" ", TAB_PROGRESS_MARKER.length);
+  if (separator < 0) return null;
+  const frame = label.slice(TAB_PROGRESS_MARKER.length, separator);
+  if (!(TAB_PROGRESS_FRAMES as readonly string[]).includes(frame)) return null;
+  return label.slice(separator + 1);
+}
+
+function tabProgressLabel(base: string, frame: string): string {
+  return `${TAB_PROGRESS_MARKER}${frame} ${base}`;
+}
+
 export const LIFECYCLE_SUBSCRIPTIONS = [
   "workspace.created",
   "workspace.updated",
@@ -169,6 +186,66 @@ export async function rename(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   await run(env.HERDR_BIN_PATH || "herdr", [kind, "rename", id, label], { env });
+}
+
+export async function beginTabProgress(
+  tab: HerdrTab,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<() => Promise<void>> {
+  const base = tab.label;
+  let expected = base;
+  let frame = 0;
+  let stopped = false;
+  let work = Promise.resolve();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const update = (nextFrame: number): Promise<void> => {
+    work = work
+      .then(async () => {
+        if (stopped) return;
+        const current = (await snapshot(env)).tabs.find(
+          (item) => item.tab_id === tab.tab_id,
+        )?.label;
+        if (stopped || current !== expected) {
+          stopped = true;
+          return;
+        }
+        const next = tabProgressLabel(base, TAB_PROGRESS_FRAMES[nextFrame]!);
+        await rename("tab", tab.tab_id, next, env);
+        expected = next;
+        frame = nextFrame;
+      })
+      .catch(() => {
+        stopped = true;
+      });
+    return work;
+  };
+
+  const schedule = (): void => {
+    timer = setTimeout(() => {
+      void update((frame + 1) % TAB_PROGRESS_FRAMES.length).then(() => {
+        if (!stopped) schedule();
+      });
+    }, TAB_PROGRESS_INTERVAL_MS);
+  };
+
+  await update(0);
+  if (!stopped) schedule();
+
+  return async () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    await work;
+    if (expected === base) return;
+    try {
+      const current = (await snapshot(env)).tabs.find(
+        (item) => item.tab_id === tab.tab_id,
+      )?.label;
+      if (current === expected) await rename("tab", tab.tab_id, base, env);
+    } catch {
+      // Progress cleanup must not hide the naming result.
+    }
+  };
 }
 
 export async function gitRoot(cwd?: string): Promise<string | null> {

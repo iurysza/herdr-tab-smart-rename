@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   LIFECYCLE_SUBSCRIPTIONS,
   normalizeHerdrEvent,
+  tabProgressBase,
 } from "../src/herdr.ts";
 import {
   recentUserMessages,
@@ -35,6 +36,8 @@ test("Herdr events normalize while subscriptions avoid output spam", () => {
   const subscriptions: readonly string[] = LIFECYCLE_SUBSCRIPTIONS;
   assert.ok(subscriptions.includes("tab.renamed"));
   assert.equal(subscriptions.includes("pane.output_matched"), false);
+  assert.equal(tabProgressBase("\u2063◆ Review Auth"), "Review Auth");
+  assert.equal(tabProgressBase("◆ Review Auth"), null);
 });
 
 test("Pi session sampling weights origin, midpoint, and recent requests", async () => {

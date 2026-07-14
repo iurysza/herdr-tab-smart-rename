@@ -185,6 +185,7 @@ test("explicit refresh reclaims manual tabs and bypasses model gates", async () 
   const paths = statePaths(dir);
   const snap = liveSnapshot("Manual Task");
   let calls = 0;
+  const activity: string[] = [];
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
@@ -193,6 +194,12 @@ test("explicit refresh reclaims manual tabs and bypasses model gates", async () 
         calls += 1;
         return { tab: "Fresh Task Name", reason: "current task" };
       },
+    },
+    modelActivity: async (tab) => {
+      activity.push(`start:${tab.label}`);
+      return async () => {
+        activity.push("stop");
+      };
     },
     dependencies: dependencies(() => snap, {
       focusedPaneContext: async (pane) =>
@@ -217,6 +224,12 @@ test("explicit refresh reclaims manual tabs and bypasses model gates", async () 
     assert.ok(forced);
     assert.equal(forced.usedModel, true);
     assert.equal(calls, 2);
+    assert.deepEqual(activity, [
+      "start:Manual Task",
+      "stop",
+      "start:Fresh Task Name",
+      "stop",
+    ]);
     assert.equal((await loadState(paths.state)).tabs.t1?.manual, false);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -259,6 +272,7 @@ test("failed model calls persist attempt backoff without success fingerprint", a
   const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-failure-"));
   const paths = statePaths(dir);
   const snap = liveSnapshot();
+  let stopped = false;
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
@@ -266,6 +280,9 @@ test("failed model calls persist attempt backoff without success fingerprint", a
       suggest: async () => {
         throw new Error("provider unavailable");
       },
+    },
+    modelActivity: async () => async () => {
+      stopped = true;
     },
     dependencies: dependencies(() => snap, {
       focusedPaneContext: async (pane) =>
@@ -275,6 +292,7 @@ test("failed model calls persist attempt backoff without success fingerprint", a
   try {
     await service.initialize(snap);
     await assert.rejects(service.evaluate("t1"), /provider unavailable/);
+    assert.equal(stopped, true);
     const state = await loadState(paths.state);
     assert.equal(typeof state.modelAttempts.t1, "number");
     assert.equal(state.fingerprints.t1, undefined);

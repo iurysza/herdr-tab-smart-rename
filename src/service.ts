@@ -60,12 +60,17 @@ export interface EvaluateOptions {
   forceRefresh?: boolean;
 }
 
+export type ModelActivity = (
+  tab: HerdrTab,
+) => Promise<() => Promise<void>>;
+
 interface ServiceOptions {
   stateFile?: string | null;
   stateLock?: string | null;
   namer: Namer;
   env?: NodeJS.ProcessEnv;
   dryRun?: boolean;
+  modelActivity?: ModelActivity;
   dependencies?: Partial<ServiceDependencies>;
 }
 
@@ -123,6 +128,7 @@ export class AutoNameService {
   readonly #namer: Namer;
   readonly #env: NodeJS.ProcessEnv;
   readonly #dryRun: boolean;
+  readonly #modelActivity: ModelActivity | undefined;
   readonly #dependencies: ServiceDependencies;
 
   constructor({
@@ -131,6 +137,7 @@ export class AutoNameService {
     namer,
     env = process.env,
     dryRun = false,
+    modelActivity,
     dependencies = {},
   }: ServiceOptions) {
     this.#stateFile = stateFile;
@@ -138,6 +145,7 @@ export class AutoNameService {
     this.#namer = namer;
     this.#env = env;
     this.#dryRun = dryRun;
+    this.#modelActivity = modelActivity;
     this.#dependencies = { ...defaultDependencies, ...dependencies };
   }
 
@@ -320,11 +328,16 @@ export class AutoNameService {
           if (gate.allowed || options.forceModel || options.forceRefresh) {
             markModelAttempt(state, tab.tab_id);
             if (!this.#dryRun) await persist();
-            const suggestion = await this.#namer.suggest(details.context);
-            markModelSuccess(state, tab.tab_id, details.context);
-            tabName = suggestion.tab;
-            reason = suggestion.reason;
-            usedModel = true;
+            const stopActivity = await this.#modelActivity?.(tab);
+            try {
+              const suggestion = await this.#namer.suggest(details.context);
+              markModelSuccess(state, tab.tab_id, details.context);
+              tabName = suggestion.tab;
+              reason = suggestion.reason;
+              usedModel = true;
+            } finally {
+              await stopActivity?.();
+            }
           } else {
             reason = "unchanged or rate-limited context";
           }
@@ -406,6 +419,7 @@ interface CompositionOptions {
   env?: NodeJS.ProcessEnv;
   dryRun?: boolean;
   namer?: Namer;
+  modelActivity?: ModelActivity;
   dependencies?: Partial<ServiceDependencies>;
 }
 
@@ -414,6 +428,7 @@ export function createService({
   env = process.env,
   dryRun = false,
   namer = new AiSdkNamer(env),
+  modelActivity,
   dependencies = {},
 }: CompositionOptions = {}): AutoNameService {
   const paths = stateDir ? statePaths(stateDir) : null;
@@ -423,6 +438,7 @@ export function createService({
     namer,
     env,
     dryRun,
+    ...(modelActivity ? { modelActivity } : {}),
     dependencies,
   });
 }

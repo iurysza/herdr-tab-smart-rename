@@ -6,6 +6,7 @@ import path from "node:path";
 import { currentResultNotice, dispatch } from "../src/cli.ts";
 import { type RenameResult } from "../src/domain.ts";
 import { acquireLock, pidAlive, workerInfo } from "../src/storage.ts";
+import { shouldIgnoreProgressRename } from "../src/worker.ts";
 
 test("CLI dispatch routes actions without executing on import", async () => {
   const calls: Array<[string, { dryRun: boolean }]> = [];
@@ -20,6 +21,14 @@ test("CLI dispatch routes actions without executing on import", async () => {
     ["once", { dryRun: true }],
   ]);
   await assert.rejects(dispatch("unknown", { actions }), /^Error: usage:/);
+
+  const progress = new Map<string, string>();
+  assert.equal(
+    shouldIgnoreProgressRename(progress, "t1", "\u2063◆ Review Auth"),
+    true,
+  );
+  assert.equal(shouldIgnoreProgressRename(progress, "t1", "Review Auth"), true);
+  assert.equal(shouldIgnoreProgressRename(progress, "t1", "Manual Name"), false);
 
   const result: RenameResult = {
     dryRun: false,

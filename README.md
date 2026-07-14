@@ -47,7 +47,7 @@ command = "tab-smart-rename.rename-all"
 description = "force smart rename all tabs"
 ```
 
-Every explicit rename ends with a notification: renamed, not renamed, or failed.
+Every explicit rename ends with a notification: renamed, not renamed, or failed. During a model-backed current-tab rename, a diamond pulse appears before its label.
 
 ## Actions
 

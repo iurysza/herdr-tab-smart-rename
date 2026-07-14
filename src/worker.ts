@@ -4,6 +4,7 @@ import { type Socket } from "node:net";
 import {
   snapshot,
   subscribe,
+  tabProgressBase,
   type HerdrEvent,
   type HerdrSnapshot,
 } from "./herdr.ts";
@@ -15,6 +16,21 @@ import {
 } from "./storage.ts";
 
 export const SWEEP_INTERVAL_MS = 60_000;
+
+export function shouldIgnoreProgressRename(
+  progressBases: Map<string, string>,
+  tabId: string,
+  label: string,
+): boolean {
+  const progressBase = tabProgressBase(label);
+  if (progressBase !== null) {
+    progressBases.set(tabId, progressBase);
+    return true;
+  }
+  const restoring = progressBases.get(tabId);
+  progressBases.delete(tabId);
+  return restoring === label;
+}
 
 export async function runWorker(
   env: NodeJS.ProcessEnv = process.env,
@@ -41,6 +57,7 @@ export async function runWorker(
   let work = Promise.resolve();
   let sweepQueued = false;
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const progressBases = new Map<string, string>();
 
   const enqueue = (task: () => Promise<void>): Promise<void> => {
     work = work
@@ -98,10 +115,17 @@ export async function runWorker(
       return;
     }
     if (event.type === "tab_renamed" && event.tab_id && event.label) {
+      if (shouldIgnoreProgressRename(progressBases, event.tab_id, event.label)) {
+        return;
+      }
       await service.acknowledge("tab", event.tab_id, event.label);
       return;
     }
-    if (event.type === "tab_closed" || event.type === "workspace_closed") return;
+    if (event.type === "tab_closed") {
+      if (event.tab_id) progressBases.delete(event.tab_id);
+      return;
+    }
+    if (event.type === "workspace_closed") return;
 
     const current = await snapshot(env);
     const pane = event.pane_id
