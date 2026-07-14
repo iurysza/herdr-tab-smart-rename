@@ -1,10 +1,13 @@
+
+
+
 <p align="center">
   <img src="assets/herdr-tab-smart-rename-banner.png" width="720" alt="Magic wand naming a Herdr tab">
 </p>
 
 <h1 align="center">herdr-tab-smart-rename</h1>
 
-<p align="center"><strong>Herdr tabs that say what the work is.</strong></p>
+<p align="center"><strong>Tabs that say what the work is.</strong></p>
 
 Smart Rename turns default workspace and tab numbers into short task labels while leaving user-chosen names alone.
 
@@ -14,7 +17,12 @@ Smart Rename turns default workspace and tab numbers into short task labels whil
 5  ->  Dev Server
 ```
 
-Obvious processes get instant deterministic names. Ambiguous work can use Kimi Code or another OpenAI-compatible model.
+Uses an OpenAI-compatible model to rename the tab based on its content. Great for when you cant remember wth was this agent doing in the first place.
+
+
+## Demo
+
+https://github.com/user-attachments/assets/25d6b133-bea5-4244-a1d7-45cc51b2c2c8
 
 ## Install
 
