@@ -10,5 +10,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "3.0.9",
+    "ai": "7.0.26"
   }
 }

@@ -6,7 +6,7 @@
 
 <p align="center"><strong>Herdr tabs that say what the work is.</strong></p>
 
-Smart Rename replaces default workspace and tab labels with short, context-aware names. User-chosen names stay untouched.
+Smart Rename replaces default workspace and tab labels with short, context-aware names. User-chosen names stay untouched. Model calls use a standalone OpenAI-compatible provider; Pi is not required for inference.
 
 ```text
 3  ->  Repair Tab Ownership
@@ -14,7 +14,7 @@ Smart Rename replaces default workspace and tab labels with short, context-aware
 5  ->  Dev Server
 ```
 
-Workspaces describe the project. Tabs describe the task. Smart Rename uses process heuristics for obvious commands and Kimi for ambiguous work.
+Workspaces describe the project. Tabs describe the task. Smart Rename uses process heuristics for obvious commands and the configured model for ambiguous work.
 
 ## Requirements
 
@@ -22,7 +22,7 @@ Workspaces describe the project. Tabs describe the task. Smart Rename uses proce
 | --- | --- |
 | Herdr | 0.7.0 or newer |
 | Node.js | 20 or newer |
-| Pi | `kimi-coding/kimi-for-coding` configured and authenticated |
+| AI provider | Kimi API key or another OpenAI-compatible endpoint |
 
 ## Install
 
@@ -30,13 +30,23 @@ From GitHub:
 
 ```sh
 herdr plugin install iurysza/herdr-tab-smart-rename
+herdr plugin action invoke configure-ai --plugin autoname
+herdr plugin action invoke check-ai --plugin autoname
 herdr plugin action invoke start --plugin autoname
 ```
 
-For local development:
+Kimi Code is the default. The configure action opens a private `provider.env` under Herdr's managed plugin config directory. Usually, only one line is needed:
+
+```dotenv
+SMART_RENAME_API_KEY=...
+```
+
+For local development, install dependencies before linking. Herdr does not run plugin build commands for local links.
 
 ```sh
-herdr plugin link /path/to/herdr-tab-smart-rename
+cd /path/to/herdr-tab-smart-rename
+npm install
+herdr plugin link "$PWD"
 herdr plugin action invoke start --plugin autoname
 ```
 
@@ -51,7 +61,7 @@ Linking registers the plugin but does not start it. Smart Rename runs as a detac
 | Vite, Next.js, Webpack, or another dev server | `Dev Server` |
 | `tail`, `journalctl`, or `docker logs` | `View Logs` |
 | SSH or Mosh | `Remote Shell` |
-| Ambiguous command with enough context | Kimi-generated task label |
+| Ambiguous command with enough context | AI-generated task label |
 | No meaningful task | Existing/default label stays unchanged |
 
 Labels use 2–4 words, readable Title Case, and at most 30 characters. Model, agent, app, and project prefixes are excluded.
@@ -69,7 +79,7 @@ Smart Rename selects one dominant pane per tab:
 
 Supporting servers and logs do not displace an active agent task.
 
-Recognized processes get deterministic labels. Agent tasks and unclear commands may go to Kimi. Weak command context must remain stable across two observations before a model call, and Kimi may abstain when the context does not contain a real task.
+Recognized processes get deterministic labels. Agent tasks and unclear commands may go to the configured model. Weak command context must remain stable across two observations before a model call, and the model may abstain when the context does not contain a real task.
 
 A serialized sweep runs every 60 seconds to catch task changes that do not emit Herdr lifecycle events. Successful context fingerprints are not sent again. Model attempts are limited to once per tab every ten minutes.
 
@@ -77,7 +87,7 @@ A serialized sweep runs every 60 seconds to catch task changes that do not emit 
 
 Smart Rename owns only default labels and labels it previously generated.
 
-Before renaming, it records the expected label. A matching Herdr rename event confirms automatic ownership; any other rename locks the item as manual. Manual tabs skip process inspection, session reads, and Kimi calls until reset.
+Before renaming, it records the expected label. A matching Herdr rename event confirms automatic ownership; any other rename locks the item as manual. Manual tabs skip process inspection, session reads, and model calls until reset.
 
 Ownership survives worker restarts. Explicit `rename-now` and `rename-all` actions count as user approval to reclaim their target tabs, bypass model cooldown, and generate fresh names.
 
@@ -88,6 +98,8 @@ Ownership survives worker restarts. Explicit `rename-now` and `rename-all` actio
 | `start` | Start one detached worker. Repeated starts are harmless. |
 | `stop` | Stop the verified worker process. |
 | `status` | Report worker status. |
+| `configure-ai` | Open the private provider config in a Herdr overlay. |
+| `check-ai` | Validate provider settings without making a billed request. |
 | `rename-now` | Reclaim and rename the current tab immediately. |
 | `rename-all` | Reclaim and rename every tab sequentially. |
 | `reset-tab` | Return the current tab to automatic ownership and evaluate it. |
@@ -99,6 +111,8 @@ Invoke actions from Herdr's action picker or the CLI:
 
 ```sh
 herdr plugin action invoke status --plugin autoname
+herdr plugin action invoke configure-ai --plugin autoname
+herdr plugin action invoke check-ai --plugin autoname
 herdr plugin action invoke rename-now --plugin autoname
 herdr plugin action invoke rename-all --plugin autoname
 herdr plugin action invoke stop --plugin autoname
@@ -122,7 +136,7 @@ description = "force smart rename all tabs"
 
 ## Context and privacy
 
-Kimi receives at most 4,500 serialized characters of sanitized context.
+The configured model receives at most 4,500 serialized characters of sanitized context.
 
 For a detected Pi agent, Smart Rename samples three bounded parts of the session file:
 
@@ -134,7 +148,20 @@ Recent requests win when the task changed. Assistant messages are excluded.
 
 For ordinary commands, Smart Rename uses bounded process details and a small recent-output sample. Sibling panes contribute process summaries only; their session content is never read.
 
-Smart Rename does not add environment values to prompts. It removes terminal escapes, normalizes home paths, and redacts common credential forms on a best-effort basis. Pi runs without sessions, tools, skills, prompt templates, themes, or project context files. Normal extension loading remains enabled for the Kimi OAuth provider.
+Smart Rename does not add environment values to prompts. It removes terminal escapes, normalizes home paths, and redacts common credential forms on a best-effort basis. Provider keys stay in Herdr's private plugin config directory and are never written to plugin state or logs. Pi session files are sampled only as naming context; Pi is never launched for model invocation.
+
+## AI provider configuration
+
+Defaults target Kimi Code:
+
+```dotenv
+SMART_RENAME_PROVIDER=kimi-code
+SMART_RENAME_BASE_URL=https://api.kimi.com/coding/v1
+SMART_RENAME_MODEL=kimi-for-coding
+SMART_RENAME_TIMEOUT_MS=45000
+```
+
+`KIMI_API_KEY` is also accepted. To use another OpenAI-compatible provider, set the base URL, model, provider name, and `SMART_RENAME_API_KEY` in `provider.env`. Process-level `SMART_RENAME_*` values override the file. The file reloads before every request, so provider edits do not require a worker restart.
 
 ## Dry run
 
@@ -144,16 +171,16 @@ Preview the current tab without renaming it or changing ownership state:
 node src/cli.mjs dry-run
 ```
 
-A dry run may call Kimi. It respects existing manual locks when plugin state is available.
+A dry run may call the configured model. It respects existing manual locks when plugin state is available.
 
 ## Refresh and failure behavior
 
 - Reconnects when the Herdr socket closes.
 - Serializes worker and action state updates with a cross-process lock.
 - Recovers stale state locks and stale worker PID files.
-- Leaves labels unchanged when Kimi abstains or fails.
+- Leaves labels unchanged when the model abstains or fails.
 - Retries failed model requests after the ten-minute backoff.
-- Uses one fresh Pi RPC process per model request.
+- Uses one non-streaming AI SDK request per model attempt.
 
 Runtime state and logs live under:
 
@@ -168,13 +195,13 @@ npm run check
 npm test
 ```
 
-Smart Rename has no runtime npm dependencies. Herdr socket, Pi RPC, and Pi session JSONL are framed on LF only.
+Runtime model calls use Vercel AI SDK v7 and `@ai-sdk/openai-compatible`. Herdr socket messages and Pi session JSONL are framed on LF only.
 
 ## Troubleshooting
 
 - Worker not running: `herdr plugin action invoke start --plugin autoname`
 - Current label never changes: check whether it is manual-locked; use `reset-tab` if AutoName should own it.
-- Kimi authentication failure: authenticate `kimi-coding/kimi-for-coding` in Pi.
+- AI config missing: run `herdr plugin action invoke configure-ai --plugin autoname`, then `check-ai`.
 - Unexpected model label: run `node src/cli.mjs dry-run` and review [`docs/naming-policy.md`](docs/naming-policy.md).
 - Worker details: `herdr plugin log list --plugin autoname --limit 10`
 

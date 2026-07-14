@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { appendFile, chmod, readFile, rm } from "node:fs/promises";
-import { PiRpc, snapshot, subscribe } from "./integrations.mjs";
+import { snapshot, subscribe } from "./integrations.mjs";
+import { AiSdkNamer } from "./provider.mjs";
 import {
   AutoNameService,
   ensurePrivateDir,
@@ -21,11 +22,11 @@ async function log(message) {
   await chmod(paths.log, 0o600).catch(() => {});
 }
 
-const pi = new PiRpc(process.env);
+const namer = new AiSdkNamer(process.env);
 const service = new AutoNameService({
   stateFile: paths.state,
   stateLock: paths.stateLock,
-  pi,
+  namer,
 });
 await service.initialize();
 
@@ -146,7 +147,7 @@ async function shutdown(signal) {
   clearInterval(sweepTimer);
   for (const timer of timers.values()) clearTimeout(timer);
   socket?.destroy();
-  pi.close();
+  namer.close();
   await work.catch(() => {});
   try {
     const info = JSON.parse(await readFile(paths.pid, "utf8"));

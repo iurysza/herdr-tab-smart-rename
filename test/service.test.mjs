@@ -93,7 +93,7 @@ test("all-tab evaluation visits every tab sequentially", async () => {
   const visits = [];
   const service = new AutoNameService({
     dryRun: true,
-    pi: { suggest: async () => { throw new Error("unexpected model call"); } },
+    namer: { suggest: async () => { throw new Error("unexpected model call"); } },
     dependencies: {
       snapshot: async () => snap,
       focusedPaneContext: async (pane) => {
@@ -129,7 +129,7 @@ test("weak command context waits for stability before model abstention", async (
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
-    pi: {
+    namer: {
       suggest: async () => {
         modelCalls += 1;
         return { tab: null, reason: "no meaningful task" };
@@ -169,7 +169,7 @@ test("forced evaluation bypasses unchanged-context model gating", async () => {
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
-    pi: {
+    namer: {
       suggest: async () => {
         modelCalls += 1;
         return { tab: "Forced Rename", reason: "task" };
@@ -214,7 +214,7 @@ test("manual ownership skips context reads and model calls", async () => {
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
-    pi: { suggest: async () => { modelCalls += 1; throw new Error("unexpected"); } },
+    namer: { suggest: async () => { modelCalls += 1; throw new Error("unexpected"); } },
     dependencies: {
       snapshot: async () => snap,
       focusedPaneContext: async () => { throw new Error("unexpected context read"); },
@@ -239,7 +239,7 @@ test("explicit refresh reclaims a manual tab", async () => {
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
-    pi: {
+    namer: {
       suggest: async () => ({ tab: "Fresh Task Name", reason: "current task" }),
     },
     dependencies: {
@@ -278,7 +278,7 @@ test("concurrent evaluations reconcile against fresh locked snapshots", async ()
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
-    pi: { suggest: async () => { throw new Error("unexpected model call"); } },
+    namer: { suggest: async () => { throw new Error("unexpected model call"); } },
     dependencies: {
       snapshot: async () => current(),
       focusedPaneContext: async () => ({
@@ -313,7 +313,7 @@ test("expected label is durable before rename and event acknowledgement", async 
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
-    pi: { suggest: async () => ({ tab: "Socket Reconnect", reason: "task" }) },
+    namer: { suggest: async () => ({ tab: "Socket Reconnect", reason: "task" }) },
     dependencies: {
       snapshot: async () => snap,
       focusedPaneContext: async () => ({
@@ -350,7 +350,7 @@ test("failed model calls persist attempt backoff only", async () => {
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
-    pi: { suggest: async () => { throw new Error("provider unavailable"); } },
+    namer: { suggest: async () => { throw new Error("provider unavailable"); } },
     dependencies: {
       snapshot: async () => snap,
       focusedPaneContext: async () => ({
@@ -386,7 +386,7 @@ test("dry-run does not create state or call rename", async () => {
     stateFile: paths.state,
     stateLock: paths.stateLock,
     dryRun: true,
-    pi: { suggest: async () => ({ tab: "Auto Tab Naming", reason: "task" }) },
+    namer: { suggest: async () => ({ tab: "Auto Tab Naming", reason: "task" }) },
     dependencies: {
       focusedPaneContext: async () => ({
         focused: true,

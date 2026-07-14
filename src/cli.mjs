@@ -5,7 +5,8 @@ import { chmod as chmodAsync, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sanitize } from "./core.mjs";
-import { PiRpc, run, snapshot } from "./integrations.mjs";
+import { run, snapshot } from "./integrations.mjs";
+import { AiSdkNamer, loadProviderConfig } from "./provider.mjs";
 import {
   AutoNameService,
   ensurePrivateDir,
@@ -125,11 +126,11 @@ async function renameAll() {
   const stateDir = requireStateDir();
   await ensurePrivateDir(stateDir);
   const paths = statePaths(stateDir);
-  const pi = new PiRpc(process.env);
+  const namer = new AiSdkNamer(process.env);
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
-    pi,
+    namer,
   });
   try {
     const initial = await service.initialize();
@@ -140,7 +141,7 @@ async function renameAll() {
     console.log(JSON.stringify(results, null, 2));
     return results;
   } finally {
-    pi.close();
+    namer.close();
   }
 }
 
@@ -156,11 +157,11 @@ async function once(resetKind = null, forceRefresh = false) {
     : requireStateDir();
   if (stateDir) await ensurePrivateDir(stateDir);
   const paths = stateDir ? statePaths(stateDir) : null;
-  const pi = new PiRpc(process.env);
+  const namer = new AiSdkNamer(process.env);
   const service = new AutoNameService({
     stateFile: paths?.state ?? null,
     stateLock: paths?.stateLock ?? null,
-    pi,
+    namer,
     dryRun,
   });
   try {
@@ -178,7 +179,37 @@ async function once(resetKind = null, forceRefresh = false) {
     console.log(JSON.stringify(result, null, 2));
     return result;
   } finally {
-    pi.close();
+    namer.close();
+  }
+}
+
+async function configureAi() {
+  await run(
+    process.env.HERDR_BIN_PATH || "herdr",
+    [
+      "plugin",
+      "pane",
+      "open",
+      "--plugin",
+      "autoname",
+      "--entrypoint",
+      "provider-config",
+      "--placement",
+      "overlay",
+    ],
+    { env: process.env },
+  );
+}
+
+async function checkAi() {
+  try {
+    const config = await loadProviderConfig(process.env);
+    const summary = `${config.provider}/${config.model}`;
+    await notify("AI ready", summary);
+    console.log(summary);
+  } catch (error) {
+    await notify("Config missing", error.message, "request");
+    throw error;
   }
 }
 
@@ -186,6 +217,8 @@ try {
   if (command === "start") await start();
   else if (command === "stop") await stop();
   else if (command === "status") await status();
+  else if (command === "configure-ai") await configureAi();
+  else if (command === "check-ai") await checkAi();
   else if (command === "once" || command === "dry-run") await once();
   else if (command === "rename-now") {
     await notify("Renaming tab");
@@ -209,7 +242,7 @@ try {
   else if (command === "reset-workspace") await once("workspace", true);
   else {
     throw new Error(
-      "usage: cli.mjs start|stop|status|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-workspace",
+      "usage: cli.mjs start|stop|status|configure-ai|check-ai|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-workspace",
     );
   }
 } catch (error) {

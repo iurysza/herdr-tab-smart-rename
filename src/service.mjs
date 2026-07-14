@@ -126,14 +126,14 @@ export class AutoNameService {
   constructor({
     stateFile,
     stateLock,
-    pi,
+    namer,
     env = process.env,
     dryRun = false,
     dependencies = {},
   }) {
     this.stateFile = stateFile;
     this.stateLock = stateLock;
-    this.pi = pi;
+    this.namer = namer;
     this.env = env;
     this.dryRun = dryRun;
     this.dependencies = { ...defaultDependencies, ...dependencies };
@@ -291,7 +291,7 @@ export class AutoNameService {
           if (gate.allowed || options.forceModel || options.forceRefresh) {
             markModelAttempt(state, tab.tab_id);
             if (!this.dryRun) await persist();
-            const suggestion = await this.pi.suggest(details.context);
+            const suggestion = await this.namer.suggest(details.context);
             markModelSuccess(state, tab.tab_id, details.context);
             tabName = suggestion.tab;
             reason = suggestion.reason;

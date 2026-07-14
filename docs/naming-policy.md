@@ -15,7 +15,7 @@ Smart Rename owns only default labels or labels it previously generated.
 
 - Any meaningful pre-existing label is manual.
 - Any rename that does not match Smart Rename's expected write becomes manual.
-- Manual workspaces and tabs are not inspected, sent to Kimi, or renamed.
+- Manual workspaces and tabs are not inspected, sent to the AI provider, or renamed.
 - Reset and explicit rename actions return their target tabs to Smart Rename ownership.
 
 ## Workspace names
@@ -78,10 +78,10 @@ Sibling panes may provide bounded process summaries, but never agent conversatio
    - development servers → `Dev Server`;
    - log followers → `View Logs`;
    - SSH or Mosh → `Remote Shell`.
-4. For a detected agent with user task evidence, ask Kimi immediately.
+4. For a detected agent with user task evidence, ask the configured model immediately.
 5. Agent session evidence is weighted across the timeline: first request, one midpoint request, and the latest four requests. Recent requests win when the task changed.
-6. For an unclear ordinary command, wait until the sanitized context is unchanged across two observations, then ask Kimi.
-7. Kimi may return `null` when there is no meaningful task. In that case, keep the current/default label.
+6. For an unclear ordinary command, wait until the sanitized context is unchanged across two observations, then ask the configured model.
+7. The model may return `null` when there is no meaningful task. In that case, keep the current/default label.
 8. Never rename when the candidate equals the current label.
 
 Broad AI naming remains enabled for ordinary commands. Stability and abstention guard against shell-startup noise and project-name guesses.
@@ -90,16 +90,16 @@ Broad AI naming remains enabled for ordinary commands. Stability and abstention 
 
 - Relevant Herdr lifecycle events are debounced briefly.
 - A serialized sweep runs every 60 seconds for task changes without events.
-- Background Kimi attempts are limited to once per tab every 10 minutes.
+- Background model attempts are limited to once per tab every 10 minutes.
 - Background evaluation does not resend an unchanged successful context fingerprint.
 - Explicit current-tab and all-tab actions bypass both limits and request fresh names.
 - Manual overrides remain locked across restarts. Explicit current/all rename actions are user-approved overrides: they reclaim their target tabs and bypass model cooldown.
 
 A strong deterministic process transition can rename immediately. A weak AI-derived transition should wait for stable evidence.
 
-## Kimi input
+## Model input
 
-Kimi receives at most 4,500 serialized characters of sanitized context.
+The configured OpenAI-compatible model receives at most 4,500 serialized characters of sanitized context. Kimi Code is the default provider. Pi session sampling is context collection only; Smart Rename does not invoke Pi as a model provider.
 
 - Detected focused Pi agent: one origin request, one midpoint request, and up to four recent user requests.
 - Ordinary focused command: bounded process data and recent output.
