@@ -99,6 +99,19 @@ Run `configure-prompt` to create and open your private copy:
 herdr plugin action invoke configure-prompt --plugin autoname
 ```
 
+You can replace the default policy with something as short as:
+
+```md
+Name the current persistent task.
+
+- Use 2–4 Title Case words, at most 30 characters.
+- Start with an action verb.
+- Omit project, app, agent, and model names.
+
+Return JSON only: {"tab":"Assess Python Migration","reason":"The user is researching migration effort."}
+If unclear: {"tab":null,"reason":"no meaningful task"}
+```
+
 Your copy lives at `~/.config/herdr/plugins/config/autoname/naming-prompt.md` and survives plugin updates. To keep the bundled policy instead, do nothing. To use another file, set `SMART_RENAME_PROMPT_PATH` in `provider.env`; relative paths resolve from the plugin config directory.
 
 Smart Rename reloads the prompt before every model request. Output still must satisfy the built-in JSON and label validation.
