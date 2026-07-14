@@ -26,12 +26,12 @@ Requires Herdr 0.7.0 or newer and Bun 1.1.34 or newer.
 
 ```sh
 herdr plugin install iurysza/herdr-tab-smart-rename
-herdr plugin action invoke configure-ai --plugin autoname
-herdr plugin action invoke check-ai --plugin autoname
-herdr plugin action invoke start --plugin autoname
+herdr plugin action invoke configure-ai --plugin tab-smart-rename
+herdr plugin action invoke check-ai --plugin tab-smart-rename
+herdr plugin action invoke start --plugin tab-smart-rename
 ```
 
-`configure-ai` opens `~/.config/herdr/plugins/config/autoname/provider.env`. Add your OpenAI key:
+`configure-ai` opens `~/.config/herdr/plugins/config/tab-smart-rename/provider.env`. Add your OpenAI key:
 
 ```dotenv
 OPENAI_API_KEY=...
@@ -47,13 +47,13 @@ Suggested Herdr bindings:
 [[keys.command]]
 key = "prefix+t"
 type = "plugin_action"
-command = "autoname.rename-now"
+command = "tab-smart-rename.rename-now"
 description = "smart rename current tab"
 
 [[keys.command]]
 key = "prefix+alt+t"
 type = "plugin_action"
-command = "autoname.rename-all"
+command = "tab-smart-rename.rename-all"
 description = "force smart rename all tabs"
 ```
 
@@ -71,7 +71,7 @@ description = "force smart rename all tabs"
 Run any action with:
 
 ```sh
-herdr plugin action invoke <action> --plugin autoname
+herdr plugin action invoke <action> --plugin tab-smart-rename
 ```
 
 Explicit rename actions reclaim manual tabs and request fresh names.
@@ -96,7 +96,7 @@ The [naming policy](docs/naming-policy.md) is both the human-readable contract a
 Run `configure-prompt` to create and open your private copy:
 
 ```sh
-herdr plugin action invoke configure-prompt --plugin autoname
+herdr plugin action invoke configure-prompt --plugin tab-smart-rename
 ```
 
 You can replace the default policy with something as short as:
@@ -112,7 +112,7 @@ Return JSON only: {"tab":"Assess Python Migration","reason":"The user is researc
 If unclear: {"tab":null,"reason":"no meaningful task"}
 ```
 
-Your copy lives at `~/.config/herdr/plugins/config/autoname/naming-prompt.md` and survives plugin updates. To keep the bundled policy instead, do nothing. To use another file, set `SMART_RENAME_PROMPT_PATH` in `provider.env`; relative paths resolve from the plugin config directory.
+Your copy lives at `~/.config/herdr/plugins/config/tab-smart-rename/naming-prompt.md` and survives plugin updates. To keep the bundled policy instead, do nothing. To use another file, set `SMART_RENAME_PROMPT_PATH` in `provider.env`; relative paths resolve from the plugin config directory.
 
 Smart Rename reloads the prompt before every model request. Output still must satisfy the built-in JSON and label validation.
 
@@ -142,11 +142,11 @@ Smart Rename never starts Pi or reads its credentials. Your AI provider key stay
 
 ## Troubleshooting
 
-- Worker stopped: `herdr plugin action invoke start --plugin autoname`
+- Worker stopped: `herdr plugin action invoke start --plugin tab-smart-rename`
 - Provider missing: run `configure-ai`, save the key, then run `check-ai`.
 - Manual label stays unchanged: use `reset-tab` or an explicit rename action.
 - No model name appears: the model may have found no meaningful task.
-- Worker logs: `herdr plugin log list --plugin autoname --limit 10`
+- Worker logs: `herdr plugin log list --plugin tab-smart-rename --limit 10`
 
 ## Project documentation
 

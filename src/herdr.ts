@@ -279,7 +279,7 @@ export function subscribe(
   socket.on("connect", () => {
     socket.write(
       `${JSON.stringify({
-        id: "autoname-subscribe",
+        id: "tab-smart-rename-subscribe",
         method: "events.subscribe",
         params: {
           subscriptions: LIFECYCLE_SUBSCRIPTIONS.map((type) => ({ type })),

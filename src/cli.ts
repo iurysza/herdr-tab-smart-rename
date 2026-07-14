@@ -182,7 +182,7 @@ async function openConfigPane(entrypoint: string): Promise<void> {
       "pane",
       "open",
       "--plugin",
-      "autoname",
+      "tab-smart-rename",
       "--entrypoint",
       entrypoint,
       "--placement",

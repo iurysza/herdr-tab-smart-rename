@@ -1,4 +1,4 @@
-id = "autoname"
+id = "tab-smart-rename"
 name = "Smart Rename"
 version = "0.1.0"
 min_herdr_version = "0.7.0"

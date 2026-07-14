@@ -31,7 +31,7 @@ test("locks recover dead owners and workers require exact Bun scripts", async ()
   );
   assert.equal(pidAlive(1, () => true), false);
 
-  const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-runtime-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-runtime-"));
   const lock = path.join(dir, "state.lock");
   const pidFile = path.join(dir, "worker.json");
   const expected = "/repo/herdr-tab-smart-rename/src/worker.ts";

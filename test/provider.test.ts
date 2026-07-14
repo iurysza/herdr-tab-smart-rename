@@ -192,6 +192,7 @@ test("manifest and source use Bun without Pi model coupling", async () => {
     new URL("../herdr-plugin.toml", import.meta.url),
     "utf8",
   );
+  assert.match(manifest, /^id = "tab-smart-rename"$/m);
   assert.match(
     manifest,
     /command = \["bun", "install", "--production", "--frozen-lockfile"\]/,

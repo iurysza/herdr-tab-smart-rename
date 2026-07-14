@@ -38,7 +38,7 @@ test("Herdr events normalize while subscriptions avoid output spam", () => {
 });
 
 test("Pi session sampling weights origin, midpoint, and recent requests", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "autoname-samples-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-samples-"));
   const agentDir = path.join(root, "agent");
   const sessions = path.join(agentDir, "sessions", "project");
   const session = path.join(sessions, "session.jsonl");
@@ -78,7 +78,7 @@ test("Pi session sampling weights origin, midpoint, and recent requests", async 
 });
 
 test("Pi session reads stay bounded to regular files under the sessions root", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "autoname-session-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-session-"));
   const agentDir = path.join(root, "agent");
   const sessions = path.join(agentDir, "sessions", "project");
   const session = path.join(sessions, "session.jsonl");

@@ -104,7 +104,7 @@ test("working agents outrank focused supporting commands", () => {
 });
 
 test("state transactions serialize concurrent writers", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-state-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-state-"));
   const paths = statePaths(dir);
   try {
     await Promise.all(
@@ -121,7 +121,7 @@ test("state transactions serialize concurrent writers", async () => {
 });
 
 test("all-tab dry run visits tabs sequentially without writing state", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-dry-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-dry-"));
   const paths = statePaths(dir);
   const snap = liveSnapshot();
   snap.tabs.push({ tab_id: "t2", workspace_id: "w1", label: "2", number: 2 });
@@ -157,7 +157,7 @@ test("all-tab dry run visits tabs sequentially without writing state", async () 
 });
 
 test("manual ownership short-circuits context and model work", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-manual-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-manual-"));
   const paths = statePaths(dir);
   const snap = liveSnapshot("Manual Task");
   const service = new AutoNameService({
@@ -181,7 +181,7 @@ test("manual ownership short-circuits context and model work", async () => {
 });
 
 test("explicit refresh reclaims manual tabs and bypasses model gates", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-force-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-force-"));
   const paths = statePaths(dir);
   const snap = liveSnapshot("Manual Task");
   let calls = 0;
@@ -224,7 +224,7 @@ test("explicit refresh reclaims manual tabs and bypasses model gates", async () 
 });
 
 test("concurrent evaluations keep expected writes durable and avoid stale races", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-race-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-race-"));
   const paths = statePaths(dir);
   let label = "1";
   const current = () => liveSnapshot(label);
@@ -256,7 +256,7 @@ test("concurrent evaluations keep expected writes durable and avoid stale races"
 });
 
 test("failed model calls persist attempt backoff without success fingerprint", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "autoname-failure-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-failure-"));
   const paths = statePaths(dir);
   const snap = liveSnapshot();
   const service = new AutoNameService({
