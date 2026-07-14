@@ -93,6 +93,8 @@ Ownership survives worker restarts. Explicit `rename-now` and `rename-all` actio
 | `reset-tab` | Return the current tab to automatic ownership and evaluate it. |
 | `reset-workspace` | Return the current workspace to automatic ownership and evaluate it. |
 
+Explicit rename actions show a Herdr toast when they start and when they finish. Failures include the sanitized error and use Herdr's request sound; start and success toasts are silent.
+
 Invoke actions from Herdr's action picker or the CLI:
 
 ```sh
