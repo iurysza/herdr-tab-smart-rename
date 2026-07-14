@@ -10,6 +10,7 @@ Smart Rename turns live Herdr activity into stable workspace names and current-t
 | Tab task | The current persistent task, expressed as a 2 to 4 word label | `domain.ts` |
 | Ownership | Whether Smart Rename or the user controls a label | `domain.ts`, `storage.ts` |
 | Expected write | A rename recorded before Herdr applies it, so its event is not mistaken for a manual rename | `domain.ts`, `service.ts` |
+| Rename activity | A guarded `◇ ◈ ◆ ◈` prefix shown only during current-tab model calls | `cli.ts`, `service.ts`, `herdr.ts`, `worker.ts` |
 | Dominant pane | The pane that supplies task evidence: focused agent, active agent, focused command, then first pane | `service.ts` |
 | Naming context | Bounded project, process, terminal, and optional Pi session evidence sent to the namer | `domain.ts`, `herdr.ts`, `pi-context.ts` |
 | Name suggestion | A validated label and reason, or `null` when evidence does not describe a task | `provider.ts` |
@@ -35,10 +36,10 @@ flowchart TB
 
 | Layer | Files | Responsibility |
 | --- | --- | --- |
-| Entrypoints | `cli.ts`, `configure.ts`, `worker.ts` | Translate Herdr actions and events into service calls |
-| Orchestration | `service.ts` | Reconcile ownership, collect context, choose a naming path, and apply safe writes |
+| Entrypoints | `cli.ts`, `configure.ts`, `worker.ts` | Translate Herdr actions and events into service calls while filtering owned activity events |
+| Orchestration | `service.ts` | Reconcile ownership, collect context, wrap model calls with optional activity, and apply safe writes |
 | Domain | `domain.ts` | Hold pure naming, ownership, validation, context, and churn rules |
-| Herdr integration | `herdr.ts` | Run Herdr commands, validate snapshots, inspect panes, rename labels, and frame socket events |
+| Herdr integration | `herdr.ts` | Run Herdr commands, validate snapshots, inspect panes, manage guarded progress labels, and frame socket events |
 | Pi context | `pi-context.ts` | Read bounded user requests from allowed Pi session files |
 | Provider | `provider.ts` | Merge exposed defaults and overrides, reload the naming prompt, call one OpenAI-compatible model, and validate its answer |
 | Persistence | `storage.ts` | Validate state, write atomically, serialize processes, and verify the singleton worker |
@@ -55,6 +56,7 @@ flowchart TB
 - Provider independence: Pi supplies optional context only. Model authentication comes from Smart Rename's private provider file.
 - User customization: provider and prompt files reload per request; fixed schemas still reject unsafe or malformed output.
 - Feedback: explicit actions emit start, success, no-change, and sanitized failure notifications.
+- Activity ownership: temporary labels carry an invisible marker, rotate only for `rename-now`, stop on external changes, and restore only the plugin's exact last write.
 
 ## Data Flow Paths
 
@@ -76,8 +78,14 @@ sequenceDiagram
     alt deterministic process
         S->>S: choose fixed label
     else ambiguous task
+        opt current-tab action
+            S->>H: guarded diamond pulse
+        end
         S->>N: bounded NamingContext
         N-->>S: NameSuggestion
+        opt current-tab action
+            S->>H: restore original label
+        end
     end
     S->>F: persist expected label
     S->>H: rename workspace or tab
@@ -124,6 +132,7 @@ sequenceDiagram
 | Model context | pane evidence | dominant-pane selection, sanitization, timeline weighting, 4,500-character hard cap | `NamingContext` |
 | Model response | provider text | JSON fence removal, JSON parse, Zod validation, title policy | `NameSuggestion` |
 | State file | JSON on disk | lock, Zod validation, reconciliation, atomic temporary-file rename | `SmartRenameState` |
+| Progress label | current tab label | invisible marker, one-cell diamond frame, exact-label guard | transient prefixed label or original label |
 | Herdr rename | candidate label | expected-write persistence before command | confirmed automatic ownership or rollback |
 
-Updated-at: 974c94d5f6401b17295d752184f93c898f896b19
+Updated-at: 7e32aa2d5e70910bedbadb0e06dcdfde50767317

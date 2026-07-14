@@ -27,12 +27,12 @@ flowchart LR
 
 | Component | Responsibility |
 | --- | --- |
-| `cli.ts` | Dispatch plugin actions, control the worker, run explicit evaluations, and show notifications |
+| `cli.ts` | Dispatch plugin actions, control the worker, enable current-tab model activity, and show notifications |
 | `configure.ts` | Seed private provider and prompt files from tracked templates, then open them in the user's editor |
-| `worker.ts` | Subscribe to events, debounce evaluations, run sweeps, serialize work, reconnect, and shut down cleanly |
-| `service.ts` | Coordinate snapshots, ownership, context, naming, persistence, and rename writes |
+| `worker.ts` | Subscribe to events, ignore owned activity writes, debounce evaluations, run sweeps, reconnect, and shut down cleanly |
+| `service.ts` | Coordinate snapshots, ownership, context, naming, model activity, persistence, and rename writes |
 | `domain.ts` | Define contracts and pure policy for labels, ownership, heuristics, prompts, fingerprints, and cooldowns |
-| `herdr.ts` | Validate and translate Herdr CLI and socket data |
+| `herdr.ts` | Validate Herdr data and manage guarded temporary and final rename writes |
 | `pi-context.ts` | Sample bounded user requests from approved Pi session files |
 | `provider.ts` | Resolve file-based defaults and overrides, reload the naming prompt, call the AI SDK, and validate model output |
 | `storage.ts` | Manage state paths, private permissions, atomic files, locks, worker identity, and stale recovery |
@@ -82,7 +82,7 @@ There is no external queue. The worker uses an in-memory promise chain to serial
 
 1. Herdr emits a workspace, tab, or pane lifecycle event.
 2. The worker validates and normalizes the event.
-3. Rename events acknowledge automatic writes or mark manual ownership.
+3. Marked activity writes and their guarded restoration are ignored; other renames acknowledge automatic writes or mark manual ownership.
 4. Other relevant events resolve a tab and schedule evaluation after 400 milliseconds.
 5. The promise queue runs the service evaluation serially.
 
@@ -110,7 +110,7 @@ flowchart TD
 
 ### Explicit action
 
-`rename-now` and `rename-all` reset automatic ownership for their target tabs. They bypass stability and cooldown gates, then report renamed, unchanged, abstained, or failed outcomes through Herdr notifications.
+`rename-now` and `rename-all` reset automatic ownership for their target tabs and bypass stability and cooldown gates. During a model-backed `rename-now`, the service prefixes the current label with a guarded `◇ ◈ ◆ ◈` pulse. It stops if the label changes externally and restores only its own last write. `rename-all` and background naming remain quiet. Every explicit action reports renamed, unchanged, abstained, or failed through Herdr notifications.
 
 ### Shutdown and recovery
 
@@ -124,6 +124,7 @@ flowchart TD
 - Direct Bun execution removes a JavaScript build step but requires Bun 1.1.34 or newer on every host.
 - Zod schemas add boundary code but prevent external JSON from becoming trusted TypeScript data by assertion.
 - A coarse state lock simplifies cross-process correctness. It also serializes model-backed evaluations.
+- The progress pulse uses temporary Herdr renames because plugins cannot render tab chrome. An invisible marker and exact-label guard prevent those writes from stealing ownership.
 - Deterministic labels avoid model latency and cost. Broad AI naming remains available for ambiguous tasks.
 - The 4,500-character context cap limits exposure and cost but can omit older evidence.
 - GPT-5.6 Luna suits short, high-volume naming, while medium reasoning trades some latency for label quality.
@@ -133,4 +134,4 @@ flowchart TD
 - One worker serves the local Herdr socket. Named or remote socket discovery is not automatic.
 - Closed ownership records and worker logs are not pruned or rotated.
 
-Updated-at: 974c94d5f6401b17295d752184f93c898f896b19
+Updated-at: 7e32aa2d5e70910bedbadb0e06dcdfde50767317
