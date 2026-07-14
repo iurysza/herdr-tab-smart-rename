@@ -133,4 +133,4 @@ flowchart TD
 - One worker serves the local Herdr socket. Named or remote socket discovery is not automatic.
 - Closed ownership records and worker logs are not pruned or rotated.
 
-Updated-at: a26492444fd10f33fb76e8d22f9ecc2969a8dd73
+Updated-at: 762263b84b318ffc7743b26dec2f57226cf24a40

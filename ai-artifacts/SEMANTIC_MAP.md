@@ -126,4 +126,4 @@ sequenceDiagram
 | State file | JSON on disk | lock, Zod validation, reconciliation, atomic temporary-file rename | `SmartRenameState` |
 | Herdr rename | candidate label | expected-write persistence before command | confirmed automatic ownership or rollback |
 
-Updated-at: a26492444fd10f33fb76e8d22f9ecc2969a8dd73
+Updated-at: 762263b84b318ffc7743b26dec2f57226cf24a40
