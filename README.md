@@ -1,28 +1,20 @@
 <p align="center">
-  <img src="assets/herdr-tab-smart-rename-banner.png" width="720" alt="Magic wand naming a Herdr tab">
+  <img src="assets/herdr-tab-smart-rename-banner.png" width="720" alt="Pixel wand renaming a terminal tab">
 </p>
 
 <h1 align="center">herdr-tab-smart-rename</h1>
 
 <p align="center"><strong>Tabs that say what the work is.</strong></p>
 
-Smart Rename turns default workspace and tab numbers into short task labels while leaving user-chosen names alone.
-
-```text
-3  ->  Repair Tab Ownership
-4  ->  Run Tests
-5  ->  Dev Server
-```
-
-Smart Rename labels tabs from their current work—useful when you cannot remember what an agent was doing. Recognized processes get instant deterministic names; ambiguous work uses OpenAI GPT-5.6 Luna by default or another OpenAI-compatible model.
+Smart Rename turns numbered Herdr tabs into short task labels. Known processes get instant names such as `Run Tests`, `Dev Server`, and `View Logs`; ambiguous work uses an OpenAI-compatible model. Manual names always win.
 
 ## Demo
 
 https://github.com/user-attachments/assets/c9d12c33-e458-4a29-986c-c403d64aff02
 
-## Install
+## Quick start
 
-Requires Herdr 0.7.0 or newer and Bun 1.1.34 or newer.
+Requires Herdr 0.7.0+ and Bun 1.1.34+.
 
 ```sh
 herdr plugin install iurysza/herdr-tab-smart-rename
@@ -31,17 +23,15 @@ herdr plugin action invoke check-ai --plugin tab-smart-rename
 herdr plugin action invoke start --plugin tab-smart-rename
 ```
 
-`configure-ai` opens `~/.config/herdr/plugins/config/tab-smart-rename/provider.env`. Add your OpenAI key:
+`configure-ai` opens `~/.config/herdr/plugins/config/tab-smart-rename/provider.env`. For the default OpenAI GPT-5.6 Luna setup, add:
 
 ```dotenv
 OPENAI_API_KEY=...
 ```
 
-The file starts from [`provider.env.example`](provider.env.example), so the endpoint, model, reasoning, and timeout are ready to use. Without a key, deterministic names still work. Model-backed names do not.
+Without a key, deterministic names still work.
 
-## Use
-
-Suggested Herdr bindings:
+## Keybindings
 
 ```toml
 [[keys.command]]
@@ -57,68 +47,36 @@ command = "tab-smart-rename.rename-all"
 description = "force smart rename all tabs"
 ```
 
-| Action | What it does |
-| --- | --- |
-| `rename-now` | Rename the current tab now |
-| `rename-all` | Rename every tab in sequence |
-| `reset-tab` | Return the current tab to automatic naming |
-| `reset-workspace` | Return the current workspace to automatic naming |
-| `configure-ai` | Edit provider settings |
-| `configure-prompt` | Edit the naming instructions |
-| `check-ai` | Check provider and prompt settings without making a model request |
-| `start` / `stop` / `status` | Control or inspect Smart Rename |
+Every explicit rename ends with a notification: renamed, not renamed, or failed.
 
-Run any action with:
+## Actions
+
+| Action | Effect |
+| --- | --- |
+| `rename-now` | Rename the current tab |
+| `rename-all` | Rename every tab |
+| `reset-tab` | Return the current tab to automatic naming |
+| `reset-workspace` | Return the workspace to automatic naming |
+| `configure-ai` | Edit provider settings |
+| `configure-prompt` | Edit naming instructions |
+| `check-ai` | Validate config without calling the provider |
+| `start` / `stop` / `status` | Control the worker |
 
 ```sh
 herdr plugin action invoke <action> --plugin tab-smart-rename
 ```
 
-Explicit rename actions reclaim manual tabs and request fresh names.
+## Naming behavior
 
-## Naming rules
+Smart Rename uses one dominant pane: focused agent, another active agent, focused command, then first pane. Supporting servers and logs never replace an active agent's task.
 
-Smart Rename uses the most relevant pane in each tab:
+Labels use 2–4 Title Case words, stay under 30 characters, and describe the task—not its tool, model, or project. Weak evidence produces no rename. Manual labels remain locked until reset or explicit rename.
 
-1. the focused agent;
-2. another working or blocked agent;
-3. the focused command;
-4. the first pane.
+See the [naming policy](docs/naming-policy.md) for the full contract.
 
-Tests, development servers, log followers, and remote shells become `Run Tests`, `Dev Server`, `View Logs`, and `Remote Shell`. Agent tasks and unclear commands may use the configured model.
+## Configuration
 
-Labels use 2 to 4 Title Case words and no more than 30 characters. Workspaces describe projects. Tabs describe tasks. Manual names always win until you reset or explicitly rename them.
-
-The [naming policy](docs/naming-policy.md) is both the human-readable contract and the default AI system prompt.
-
-## Customize the naming prompt
-
-Run `configure-prompt` to create and open your private copy:
-
-```sh
-herdr plugin action invoke configure-prompt --plugin tab-smart-rename
-```
-
-You can replace the default policy with something as short as:
-
-```md
-Name the current persistent task.
-
-- Use 2–4 Title Case words, at most 30 characters.
-- Start with an action verb.
-- Omit project, app, agent, and model names.
-
-Return JSON only: {"tab":"Assess Python Migration","reason":"The user is researching migration effort."}
-If unclear: {"tab":null,"reason":"no meaningful task"}
-```
-
-Your copy lives at `~/.config/herdr/plugins/config/tab-smart-rename/naming-prompt.md` and survives plugin updates. To keep the bundled policy instead, do nothing. To use another file, set `SMART_RENAME_PROMPT_PATH` in `provider.env`; relative paths resolve from the plugin config directory.
-
-Smart Rename reloads the prompt before every model request. Output still must satisfy the built-in JSON and label validation.
-
-## Choose a provider and model
-
-The defaults are exposed in [`provider.env.example`](provider.env.example):
+Provider defaults live in [`provider.env.example`](provider.env.example):
 
 ```dotenv
 SMART_RENAME_PROVIDER=openai
@@ -128,28 +86,43 @@ SMART_RENAME_REASONING_EFFORT=medium
 SMART_RENAME_TIMEOUT_MS=45000
 ```
 
-Set those values and `SMART_RENAME_API_KEY` to use another OpenAI-compatible provider. `OPENAI_API_KEY` works for OpenAI; `KIMI_API_KEY` works when `SMART_RENAME_PROVIDER=kimi-code`. Reasoning effort accepts `low`, `medium`, or `high` when the model supports it.
+Use `SMART_RENAME_API_KEY` for another OpenAI-compatible provider. `OPENAI_API_KEY` and Kimi's `KIMI_API_KEY` are also supported when their provider is selected. Config reloads before every model request.
 
-Smart Rename reloads `provider.env` before every model request. You do not need to restart the worker after changing it.
+### Custom prompt
+
+The default system prompt is [`docs/naming-policy.md`](docs/naming-policy.md). Create a private editable copy with:
+
+```sh
+herdr plugin action invoke configure-prompt --plugin tab-smart-rename
+```
+
+It opens `~/.config/herdr/plugins/config/tab-smart-rename/naming-prompt.md`. A prompt can be this small:
+
+```md
+Name the current persistent task in 2–4 Title Case words.
+Omit project, app, agent, and model names.
+Return JSON only: {"tab":"Assess Python Migration","reason":"Current task."}
+If unclear: {"tab":null,"reason":"no meaningful task"}
+```
+
+Set `SMART_RENAME_PROMPT_PATH` to use another file. Prompts reload per request; built-in JSON and label validation still applies.
 
 ## Privacy
 
-To name a tab, Smart Rename may send the most relevant pane's command and recent output to your AI provider. If that pane is running Pi, it may also include short excerpts from your requests so the name reflects the actual task.
+Model requests contain bounded, sanitized evidence from the dominant pane. Pi panes may contribute short user-request excerpts; sibling panes contribute process summaries only. Smart Rename removes terminal formatting, common secret shapes, and the local home path before sending context.
 
-Before sending anything, Smart Rename removes terminal formatting, common secrets, and your home-directory path, then limits how much text is included. Other panes contribute process names only—not terminal or chat content.
-
-Smart Rename never starts Pi or reads its credentials. Your AI provider key stays in Herdr's private plugin config and never appears in Smart Rename's state or logs.
+Provider keys stay in Herdr's private plugin config and never enter Smart Rename state or logs.
 
 ## Troubleshooting
 
 - Worker stopped: `herdr plugin action invoke start --plugin tab-smart-rename`
-- Provider missing: run `configure-ai`, save the key, then run `check-ai`.
-- Manual label stays unchanged: use `reset-tab` or an explicit rename action.
-- No model name appears: the model may have found no meaningful task.
-- Worker logs: `herdr plugin log list --plugin tab-smart-rename --limit 10`
+- Config invalid: run `configure-ai`, then `check-ai`.
+- Authentication fails: ensure the key matches the configured endpoint and model; `check-ai` does not make an API request.
+- Manual label stays: use `reset-tab` or an explicit rename.
+- Logs: `herdr plugin log list --plugin tab-smart-rename --limit 10`
 
-## Project documentation
+## Documentation
 
+- [Naming policy](docs/naming-policy.md)
 - [Semantic map](ai-artifacts/SEMANTIC_MAP.md)
 - [Architecture](ai-artifacts/ARCHITECTURE.md)
-- [Naming policy](docs/naming-policy.md)
