@@ -8,7 +8,6 @@ import {
   AiSdkNamer,
   PROVIDER_DEFAULTS,
   loadProviderConfig,
-  readProviderEnv,
 } from "../src/provider.mjs";
 
 async function tempConfig() {
@@ -108,7 +107,7 @@ test("provider.env reads are capped at 16 KiB", async () => {
   const fixture = await tempConfig();
   try {
     await writeFile(fixture.file, "x".repeat(16 * 1024 + 1));
-    await assert.rejects(readProviderEnv(fixture.file), /exceeds 16 KiB/);
+    await assert.rejects(loadProviderConfig(fixture.env), /exceeds 16 KiB/);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -217,7 +216,15 @@ test("manifest registers configure/check actions and provider pane", async () =>
 });
 
 test("source contains no Pi model invocation path", async () => {
-  const files = ["integrations.mjs", "cli.mjs", "service.mjs", "worker.mjs"];
+  const files = [
+    "app.mjs",
+    "cli.mjs",
+    "integrations.mjs",
+    "pi-sessions.mjs",
+    "provider.mjs",
+    "service.mjs",
+    "worker.mjs",
+  ];
   const source = (
     await Promise.all(
       files.map((file) => readFile(new URL(`../src/${file}`, import.meta.url), "utf8")),

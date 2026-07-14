@@ -4,7 +4,16 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { generateText } from "ai";
 import { MAX_TAB_LENGTH, parseModelTitle, sanitize } from "./core.mjs";
 
-export const PROVIDER_ENV_BYTES = 16 * 1024;
+/**
+ * @typedef {object} ProviderConfig
+ * @property {string} provider
+ * @property {string} baseURL
+ * @property {string} model
+ * @property {number} timeoutMs
+ * @property {string} apiKey
+ */
+
+const PROVIDER_ENV_BYTES = 16 * 1024;
 export const PROVIDER_ENV_NAME = "provider.env";
 export const PROVIDER_DEFAULTS = Object.freeze({
   provider: "kimi-code",
@@ -13,14 +22,14 @@ export const PROVIDER_DEFAULTS = Object.freeze({
   timeoutMs: 45_000,
 });
 
-export const NAMING_SYSTEM_PROMPT = `Name Herdr task tabs. Return JSON only: {"tab":"...","reason":"..."}, or {"tab":null,"reason":"no meaningful task"} when context has no clear task. The tab is the persistent task only, never an agent/model/app/project prefix. Use 2-4 concrete Title Case words, maximum ${MAX_TAB_LENGTH} characters. Preserve acronyms. Prefer user requests. A sessionTimeline contains origin, middle, and recent requests; use origin and middle for continuity, but recent wins when the task changed. Ignore confirmations and operational follow-ups. Do not invent specificity or repeat the project name as the task.`;
+const NAMING_SYSTEM_PROMPT = `Name Herdr task tabs. Return JSON only: {"tab":"...","reason":"..."}, or {"tab":null,"reason":"no meaningful task"} when context has no clear task. The tab is the persistent task only, never an agent/model/app/project prefix. Use 2-4 concrete Title Case words, maximum ${MAX_TAB_LENGTH} characters. Preserve acronyms. Prefer user requests. A sessionTimeline contains origin, middle, and recent requests; use origin and middle for continuity, but recent wins when the task changed. Ignore confirmations and operational follow-ups. Do not invent specificity or repeat the project name as the task.`;
 
 export function providerEnvPath(env = process.env) {
   const directory = env.HERDR_PLUGIN_CONFIG_DIR;
   return directory ? path.join(directory, PROVIDER_ENV_NAME) : null;
 }
 
-export function parseProviderEnv(text) {
+function parseProviderEnv(text) {
   const values = {};
   for (const rawLine of String(text).split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -42,7 +51,7 @@ export function parseProviderEnv(text) {
   return values;
 }
 
-export async function readProviderEnv(file) {
+async function readProviderEnv(file) {
   if (!file) return {};
   let handle;
   try {
@@ -80,7 +89,7 @@ function validateBaseURL(value) {
   return value.replace(/\/$/, "");
 }
 
-export function validateProviderConfig(config) {
+function validateProviderConfig(config) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(config.provider)) {
     throw new Error("SMART_RENAME_PROVIDER is invalid");
   }
@@ -99,6 +108,7 @@ export function validateProviderConfig(config) {
   return config;
 }
 
+/** @returns {Promise<ProviderConfig>} */
 export async function loadProviderConfig(env = process.env) {
   const fileEnv = await readProviderEnv(providerEnvPath(env));
   const timeoutRaw = pick(
@@ -167,5 +177,4 @@ export class AiSdkNamer {
     }
   }
 
-  close() {}
 }

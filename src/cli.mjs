@@ -1,21 +1,16 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { chmod, openSync, closeSync } from "node:fs";
+import { chmod, closeSync, openSync } from "node:fs";
 import { chmod as chmodAsync, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createService } from "./app.mjs";
 import { sanitize } from "./core.mjs";
 import { run, snapshot } from "./integrations.mjs";
-import { AiSdkNamer, loadProviderConfig } from "./provider.mjs";
-import {
-  AutoNameService,
-  ensurePrivateDir,
-  statePaths,
-} from "./service.mjs";
+import { loadProviderConfig } from "./provider.mjs";
+import { ensurePrivateDir, statePaths } from "./service.mjs";
 import { acquireLock, workerInfo } from "./singleton.mjs";
 
-const command = process.argv[2];
-const dryRun = command === "dry-run" || process.argv.includes("--dry-run");
 const root =
   process.env.HERDR_PLUGIN_ROOT ||
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -125,27 +120,17 @@ async function status() {
 async function renameAll() {
   const stateDir = requireStateDir();
   await ensurePrivateDir(stateDir);
-  const paths = statePaths(stateDir);
-  const namer = new AiSdkNamer(process.env);
-  const service = new AutoNameService({
-    stateFile: paths.state,
-    stateLock: paths.stateLock,
-    namer,
+  const service = createService({ stateDir });
+  const initial = await service.initialize();
+  const results = await service.evaluateAll(initial, {
+    resetKind: "tab",
+    forceRefresh: true,
   });
-  try {
-    const initial = await service.initialize();
-    const results = await service.evaluateAll(initial, {
-      resetKind: "tab",
-      forceRefresh: true,
-    });
-    console.log(JSON.stringify(results, null, 2));
-    return results;
-  } finally {
-    namer.close();
-  }
+  console.log(JSON.stringify(results, null, 2));
+  return results;
 }
 
-async function once(resetKind = null, forceRefresh = false) {
+async function once(resetKind = null, forceRefresh = false, dryRun = false) {
   const snap = await snapshot();
   const tabId = process.env.HERDR_TAB_ID || snap.focused_tab_id;
   const workspaceId =
@@ -156,31 +141,20 @@ async function once(resetKind = null, forceRefresh = false) {
     ? process.env.HERDR_PLUGIN_STATE_DIR
     : requireStateDir();
   if (stateDir) await ensurePrivateDir(stateDir);
-  const paths = stateDir ? statePaths(stateDir) : null;
-  const namer = new AiSdkNamer(process.env);
-  const service = new AutoNameService({
-    stateFile: paths?.state ?? null,
-    stateLock: paths?.stateLock ?? null,
-    namer,
-    dryRun,
+  const service = createService({ stateDir, dryRun });
+  await service.initialize(snap);
+  const targetTab =
+    resetKind === "workspace"
+      ? snap.workspaces.find((item) => item.workspace_id === workspaceId)
+          ?.active_tab_id || tabId
+      : tabId;
+  const result = await service.evaluate(targetTab, {
+    snapshot: snap,
+    resetKind,
+    forceRefresh,
   });
-  try {
-    await service.initialize(snap);
-    const targetTab =
-      resetKind === "workspace"
-        ? snap.workspaces.find((item) => item.workspace_id === workspaceId)
-            ?.active_tab_id || tabId
-        : tabId;
-    const result = await service.evaluate(targetTab, {
-      snapshot: snap,
-      resetKind,
-      forceRefresh,
-    });
-    console.log(JSON.stringify(result, null, 2));
-    return result;
-  } finally {
-    namer.close();
-  }
+  console.log(JSON.stringify(result, null, 2));
+  return result;
 }
 
 async function configureAi() {
@@ -213,42 +187,73 @@ async function checkAi() {
   }
 }
 
-try {
-  if (command === "start") await start();
-  else if (command === "stop") await stop();
-  else if (command === "status") await status();
-  else if (command === "configure-ai") await configureAi();
-  else if (command === "check-ai") await checkAi();
-  else if (command === "once" || command === "dry-run") await once();
-  else if (command === "rename-now") {
-    await notify("Renaming tab");
-    const result = await once("tab", true);
-    const notice = currentResultNotice(result);
-    await notify(notice.title, notice.body);
-  } else if (command === "all") {
-    await notify("Renaming tabs");
-    const results = await renameAll();
-    const renamed = results.reduce(
-      (count, result) =>
-        count + result.changes.filter((item) => item.kind === "tab").length,
-      0,
-    );
-    await notify(
-      renamed ? "Tabs renamed" : "No changes",
-      `${renamed}/${results.length}`,
-    );
-  }
-  else if (command === "reset-tab") await once("tab", true);
-  else if (command === "reset-workspace") await once("workspace", true);
-  else {
+async function renameNow() {
+  await notify("Renaming tab");
+  const result = await once("tab", true);
+  const notice = currentResultNotice(result);
+  await notify(notice.title, notice.body);
+}
+
+async function renameEveryTab() {
+  await notify("Renaming tabs");
+  const results = await renameAll();
+  const renamed = results.reduce(
+    (count, result) =>
+      count + result.changes.filter((item) => item.kind === "tab").length,
+    0,
+  );
+  await notify(
+    renamed ? "Tabs renamed" : "No changes",
+    `${renamed}/${results.length}`,
+  );
+}
+
+const defaultActions = {
+  start,
+  stop,
+  status,
+  "configure-ai": configureAi,
+  "check-ai": checkAi,
+  once: ({ dryRun }) => once(null, false, dryRun),
+  "dry-run": () => once(null, false, true),
+  "rename-now": renameNow,
+  all: renameEveryTab,
+  "reset-tab": () => once("tab", true),
+  "reset-workspace": () => once("workspace", true),
+};
+
+/**
+ * Dispatch one CLI action without executing at module import time.
+ *
+ * @param {string} command
+ * @param {{dryRun?: boolean, actions?: Record<string, Function>}} options
+ */
+export async function dispatch(
+  command,
+  { dryRun = false, actions = defaultActions } = {},
+) {
+  const action = actions[command];
+  if (!action) {
     throw new Error(
       "usage: cli.mjs start|stop|status|configure-ai|check-ai|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-workspace",
     );
   }
-} catch (error) {
-  if (command === "rename-now" || command === "all") {
-    await notify("Rename failed", error.message, "request");
+  return action({ dryRun });
+}
+
+async function main(argv = process.argv.slice(2)) {
+  const command = argv[0];
+  try {
+    await dispatch(command, { dryRun: argv.includes("--dry-run") });
+  } catch (error) {
+    if (command === "rename-now" || command === "all") {
+      await notify("Rename failed", error.message, "request");
+    }
+    console.error(`Smart Rename: ${error.message}`);
+    process.exitCode = 1;
   }
-  console.error(`Smart Rename: ${error.message}`);
-  process.exitCode = 1;
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  await main();
 }

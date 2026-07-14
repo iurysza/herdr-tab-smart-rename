@@ -6,9 +6,11 @@ import path from "node:path";
 import {
   LIFECYCLE_SUBSCRIPTIONS,
   normalizeHerdrEvent,
+} from "../src/integrations.mjs";
+import {
   recentUserMessages,
   sampledUserMessages,
-} from "../src/integrations.mjs";
+} from "../src/pi-sessions.mjs";
 
 test("Herdr event envelopes normalize top-level event and data", () => {
   assert.deepEqual(

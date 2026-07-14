@@ -1,12 +1,8 @@
 #!/usr/bin/env node
 import { appendFile, chmod, readFile, rm } from "node:fs/promises";
+import { createService } from "./app.mjs";
 import { snapshot, subscribe } from "./integrations.mjs";
-import { AiSdkNamer } from "./provider.mjs";
-import {
-  AutoNameService,
-  ensurePrivateDir,
-  statePaths,
-} from "./service.mjs";
+import { ensurePrivateDir, statePaths } from "./service.mjs";
 
 export const SWEEP_INTERVAL_MS = 60_000;
 
@@ -22,12 +18,7 @@ async function log(message) {
   await chmod(paths.log, 0o600).catch(() => {});
 }
 
-const namer = new AiSdkNamer(process.env);
-const service = new AutoNameService({
-  stateFile: paths.state,
-  stateLock: paths.stateLock,
-  namer,
-});
+const service = createService({ stateDir });
 await service.initialize();
 
 let socket = null;
@@ -147,7 +138,6 @@ async function shutdown(signal) {
   clearInterval(sweepTimer);
   for (const timer of timers.values()) clearTimeout(timer);
   socket?.destroy();
-  namer.close();
   await work.catch(() => {});
   try {
     const info = JSON.parse(await readFile(paths.pid, "utf8"));

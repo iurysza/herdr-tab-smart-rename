@@ -1,10 +1,56 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 
+/**
+ * @typedef {object} OwnershipRecord
+ * @property {boolean} [manual]
+ * @property {string} [autoLabel]
+ * @property {string} [expectedLabel]
+ * @property {string} [observedLabel]
+ */
+
+/**
+ * @typedef {object} SmartRenameState
+ * @property {1} version
+ * @property {Record<string, OwnershipRecord>} workspaces
+ * @property {Record<string, OwnershipRecord>} tabs
+ * @property {Record<string, number>} modelAttempts
+ * @property {Record<string, string>} fingerprints
+ * @property {Record<string, string>} pendingFingerprints
+ */
+
+/**
+ * @typedef {object} NamingContext
+ * @property {string} project
+ * @property {{origin: string[], middle: string[], recent: string[]}} [sessionTimeline]
+ * @property {string[]} [userRequests]
+ * @property {object} [focusedPane]
+ * @property {object[]} [siblingPanes]
+ */
+
+/**
+ * @typedef {object} NameSuggestion
+ * @property {string | null} tab
+ * @property {string} reason
+ */
+
+/**
+ * @typedef {object} RenameResult
+ * @property {boolean} dryRun
+ * @property {string} workspace
+ * @property {string} tab
+ * @property {{workspace: string | null, tab: string | null}} candidate
+ * @property {string} reason
+ * @property {boolean} usedModel
+ * @property {{workspaceManual: boolean, tabManual: boolean}} ownership
+ * @property {Array<{kind: "workspace" | "tab", id: string, from: string, to: string}>} changes
+ */
+
 export const MAX_TAB_LENGTH = 30;
 export const MAX_CONTEXT_CHARS = 4_500;
 export const MODEL_RATE_MS = 10 * 60 * 1_000;
 
+/** @returns {SmartRenameState} */
 export function emptyState() {
   return {
     version: 1,
@@ -150,6 +196,7 @@ function boundedProcess(process, commandLimit = 400) {
   };
 }
 
+/** @returns {NamingContext} */
 export function buildModelContext({ workspaceName, paneContexts }) {
   const focused = paneContexts.find((pane) => pane.focused) ?? paneContexts[0] ?? {};
   const requests = (focused.userMessages ?? [])
@@ -266,6 +313,7 @@ export function markModelSuccess(state, tabId, context) {
   delete state.pendingFingerprints?.[tabId];
 }
 
+/** @returns {NameSuggestion} */
 export function parseModelTitle(text) {
   const cleaned = String(text)
     .replace(/^```(?:json)?\s*/i, "")

@@ -31,6 +31,17 @@ import {
 } from "./integrations.mjs";
 import { acquireLock } from "./singleton.mjs";
 
+/** @typedef {{suggest(context: import("./core.mjs").NamingContext): Promise<import("./core.mjs").NameSuggestion>}} Namer */
+
+/**
+ * @typedef {object} ServiceDependencies
+ * @property {(env?: NodeJS.ProcessEnv) => Promise<object>} snapshot
+ * @property {(cwd?: string) => Promise<string | null>} gitRoot
+ * @property {(pane: object, env?: NodeJS.ProcessEnv) => Promise<object>} focusedPaneContext
+ * @property {(pane: object, env?: NodeJS.ProcessEnv) => Promise<object>} siblingPaneContext
+ * @property {(kind: "workspace" | "tab", id: string, label: string, env?: NodeJS.ProcessEnv) => Promise<void>} rename
+ */
+
 export function statePaths(stateDir) {
   return {
     state: path.join(stateDir, "state.json"),
@@ -123,6 +134,16 @@ const defaultDependencies = {
 };
 
 export class AutoNameService {
+  /**
+   * @param {{
+   *   stateFile?: string | null,
+   *   stateLock?: string | null,
+   *   namer: Namer,
+   *   env?: NodeJS.ProcessEnv,
+   *   dryRun?: boolean,
+   *   dependencies?: Partial<ServiceDependencies>,
+   * }} options
+   */
   constructor({
     stateFile,
     stateLock,
@@ -202,6 +223,7 @@ export class AutoNameService {
     return results;
   }
 
+  /** @returns {Promise<import("./core.mjs").RenameResult | null>} */
   async evaluate(tabId, options = {}) {
     if (this.dryRun || !this.stateFile) {
       const snap =
