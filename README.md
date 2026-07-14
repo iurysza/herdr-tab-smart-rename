@@ -104,11 +104,11 @@ Smart Rename reloads this file before every model request. You do not need to re
 
 ## Privacy
 
-Smart Rename sends only bounded, sanitized task context to the configured provider. It removes terminal controls, common credential forms, and local home paths before a request.
+To name a tab, Smart Rename may send the most relevant pane's command and recent output to your AI provider. If that pane is running Pi, it may also include short excerpts from your requests so the name reflects the actual task.
 
-For detected Pi panes, it can sample user requests from the local session file. It never starts Pi, reads Pi credentials, or uses Pi for inference. Sibling panes contribute process summaries only.
+Before sending anything, Smart Rename removes terminal formatting, common secrets, and your home-directory path, then limits how much text is included. Other panes contribute process names only—not terminal or chat content.
 
-Provider keys stay in Herdr's private plugin config directory. Smart Rename does not write them to state or logs.
+Smart Rename never starts Pi or reads its credentials. Your AI provider key stays in Herdr's private plugin config and never appears in Smart Rename's state or logs.
 
 ## Troubleshooting
 
