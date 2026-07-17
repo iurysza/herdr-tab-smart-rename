@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { currentResultNotice, dispatch } from "../src/cli.ts";
@@ -72,6 +72,39 @@ test("CLI dispatch routes actions without executing on import", async () => {
       sound: "done",
     },
   );
+});
+
+test("Bun launcher survives Herdr's minimal server PATH", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-bun-"));
+  const bunDir = path.join(home, ".bun", "bin");
+  const fakeBun = path.join(bunDir, "bun");
+  try {
+    await mkdir(bunDir, { recursive: true });
+    await writeFile(fakeBun, "#!/bin/sh\nprintf 'fake-bun:%s\\n' \"$*\"\n");
+    await chmod(fakeBun, 0o700);
+    const child = Bun.spawn(
+      [
+        "/bin/sh",
+        path.resolve(import.meta.dir, "../src/run-bun.sh"),
+        "src/cli.ts",
+        "status",
+      ],
+      {
+        env: { HOME: home, PATH: "/usr/bin:/bin" },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    assert.equal(exitCode, 0, stderr);
+    assert.equal(stdout.trim(), "fake-bun:src/cli.ts status");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test("locks recover dead owners and workers require exact Bun scripts", async () => {

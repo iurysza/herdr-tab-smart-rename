@@ -1,6 +1,6 @@
 id = "tab-smart-rename"
 name = "Smart Rename"
-version = "0.1.0"
+version = "0.1.1"
 min_herdr_version = "0.7.0"
 description = "Context-aware names for Herdr workspaces and task tabs."
 platforms = ["linux", "macos"]
@@ -13,81 +13,81 @@ id = "start"
 title = "Smart Rename: start"
 description = "Start the detached Smart Rename worker."
 contexts = ["global", "workspace"]
-command = ["bun", "src/cli.ts", "start"]
+command = ["sh", "src/run-bun.sh", "src/cli.ts", "start"]
 
 [[actions]]
 id = "stop"
 title = "Smart Rename: stop"
 description = "Stop the Smart Rename worker."
 contexts = ["global", "workspace"]
-command = ["bun", "src/cli.ts", "stop"]
+command = ["sh", "src/run-bun.sh", "src/cli.ts", "stop"]
 
 [[actions]]
 id = "status"
 title = "Smart Rename: status"
 description = "Report worker status."
 contexts = ["global", "workspace"]
-command = ["bun", "src/cli.ts", "status"]
+command = ["sh", "src/run-bun.sh", "src/cli.ts", "status"]
 
 [[actions]]
 id = "configure-ai"
 title = "Smart Rename: configure AI"
 description = "Open the private AI provider configuration."
 contexts = ["global", "workspace", "tab", "pane"]
-command = ["bun", "src/cli.ts", "configure-ai"]
+command = ["sh", "src/run-bun.sh", "src/cli.ts", "configure-ai"]
 
 [[actions]]
 id = "configure-prompt"
 title = "Smart Rename: configure prompt"
 description = "Open the private naming prompt."
 contexts = ["global", "workspace", "tab", "pane"]
-command = ["bun", "src/cli.ts", "configure-prompt"]
+command = ["sh", "src/run-bun.sh", "src/cli.ts", "configure-prompt"]
 
 [[actions]]
 id = "check-ai"
 title = "Smart Rename: check AI config"
 description = "Validate the provider and naming prompt without making a request."
 contexts = ["global", "workspace", "tab", "pane"]
-command = ["bun", "src/cli.ts", "check-ai"]
+command = ["sh", "src/run-bun.sh", "src/cli.ts", "check-ai"]
 
 [[actions]]
 id = "rename-now"
 title = "Smart Rename: current tab"
 description = "Reclaim and rename the current tab now."
 contexts = ["workspace", "tab", "pane"]
-command = ["bun", "src/cli.ts", "rename-now"]
+command = ["sh", "src/run-bun.sh", "src/cli.ts", "rename-now"]
 
 [[actions]]
 id = "rename-all"
 title = "Smart Rename: all tabs"
 description = "Reclaim and rename every tab sequentially."
 contexts = ["global", "workspace", "tab", "pane"]
-command = ["bun", "src/cli.ts", "all"]
+command = ["sh", "src/run-bun.sh", "src/cli.ts", "all"]
 
 [[actions]]
 id = "reset-tab"
 title = "Smart Rename: reset tab"
 description = "Clear the current tab's manual lock and evaluate it."
 contexts = ["tab", "pane"]
-command = ["bun", "src/cli.ts", "reset-tab"]
+command = ["sh", "src/run-bun.sh", "src/cli.ts", "reset-tab"]
 
 [[actions]]
 id = "reset-workspace"
 title = "Smart Rename: reset workspace"
 description = "Clear the current workspace's manual lock and evaluate it."
 contexts = ["workspace", "tab", "pane"]
-command = ["bun", "src/cli.ts", "reset-workspace"]
+command = ["sh", "src/run-bun.sh", "src/cli.ts", "reset-workspace"]
 
 [[panes]]
 id = "provider-config"
 title = "Smart Rename AI"
 description = "Edit the private OpenAI-compatible provider configuration."
 placement = "overlay"
-command = ["bun", "src/configure.ts"]
+command = ["sh", "src/run-bun.sh", "src/configure.ts"]
 
 [[panes]]
 id = "prompt-config"
 title = "Smart Rename Prompt"
 description = "Edit the private naming prompt."
 placement = "overlay"
-command = ["bun", "src/configure.ts", "prompt"]
+command = ["sh", "src/run-bun.sh", "src/configure.ts", "prompt"]

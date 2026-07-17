@@ -118,6 +118,7 @@ Provider keys stay in Herdr's private plugin config and never enter Smart Rename
 - Worker stopped: `herdr plugin action invoke start --plugin tab-smart-rename`
 - Config invalid: run `configure-ai`, then `check-ai`.
 - Authentication fails: ensure the key matches the configured endpoint and model; `check-ai` does not make an API request.
+- Bun is outside Herdr's server `PATH`: runtime actions also check standard Bun and Homebrew locations.
 - Manual label stays: use `reset-tab` or an explicit rename.
 - Logs: `herdr plugin log list --plugin tab-smart-rename --limit 10`
 

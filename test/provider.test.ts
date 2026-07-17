@@ -187,17 +187,22 @@ test("namer reloads provider.env and naming-prompt.md, then redacts failures", a
   }
 });
 
-test("manifest and source use Bun without Pi model coupling", async () => {
+test("manifest uses portable Bun runtime without Pi model coupling", async () => {
   const manifest = await readFile(
     new URL("../herdr-plugin.toml", import.meta.url),
     "utf8",
   );
   assert.match(manifest, /^id = "tab-smart-rename"$/m);
+  assert.match(manifest, /^version = "0\.1\.1"$/m);
   assert.match(
     manifest,
     /command = \["bun", "install", "--production", "--frozen-lockfile"\]/,
   );
-  assert.match(manifest, /command = \["bun", "src\/cli\.ts", "start"\]/);
+  assert.match(
+    manifest,
+    /command = \["sh", "src\/run-bun\.sh", "src\/cli\.ts", "start"\]/,
+  );
+  assert.doesNotMatch(manifest, /command = \["bun", "src\//);
   assert.match(manifest, /id = "provider-config"[\s\S]*placement = "overlay"/);
   assert.match(manifest, /id = "prompt-config"[\s\S]*placement = "overlay"/);
 
