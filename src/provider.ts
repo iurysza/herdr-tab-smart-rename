@@ -136,10 +136,14 @@ export async function readOpencodeConfig(): Promise<{ provider: string; baseURL:
     if (!providerName) return null;
 
     const providerConfig = content.provider[providerName];
+    const fullModel = content.model;
+    const slashIdx = fullModel.indexOf("/");
+    const model = slashIdx > 0 ? fullModel.slice(slashIdx + 1) : fullModel;
+
     return {
       provider: providerConfig.name || providerName,
       baseURL: providerConfig.options.baseURL,
-      model: content.model,
+      model,
       apiKey: providerConfig.options.apiKey,
     };
   } catch {
