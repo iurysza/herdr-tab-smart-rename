@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { generateText } from "ai";
+import { generateText, streamText } from "ai";
 import { parse as parseEnv } from "dotenv";
 import stripJsonComments from "strip-json-comments";
 import { z } from "zod";
@@ -302,11 +302,10 @@ async function completeWithAiSdk(request: CompletionRequest): Promise<string> {
     baseURL: request.config.baseURL,
     apiKey: request.config.apiKey,
   });
-  const result = await generateText({
+  const result = streamText({
     model: provider(request.config.model),
     system: request.system,
     prompt: `Suggest one label from this sanitized context:\n${JSON.stringify(request.context)}`,
-    maxOutputTokens: request.maxOutputTokens,
     ...(request.config.reasoningEffort
       ? {
           providerOptions: {
