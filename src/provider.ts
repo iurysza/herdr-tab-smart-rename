@@ -114,7 +114,7 @@ function resolvePromptPath(value: string, env: NodeJS.ProcessEnv): string {
   return path.resolve(env.HERDR_PLUGIN_CONFIG_DIR || process.cwd(), value);
 }
 
-async function loadOpencodeConfig(): Promise<{ provider: string; baseURL: string; model: string; apiKey: string } | null> {
+export async function readOpencodeConfig(): Promise<{ provider: string; baseURL: string; model: string; apiKey: string } | null> {
   const configDir = path.join(process.env.HOME || "", ".config/opencode");
   const jsonPath = path.join(configDir, "opencode.json");
   const jsoncPath = path.join(configDir, "opencode.jsonc");
@@ -125,11 +125,6 @@ async function loadOpencodeConfig(): Promise<{ provider: string; baseURL: string
   } else if (await Bun.file(jsoncPath).exists()) {
     configPath = jsoncPath;
   } else {
-    return null;
-  }
-
-  const consent = prompt(`Allow Smart Rename to read your OpenCode config from ${configPath}? (y/n)`);
-  if (!consent || !consent.toLowerCase().startsWith("y")) {
     return null;
   }
 
@@ -157,10 +152,6 @@ async function providerApiKey(
   processEnv: NodeJS.ProcessEnv,
   fileEnv: Record<string, string>,
 ): Promise<string> {
-  if (provider === "opencode") {
-    const config = await loadOpencodeConfig();
-    return config?.apiKey || "";
-  }
   const providerKey =
     provider === "openai"
       ? "OPENAI_API_KEY"
@@ -220,19 +211,7 @@ export async function loadProviderConfig(
     readProviderEnv(providerEnvPath(env)),
   ]);
 
-  let provider = pick(env, fileEnv, defaults, "SMART_RENAME_PROVIDER");
-  let baseURL = pick(env, fileEnv, defaults, "SMART_RENAME_BASE_URL");
-  let model = pick(env, fileEnv, defaults, "SMART_RENAME_MODEL");
-
-  if (provider === "opencode") {
-    const opencodeConfig = await loadOpencodeConfig();
-    if (opencodeConfig) {
-      provider = opencodeConfig.provider;
-      baseURL = opencodeConfig.baseURL;
-      model = opencodeConfig.model;
-    }
-  }
-
+  const provider = pick(env, fileEnv, defaults, "SMART_RENAME_PROVIDER");
   const configuredReasoning =
     env.SMART_RENAME_REASONING_EFFORT || fileEnv.SMART_RENAME_REASONING_EFFORT;
   const reasoningEffort =
@@ -244,8 +223,8 @@ export async function loadProviderConfig(
     env.SMART_RENAME_PROMPT_PATH || fileEnv.SMART_RENAME_PROMPT_PATH;
   const input = {
     provider,
-    baseURL,
-    model,
+    baseURL: pick(env, fileEnv, defaults, "SMART_RENAME_BASE_URL"),
+    model: pick(env, fileEnv, defaults, "SMART_RENAME_MODEL"),
     timeoutMs: Number(pick(env, fileEnv, defaults, "SMART_RENAME_TIMEOUT_MS")),
     ...(reasoningEffort ? { reasoningEffort } : {}),
     ...(configuredPrompt

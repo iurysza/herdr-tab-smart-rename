@@ -5,6 +5,7 @@ import path from "node:path";
 import { type RenameResult } from "./domain.ts";
 import { beginTabProgress, run, snapshot } from "./herdr.ts";
 import { loadNamingPrompt, loadProviderConfig } from "./provider.ts";
+import { importOpenCodeConfig } from "./configure.ts";
 import { createService } from "./service.ts";
 import {
   acquireLock,
@@ -273,6 +274,7 @@ const defaultActions: NonNullable<DispatchOptions["actions"]> = {
   "configure-ai": configureAi,
   "configure-prompt": configurePrompt,
   "check-ai": checkAi,
+  "import-opencode": () => importOpenCodeConfig(),
   once: ({ dryRun }) => once({ dryRun }),
   "dry-run": () => once({ dryRun: true }),
   "rename-now": renameNow,
@@ -289,7 +291,7 @@ export async function dispatch(
   const action = command ? actions[command] : undefined;
   if (!action) {
     throw new Error(
-      "usage: cli.ts start|stop|status|configure-ai|configure-prompt|check-ai|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-workspace",
+      "usage: cli.ts start|stop|status|configure-ai|configure-prompt|check-ai|import-opencode|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-workspace",
     );
   }
   return action({ dryRun });

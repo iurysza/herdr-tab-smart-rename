@@ -1,12 +1,14 @@
 #!/usr/bin/env bun
 import path from "node:path";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import {
   bundledNamingPrompt,
   configuredNamingPromptPath,
   providerEnvPath,
   providerExampleText,
+  readOpencodeConfig,
 } from "./provider.ts";
+import { parse as parseEnv } from "dotenv";
 
 async function ensureConfigDirectory(env: NodeJS.ProcessEnv): Promise<string> {
   const directory = env.HERDR_PLUGIN_CONFIG_DIR;
@@ -67,6 +69,48 @@ export async function configurePrompt(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   await openEditor(await ensureNamingPromptFile(env), env);
+}
+
+function stringifyEnv(data: Record<string, string>): string {
+  return Object.entries(data)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
+}
+
+export async function importOpenCodeConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const opencode = await readOpencodeConfig();
+  if (!opencode) {
+    throw new Error(
+      "No OpenCode config found at ~/.config/opencode/opencode.json or .jsonc",
+    );
+  }
+
+  const configDir = env.HERDR_PLUGIN_CONFIG_DIR;
+  if (!configDir) throw new Error("HERDR_PLUGIN_CONFIG_DIR is required");
+  await ensureConfigDirectory(env);
+  const envFile = providerEnvPath(env);
+  if (!envFile) throw new Error("HERDR_PLUGIN_CONFIG_DIR is required");
+
+  const existing = await readFile(envFile, "utf8").catch(() => "");
+  const parsed = parseEnv(existing);
+
+  parsed.SMART_RENAME_PROVIDER = opencode.provider;
+  parsed.SMART_RENAME_BASE_URL = opencode.baseURL;
+  parsed.SMART_RENAME_MODEL = opencode.model;
+  parsed.SMART_RENAME_API_KEY = opencode.apiKey;
+
+  const lines: string[] = [];
+  for (const [k, v] of Object.entries(parsed)) {
+    lines.push(`${k}=${v}`);
+  }
+  await writeFile(envFile, lines.join("\n") + "\n", { mode: 0o600 });
+  await chmod(envFile, 0o600);
+
+  console.log(
+    `Imported OpenCode config → ${envFile} (${opencode.provider}/${opencode.model})`,
+  );
 }
 
 function errorCode(error: unknown): string | undefined {
