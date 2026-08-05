@@ -142,6 +142,66 @@ test("namer sends one bounded completion and validates model output", async () =
   await assert.rejects(invalid.suggest(context), /invalid model tab label/);
 });
 
+test("provider transport enforces the output-token ceiling without external network", async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  const responseText = '{"tab":"Bound Provider Output","reason":"transport contract"}';
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      requestBody = (await request.json()) as Record<string, unknown>;
+      if (requestBody.stream === true) {
+        const chunk = {
+          id: "chatcmpl-test",
+          object: "chat.completion.chunk",
+          created: 0,
+          model: "test-model",
+          choices: [
+            {
+              index: 0,
+              delta: { role: "assistant", content: responseText },
+              finish_reason: "stop",
+            },
+          ],
+        };
+        return new Response(
+          `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      }
+      return Response.json({
+        id: "chatcmpl-test",
+        object: "chat.completion",
+        created: 0,
+        model: "test-model",
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: responseText },
+            finish_reason: "stop",
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+    },
+  });
+  try {
+    const namer = new AiSdkNamer({
+      SMART_RENAME_PROVIDER: "test-provider",
+      SMART_RENAME_BASE_URL: `http://127.0.0.1:${server.port}/v1`,
+      SMART_RENAME_MODEL: "test-model",
+      SMART_RENAME_API_KEY: "test-key",
+      SMART_RENAME_TIMEOUT_MS: "5000",
+    });
+    assert.deepEqual(await namer.suggest(context), {
+      tab: "Bound Provider Output",
+      reason: "transport contract",
+    });
+    assert.equal(requestBody?.max_tokens, 32_768);
+  } finally {
+    server.stop(true);
+  }
+});
+
 test("namer reloads provider.env and naming-prompt.md, then redacts failures", async () => {
   const fixture = await tempConfig();
   const promptFile = path.join(fixture.root, "naming-prompt.md");
