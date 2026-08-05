@@ -71,12 +71,6 @@ export async function configurePrompt(
   await openEditor(await ensureNamingPromptFile(env), env);
 }
 
-function stringifyEnv(data: Record<string, string>): string {
-  return Object.entries(data)
-    .map(([k, v]) => `${k}=${v}`)
-    .join("\n");
-}
-
 export async function importOpenCodeConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {

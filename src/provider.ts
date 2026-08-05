@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { generateText, streamText } from "ai";
+import { streamText } from "ai";
 import { parse as parseEnv } from "dotenv";
 import stripJsonComments from "strip-json-comments";
 import { z } from "zod";

@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { readFile, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { importOpenCodeConfig } from "../src/configure.ts";
@@ -29,8 +29,6 @@ async function tempEnv() {
     env: { HERDR_PLUGIN_CONFIG_DIR: root },
   };
 }
-
-const debugFile = path.join(os.tmpdir(), "opencode-import-debug.log");
 
 test("import-opencode writes correct provider.env from real opencode.json", async () => {
   const pluginDir = await tempEnv();
