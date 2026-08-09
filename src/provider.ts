@@ -262,6 +262,17 @@ async function completeWithAiSdk(request: CompletionRequest): Promise<string> {
     name: request.config.provider,
     baseURL: request.config.baseURL,
     apiKey: request.config.apiKey,
+    ...(request.config.provider === "openai"
+      ? {
+          transformRequestBody: (body: Record<string, unknown>) => {
+            const { max_tokens: maxCompletionTokens, ...rest } = body;
+            return {
+              ...rest,
+              max_completion_tokens: maxCompletionTokens,
+            };
+          },
+        }
+      : {}),
   });
   const result = await generateText({
     model: provider(request.config.model),
