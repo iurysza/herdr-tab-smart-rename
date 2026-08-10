@@ -216,6 +216,14 @@ test("provider transport uses the provider-compatible output-token parameter", a
 
 test("OpenAI request transform preserves native completion-token values", () => {
   assert.deepEqual(
+    transformOpenAiRequestBody({ model: "m", max_tokens: 5 }),
+    { model: "m", max_completion_tokens: 5 },
+  );
+  assert.deepEqual(
+    transformOpenAiRequestBody({ max_tokens: 5, max_completion_tokens: 7 }),
+    { max_completion_tokens: 5 },
+  );
+  assert.deepEqual(
     transformOpenAiRequestBody({ max_completion_tokens: 123 }),
     { max_completion_tokens: 123 },
   );
