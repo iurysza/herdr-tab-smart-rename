@@ -260,9 +260,10 @@ type Complete = (request: CompletionRequest) => Promise<string>;
 export function transformOpenAiRequestBody(
   body: Record<string, unknown>,
 ): Record<string, unknown> {
-  const { max_tokens: maxCompletionTokens, ...rest } = body;
-  if (maxCompletionTokens === null || maxCompletionTokens === undefined) return rest;
-  return { ...rest, max_completion_tokens: maxCompletionTokens };
+  const { max_tokens, ...rest } = body;
+  return max_tokens == null
+    ? rest
+    : { ...rest, max_completion_tokens: max_tokens };
 }
 
 async function completeWithAiSdk(request: CompletionRequest): Promise<string> {
