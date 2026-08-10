@@ -257,6 +257,14 @@ export interface CompletionRequest {
 
 type Complete = (request: CompletionRequest) => Promise<string>;
 
+export function transformOpenAiRequestBody(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  const { max_tokens: maxCompletionTokens, ...rest } = body;
+  if (maxCompletionTokens === null || maxCompletionTokens === undefined) return rest;
+  return { ...rest, max_completion_tokens: maxCompletionTokens };
+}
+
 async function completeWithAiSdk(request: CompletionRequest): Promise<string> {
   const provider = createOpenAICompatible({
     name: request.config.provider,
@@ -264,13 +272,7 @@ async function completeWithAiSdk(request: CompletionRequest): Promise<string> {
     apiKey: request.config.apiKey,
     ...(request.config.provider === "openai"
       ? {
-          transformRequestBody: (body: Record<string, unknown>) => {
-            const { max_tokens: maxCompletionTokens, ...rest } = body;
-            return {
-              ...rest,
-              max_completion_tokens: maxCompletionTokens,
-            };
-          },
+          transformRequestBody: transformOpenAiRequestBody,
         }
       : {}),
   });

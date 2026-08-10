@@ -18,6 +18,7 @@ import {
   AiSdkNamer,
   loadProviderConfig,
   type CompletionRequest,
+  transformOpenAiRequestBody,
 } from "../src/provider.ts";
 import { type NamingContext } from "../src/domain.ts";
 
@@ -211,6 +212,17 @@ test("provider transport uses the provider-compatible output-token parameter", a
   } finally {
     server.stop(true);
   }
+});
+
+test("OpenAI request transform preserves native completion-token values", () => {
+  assert.deepEqual(
+    transformOpenAiRequestBody({ max_completion_tokens: 123 }),
+    { max_completion_tokens: 123 },
+  );
+  assert.deepEqual(
+    transformOpenAiRequestBody({ max_tokens: null, max_completion_tokens: 123 }),
+    { max_completion_tokens: 123 },
+  );
 });
 
 test("namer reloads provider.env and naming-prompt.md, then redacts failures", async () => {
