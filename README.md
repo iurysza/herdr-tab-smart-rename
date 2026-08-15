@@ -31,6 +31,12 @@ OPENAI_API_KEY=...
 
 Without a key, deterministic names still work.
 
+### Windows
+
+Herdr's Windows preview is supported with Bun available on `PATH`. The plugin
+uses direct Bun commands instead of a Unix shell launcher, and inspects worker
+processes through PowerShell.
+
 ## Keybindings
 
 ```toml

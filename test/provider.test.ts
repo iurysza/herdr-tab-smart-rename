@@ -93,9 +93,11 @@ test("private provider and prompt config enforce templates, permissions, and bou
   try {
     const file = await ensureProviderFile(fixture.env);
     const prompt = await ensureNamingPromptFile(fixture.env);
-    assert.equal((await stat(fixture.root)).mode & 0o777, 0o700);
-    assert.equal((await stat(file)).mode & 0o777, 0o600);
-    assert.equal((await stat(prompt)).mode & 0o777, 0o600);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(fixture.root)).mode & 0o777, 0o700);
+      assert.equal((await stat(file)).mode & 0o777, 0o600);
+      assert.equal((await stat(prompt)).mode & 0o777, 0o600);
+    }
     assert.match(await readFile(file, "utf8"), /SMART_RENAME_MODEL=gpt-5\.6-luna/);
     assert.match(await readFile(prompt, "utf8"), /^# Naming policy/);
     await assert.rejects(loadProviderConfig(fixture.env), /AI key missing.*provider\.env/i);
@@ -260,9 +262,12 @@ test("manifest uses portable Bun runtime without Pi model coupling", async () =>
   );
   assert.match(
     manifest,
-    /command = \["sh", "src\/run-bun\.sh", "src\/cli\.ts", "start"\]/,
+    /platforms = \["linux", "macos", "windows"\]/,
   );
-  assert.doesNotMatch(manifest, /command = \["bun", "src\//);
+  assert.match(
+    manifest,
+    /command = \["bun", "src\/cli\.ts", "start"\]/,
+  );
   assert.match(manifest, /id = "provider-config"[\s\S]*placement = "overlay"/);
   assert.match(manifest, /id = "prompt-config"[\s\S]*placement = "overlay"/);
 
