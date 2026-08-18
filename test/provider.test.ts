@@ -18,6 +18,7 @@ import {
   AiSdkNamer,
   loadProviderConfig,
   type CompletionRequest,
+  transformOpenAiRequestBody,
 } from "../src/provider.ts";
 import { type NamingContext } from "../src/domain.ts";
 
@@ -142,7 +143,7 @@ test("namer sends one bounded completion and validates model output", async () =
   await assert.rejects(invalid.suggest(context), /invalid model tab label/);
 });
 
-test("provider transport enforces the output-token ceiling without external network", async () => {
+test("provider transport uses the provider-compatible output-token parameter", async () => {
   let requestBody: Record<string, unknown> | undefined;
   const responseText = '{"tab":"Bound Provider Output","reason":"transport contract"}';
   const server = Bun.serve({
@@ -197,9 +198,39 @@ test("provider transport enforces the output-token ceiling without external netw
       reason: "transport contract",
     });
     assert.equal(requestBody?.max_tokens, 32_768);
+
+    const openaiNamer = new AiSdkNamer({
+      SMART_RENAME_PROVIDER: "openai",
+      SMART_RENAME_BASE_URL: `http://127.0.0.1:${server.port}/v1`,
+      SMART_RENAME_MODEL: "gpt-5.6-luna",
+      SMART_RENAME_API_KEY: "test-key",
+      SMART_RENAME_TIMEOUT_MS: "5000",
+    });
+    await openaiNamer.suggest(context);
+    assert.equal(requestBody?.max_completion_tokens, 32_768);
+    assert.equal(requestBody?.max_tokens, undefined);
   } finally {
     server.stop(true);
   }
+});
+
+test("OpenAI request transform preserves native completion-token values", () => {
+  assert.deepEqual(
+    transformOpenAiRequestBody({ model: "m", max_tokens: 5 }),
+    { model: "m", max_completion_tokens: 5 },
+  );
+  assert.deepEqual(
+    transformOpenAiRequestBody({ max_tokens: 5, max_completion_tokens: 7 }),
+    { max_completion_tokens: 5 },
+  );
+  assert.deepEqual(
+    transformOpenAiRequestBody({ max_completion_tokens: 123 }),
+    { max_completion_tokens: 123 },
+  );
+  assert.deepEqual(
+    transformOpenAiRequestBody({ max_tokens: null, max_completion_tokens: 123 }),
+    { max_completion_tokens: 123 },
+  );
 });
 
 test("namer reloads provider.env and naming-prompt.md, then redacts failures", async () => {
