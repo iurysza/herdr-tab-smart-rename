@@ -95,6 +95,7 @@ async function start(): Promise<void> {
       stdin: "ignore",
       stdout: logFd,
       stderr: logFd,
+      windowsHide: true,
     });
     child.unref();
     closeSync(logFd);
