@@ -140,6 +140,7 @@ export async function run(
     env: options.env ?? process.env,
     stdout: "pipe",
     stderr: "pipe",
+    windowsHide: true,
   });
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -346,11 +347,22 @@ export function normalizeHerdrEvent(message: unknown): HerdrEvent | null {
   };
 }
 
+const WINDOWS_PIPE_PREFIX = "\\\\.\\pipe\\";
+
+export function resolveSocketPath(
+  socketPath: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== "win32") return socketPath;
+  if (socketPath.startsWith(WINDOWS_PIPE_PREFIX)) return socketPath;
+  return `${WINDOWS_PIPE_PREFIX}${socketPath}`;
+}
+
 export function subscribe(
   socketPath: string,
   onEvent: (event: HerdrEvent) => void,
 ): Socket {
-  const socket = net.createConnection(socketPath);
+  const socket = net.createConnection(resolveSocketPath(socketPath));
   let buffer = "";
   socket.setEncoding("utf8");
   socket.on("connect", () => {
