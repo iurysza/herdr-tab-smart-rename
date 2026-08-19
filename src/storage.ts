@@ -152,7 +152,7 @@ async function commandForPid(pid: number): Promise<string> {
         "-Command",
         `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($p) { $p.CommandLine }`,
       ],
-      { stdout: "pipe", stderr: "ignore" },
+      { stdout: "pipe", stderr: "ignore", windowsHide: true },
     );
     const [command, exitCode] = await Promise.all([
       new Response(child.stdout).text(),
@@ -225,8 +225,9 @@ async function staleLock(lockFile: string, staleMs: number): Promise<boolean> {
   let age = Infinity;
   try {
     age = Date.now() - (await stat(lockFile)).mtimeMs;
-  } catch {
-    return true;
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return false;
+    throw error;
   }
   try {
     const owner = LockOwnerSchema.parse(JSON.parse(await readFile(lockFile, "utf8")));

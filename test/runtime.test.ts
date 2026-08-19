@@ -146,17 +146,22 @@ test("locks recover dead owners and workers require exact Bun scripts", async ()
   }
 });
 
-test("worker inspection uses the native process lookup on Windows", async () => {
-  if (process.platform !== "win32") return;
-  const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-process-"));
-  const pidFile = path.join(dir, "worker.json");
-  try {
-    await writeFile(
-      pidFile,
-      `${JSON.stringify({ pid: process.pid, script: "bun", startedAt: "now" })}\n`,
-    );
-    assert.equal((await workerInfo(pidFile, "bun"))?.pid, process.pid);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
+test(
+  "worker inspection uses the native process lookup on Windows",
+  async () => {
+    if (process.platform !== "win32") return;
+    const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-process-"));
+    const pidFile = path.join(dir, "worker.json");
+    try {
+      await writeFile(
+        pidFile,
+        `${JSON.stringify({ pid: process.pid, script: "bun", startedAt: "now" })}\n`,
+      );
+      assert.equal((await workerInfo(pidFile, "bun"))?.pid, process.pid);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+  // Hosted Windows cold-starts Windows PowerShell beyond Bun's 5s default.
+  { timeout: 15_000 },
+);
