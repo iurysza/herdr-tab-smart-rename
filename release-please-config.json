@@ -1,0 +1,17 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "package-name": "herdr-tab-smart-rename",
+      "include-component-in-tag": false,
+      "include-v-in-tag": true,
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "herdr-plugin.toml",
+          "jsonpath": "$.version"
+        }
+      ]
+    }
+  }
+}
