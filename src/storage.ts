@@ -143,13 +143,31 @@ export function pidAlive(
 }
 
 async function commandForPid(pid: number): Promise<string> {
-  const process = Bun.spawn(["ps", "-p", String(pid), "-o", "command="], {
+  if (process.platform === "win32") {
+    const child = Bun.spawn(
+      [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($p) { $p.CommandLine }`,
+      ],
+      { stdout: "pipe", stderr: "ignore", windowsHide: true },
+    );
+    const [command, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      child.exited,
+    ]);
+    if (exitCode !== 0) throw new Error(`PowerShell exited ${exitCode}`);
+    return command.trim();
+  }
+  const psProcess = Bun.spawn(["ps", "-p", String(pid), "-o", "command="], {
     stdout: "pipe",
     stderr: "ignore",
   });
   const [command, exitCode] = await Promise.all([
-    new Response(process.stdout).text(),
-    process.exited,
+    new Response(psProcess.stdout).text(),
+    psProcess.exited,
   ]);
   if (exitCode !== 0) throw new Error(`ps exited ${exitCode}`);
   return command.trim();
@@ -207,8 +225,9 @@ async function staleLock(lockFile: string, staleMs: number): Promise<boolean> {
   let age = Infinity;
   try {
     age = Date.now() - (await stat(lockFile)).mtimeMs;
-  } catch {
-    return true;
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return false;
+    throw error;
   }
   try {
     const owner = LockOwnerSchema.parse(JSON.parse(await readFile(lockFile, "utf8")));
