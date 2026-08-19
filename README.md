@@ -131,5 +131,7 @@ Provider keys stay in Herdr's private plugin config and never enter Smart Rename
 ## Documentation
 
 - [Naming policy](docs/naming-policy.md)
+- [Release process](docs/releasing.md)
+- [Changelog](CHANGELOG.md)
 - [Semantic map](ai-artifacts/SEMANTIC_MAP.md)
 - [Architecture](ai-artifacts/ARCHITECTURE.md)
