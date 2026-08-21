@@ -20,21 +20,46 @@ const BUNDLED_NAMING_PROMPT = fileURLToPath(
 export const PROVIDER_ENV_NAME = "provider.env";
 export const NAMING_PROMPT_NAME = "naming-prompt.md";
 
-const ProviderConfigSchema = z.object({
-  provider: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
-  baseURL: z
-    .url()
-    .refine((value) => {
-      const url = new URL(value);
-      return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
-    })
-    .transform((value) => value.replace(/\/$/, "")),
-  model: z.string().min(1).refine((value) => !/[\r\n]/.test(value)),
-  timeoutMs: z.number().int().min(1_000).max(300_000),
-  reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
-  promptPath: z.string().min(1).optional(),
-  apiKey: z.string().min(1),
-});
+const HttpBaseUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
+  });
+
+const ProviderConfigSchema = z
+  .object({
+    provider: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+    baseURL: z.string().optional(),
+    model: z.string().min(1).refine((value) => !/[\r\n]/.test(value)),
+    timeoutMs: z.number().int().min(1_000).max(300_000),
+    reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
+    promptPath: z.string().min(1).optional(),
+    apiKey: z.string().min(1).optional(),
+  })
+  .superRefine((config, context) => {
+    if (config.provider === "omp") return;
+    if (!config.baseURL || !HttpBaseUrlSchema.safeParse(config.baseURL).success) {
+      context.addIssue({
+        code: "custom",
+        path: ["baseURL"],
+        message: "SMART_RENAME_BASE_URL must be an HTTP(S) URL without credentials",
+      });
+    }
+    if (!config.apiKey) {
+      context.addIssue({
+        code: "custom",
+        path: ["apiKey"],
+        message: "AI key missing",
+      });
+    }
+  })
+  .transform((config) =>
+    config.baseURL
+      ? { ...config, baseURL: config.baseURL.replace(/\/$/, "") }
+      : config,
+  );
 
 const ModelOutputSchema = z.object({
   tab: z.string().nullable(),
@@ -184,18 +209,25 @@ export async function loadProviderConfig(
     (provider === defaults.SMART_RENAME_PROVIDER
       ? defaults.SMART_RENAME_REASONING_EFFORT
       : "");
+  const baseURL = pick(
+    env,
+    fileEnv,
+    provider === "omp" ? {} : defaults,
+    "SMART_RENAME_BASE_URL",
+  );
+  const apiKey = providerApiKey(provider, env, fileEnv);
   const configuredPrompt =
     env.SMART_RENAME_PROMPT_PATH || fileEnv.SMART_RENAME_PROMPT_PATH;
   const input = {
     provider,
-    baseURL: pick(env, fileEnv, defaults, "SMART_RENAME_BASE_URL"),
+    ...(baseURL ? { baseURL } : {}),
     model: pick(env, fileEnv, defaults, "SMART_RENAME_MODEL"),
     timeoutMs: Number(pick(env, fileEnv, defaults, "SMART_RENAME_TIMEOUT_MS")),
     ...(reasoningEffort ? { reasoningEffort } : {}),
     ...(configuredPrompt
       ? { promptPath: resolvePromptPath(configuredPrompt, env) }
       : {}),
-    apiKey: providerApiKey(provider, env, fileEnv),
+    ...(apiKey ? { apiKey } : {}),
   };
   const parsed = ProviderConfigSchema.safeParse(input);
   if (!parsed.success) throw configError(parsed.error);
@@ -242,7 +274,7 @@ function parseSuggestion(text: string): NameSuggestion {
 
 function safeProviderError(error: unknown, config: ProviderConfig): string {
   let message = error instanceof Error ? error.message : String(error || "provider request failed");
-  message = message.replaceAll(config.apiKey, "[redacted]");
+  if (config.apiKey) message = message.replaceAll(config.apiKey, "[redacted]");
   return sanitizeText(message).slice(0, 400) || "provider request failed";
 }
 
@@ -252,6 +284,7 @@ export interface CompletionRequest {
   system: string;
   maxOutputTokens: 32_768;
   maxRetries: 1;
+  env: NodeJS.ProcessEnv;
   abortSignal: AbortSignal;
 }
 
@@ -267,10 +300,12 @@ export function transformOpenAiRequestBody(
 }
 
 async function completeWithAiSdk(request: CompletionRequest): Promise<string> {
+  const { baseURL, apiKey } = request.config;
+  if (!baseURL || !apiKey) throw new Error("provider configuration is incomplete");
   const provider = createOpenAICompatible({
     name: request.config.provider,
-    baseURL: request.config.baseURL,
-    apiKey: request.config.apiKey,
+    baseURL,
+    apiKey,
     ...(request.config.provider === "openai"
       ? {
           transformRequestBody: transformOpenAiRequestBody,
@@ -297,13 +332,143 @@ async function completeWithAiSdk(request: CompletionRequest): Promise<string> {
   return result.text;
 }
 
+const OMP_OUTPUT_BYTES = 2 * 1024 * 1024;
+const OMP_CLEANUP_GRACE_MS = 250;
+
+async function readBoundedOutput(
+  stream: ReadableStream<Uint8Array>,
+  label: string,
+): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > OMP_OUTPUT_BYTES) {
+        throw new Error(`${label} output exceeded buffer`);
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function drainOmpOutput(
+  output: Promise<[string, string]>,
+  abortPromise: Promise<never>,
+): Promise<[string, string]> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("omp output drain timed out")),
+      OMP_CLEANUP_GRACE_MS,
+    );
+  });
+  try {
+    return await Promise.race([output, abortPromise, timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+async function completeWithOmp(request: CompletionRequest): Promise<string> {
+  const args = [
+    "omp",
+    "-p",
+    "--model",
+    request.config.model,
+    "--no-session",
+    "--no-tools",
+    "--no-lsp",
+    "--no-extensions",
+    "--no-skills",
+    "--no-rules",
+  ];
+  if (request.config.reasoningEffort) {
+    args.push("--thinking", request.config.reasoningEffort);
+  }
+  const child = Bun.spawn(args, {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, ...request.env },
+    windowsHide: true,
+  });
+  const prompt = `${request.system}\n\nSuggest one label from this sanitized context:\n${JSON.stringify(request.context)}\n`;
+  const stdoutPromise = readBoundedOutput(child.stdout, "omp stdout");
+  const stderrPromise = readBoundedOutput(child.stderr, "omp stderr");
+  const outputPromise = Promise.all([stdoutPromise, stderrPromise]);
+  void outputPromise.catch(() => {});
+  const stdinPromise = (async () => {
+    await child.stdin.write(prompt);
+    await child.stdin.end();
+  })();
+  let rejectAbort: (reason?: unknown) => void = () => {};
+  const abortPromise = new Promise<never>((_, reject) => {
+    rejectAbort = reject;
+  });
+  const kill = () => {
+    try {
+      child.kill();
+    } catch {
+      // The process may have exited between output and cleanup.
+    }
+  };
+  const onAbort = () => {
+    kill();
+    rejectAbort(new Error("omp request aborted"));
+  };
+  request.abortSignal.addEventListener("abort", onAbort, { once: true });
+  if (request.abortSignal.aborted) onAbort();
+  try {
+    await Promise.race([stdinPromise, abortPromise]);
+    const exitCode = await Promise.race([child.exited, abortPromise]);
+    if (request.abortSignal.aborted) throw new Error("omp request aborted");
+    let output: [string, string];
+    try {
+      output = await drainOmpOutput(outputPromise, abortPromise);
+    } catch (error) {
+      if (exitCode !== 0 && !request.abortSignal.aborted) {
+        throw new Error(`omp exit ${exitCode}`);
+      }
+      throw error;
+    }
+    if (request.abortSignal.aborted) throw new Error("omp request aborted");
+    if (exitCode !== 0) {
+      throw new Error(`omp exit ${exitCode}`);
+    }
+    return output[0];
+  } catch (error) {
+    kill();
+    await Promise.race([
+      Promise.allSettled([child.exited, stdinPromise, stdoutPromise, stderrPromise]),
+      new Promise<void>((resolve) => setTimeout(resolve, OMP_CLEANUP_GRACE_MS)),
+    ]);
+    throw error;
+  } finally {
+    request.abortSignal.removeEventListener("abort", onAbort);
+  }
+}
+
+async function completeWithProvider(request: CompletionRequest): Promise<string> {
+  return request.config.provider === "omp"
+    ? completeWithOmp(request)
+    : completeWithAiSdk(request);
+}
+
 export class AiSdkNamer implements Namer {
   readonly #env: NodeJS.ProcessEnv;
   readonly #complete: Complete;
 
   constructor(
     env: NodeJS.ProcessEnv = process.env,
-    complete: Complete = completeWithAiSdk,
+    complete: Complete = completeWithProvider,
   ) {
     this.#env = env;
     this.#complete = complete;
@@ -319,6 +484,7 @@ export class AiSdkNamer implements Namer {
         system,
         maxOutputTokens: 32_768,
         maxRetries: 1,
+        env: this.#env,
         abortSignal: AbortSignal.timeout(config.timeoutMs),
       });
       return parseSuggestion(text);
