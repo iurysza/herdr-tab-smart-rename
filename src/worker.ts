@@ -125,6 +125,10 @@ export async function runWorker(
       if (event.tab_id) progressBases.delete(event.tab_id);
       return;
     }
+    if (event.type === "pane_renamed" && event.pane_id && event.label) {
+      await service.acknowledge("pane", event.pane_id, event.label);
+      return;
+    }
     if (event.type === "workspace_closed") return;
 
     const current = await snapshot(env);

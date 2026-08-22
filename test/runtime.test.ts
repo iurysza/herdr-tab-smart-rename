@@ -13,12 +13,16 @@ test("CLI dispatch routes actions without executing on import", async () => {
   const actions = {
     status: (options: { dryRun: boolean }) => calls.push(["status", options]),
     once: (options: { dryRun: boolean }) => calls.push(["once", options]),
+    "reset-pane": (options: { dryRun: boolean }) =>
+      calls.push(["reset-pane", options]),
   };
   await dispatch("status", { actions });
   await dispatch("once", { actions, dryRun: true });
+  await dispatch("reset-pane", { actions });
   assert.deepEqual(calls, [
     ["status", { dryRun: false }],
     ["once", { dryRun: true }],
+    ["reset-pane", { dryRun: false }],
   ]);
   await assert.rejects(dispatch("unknown", { actions }), /^Error: usage:/);
 

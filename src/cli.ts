@@ -47,11 +47,27 @@ export function currentResultNotice(result: RenameResult | null): {
   body: string;
   sound: "done" | "request";
 } {
-  const change = result?.changes.find((item) => item.kind === "tab");
-  if (change) {
+  const tabChange = result?.changes.find((item) => item.kind === "tab");
+  const paneChanges = result?.changes.filter((item) => item.kind === "pane") ?? [];
+  if (tabChange) {
     return {
       title: "Tab renamed",
+      body: `${tabChange.from} -> ${tabChange.to}`,
+      sound: "done",
+    };
+  }
+  if (paneChanges.length === 1) {
+    const change = paneChanges[0]!;
+    return {
+      title: "Pane renamed",
       body: `${change.from} -> ${change.to}`,
+      sound: "done",
+    };
+  }
+  if (paneChanges.length > 1) {
+    return {
+      title: "Panes renamed",
+      body: `${paneChanges.length} panes`,
       sound: "done",
     };
   }
@@ -157,10 +173,11 @@ async function renameAll(): Promise<RenameResult[]> {
 }
 
 interface OnceOptions {
-  resetKind?: "workspace" | "tab" | null;
+  resetKind?: "workspace" | "tab" | "pane" | null;
   forceRefresh?: boolean;
   dryRun?: boolean;
   progress?: boolean;
+  targetPaneId?: string | null;
 }
 
 async function once({
@@ -168,11 +185,18 @@ async function once({
   forceRefresh = false,
   dryRun = false,
   progress = false,
+  targetPaneId = null,
 }: OnceOptions = {}): Promise<RenameResult | null> {
   const current = await snapshot();
-  const tabId = process.env.HERDR_TAB_ID || current.focused_tab_id;
+  let tabId: string | undefined;
+  if (resetKind === "pane") {
+    const paneId =
+      targetPaneId ?? process.env.HERDR_PANE_ID ?? current.focused_pane_id;
+    tabId = current.panes.find((pane) => pane.pane_id === paneId)?.tab_id;
+  }
+  tabId ??= process.env.HERDR_TAB_ID ?? current.focused_tab_id;
   const workspaceId =
-    process.env.HERDR_WORKSPACE_ID || current.focused_workspace_id;
+    process.env.HERDR_WORKSPACE_ID ?? current.focused_workspace_id;
   if (!tabId || !workspaceId) throw new Error("No current Herdr tab/workspace");
 
   const stateDir = dryRun
@@ -252,7 +276,10 @@ async function renameEveryTab(): Promise<void> {
   const results = await renameAll();
   const renamed = results.reduce(
     (count, result) =>
-      count + result.changes.filter((item) => item.kind === "tab").length,
+      count +
+      result.changes.filter(
+        (item) => item.kind === "tab" || item.kind === "pane",
+      ).length,
     0,
   );
   await notify(
@@ -281,6 +308,7 @@ const defaultActions: NonNullable<DispatchOptions["actions"]> = {
   "reset-tab": () => once({ resetKind: "tab", forceRefresh: true }),
   "reset-workspace": () =>
     once({ resetKind: "workspace", forceRefresh: true }),
+  "reset-pane": () => once({ resetKind: "pane", forceRefresh: true }),
 };
 
 export async function dispatch(
@@ -290,7 +318,7 @@ export async function dispatch(
   const action = command ? actions[command] : undefined;
   if (!action) {
     throw new Error(
-      "usage: cli.ts start|stop|status|configure-ai|configure-prompt|check-ai|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-workspace",
+      "usage: cli.ts start|stop|status|configure-ai|configure-prompt|check-ai|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-pane|reset-workspace",
     );
   }
   return action({ dryRun });

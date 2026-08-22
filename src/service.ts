@@ -11,6 +11,7 @@ import {
   resetOwnership,
   shouldCallModel,
   workspaceCandidate,
+  type OwnershipRecord,
   type PaneContext,
   type RenameChange,
   type RenameResult,
@@ -46,7 +47,7 @@ export interface ServiceDependencies {
     env?: NodeJS.ProcessEnv,
   ): Promise<PaneContext>;
   rename(
-    kind: "workspace" | "tab",
+    kind: "workspace" | "tab" | "pane",
     id: string,
     label: string,
     env?: NodeJS.ProcessEnv,
@@ -55,7 +56,7 @@ export interface ServiceDependencies {
 
 export interface EvaluateOptions {
   snapshot?: HerdrSnapshot;
-  resetKind?: "workspace" | "tab" | null;
+  resetKind?: "workspace" | "tab" | "pane" | null;
   forceModel?: boolean;
   forceRefresh?: boolean;
 }
@@ -119,6 +120,13 @@ export function reconcileSnapshot(
       isDefaultLabel(tab.label, tab.number),
     );
   }
+  for (const pane of snap.panes) {
+    state.panes[pane.pane_id] = reconcileItem(
+      state.panes[pane.pane_id],
+      pane.label ?? "",
+      isDefaultLabel(pane.label),
+    );
+  }
   return state;
 }
 
@@ -159,13 +167,18 @@ export class AutoNameService {
   }
 
   async acknowledge(
-    kind: "workspace" | "tab",
+    kind: "workspace" | "tab" | "pane",
     id: string,
     label: string,
   ): Promise<void> {
     if (!this.#stateFile || !this.#stateLock) return;
     await withStateTransaction(this.#stateFile, this.#stateLock, (state) => {
-      const collection = kind === "tab" ? state.tabs : state.workspaces;
+      const collection =
+        kind === "pane"
+          ? state.panes
+          : kind === "tab"
+            ? state.tabs
+            : state.workspaces;
       collection[id] = acknowledgeRename(collection[id], label);
     });
   }
@@ -176,6 +189,7 @@ export class AutoNameService {
     workspaceName: string,
   ): Promise<{
     focusedPane: HerdrPane | undefined;
+    panes: HerdrPane[];
     paneContexts: PaneContext[];
     context: ReturnType<typeof buildModelContext>;
   }> {
@@ -191,6 +205,43 @@ export class AutoNameService {
     }
     return {
       focusedPane,
+      panes,
+      paneContexts,
+      context: buildModelContext({ workspaceName, paneContexts }),
+    };
+  }
+
+  private async paneContextFor(
+    targetPane: HerdrPane,
+    snap: HerdrSnapshot,
+    workspaceName: string,
+    options: {
+      focusedPaneId?: string | undefined;
+      focusedContext?: PaneContext | undefined;
+    } = {},
+  ): Promise<{
+    paneContexts: PaneContext[];
+    context: ReturnType<typeof buildModelContext>;
+  }> {
+    const panes = snap.panes.filter((pane) => pane.tab_id === targetPane.tab_id);
+    const paneContexts: PaneContext[] = [];
+    for (const pane of panes) {
+      const isTarget = pane.pane_id === targetPane.pane_id;
+      const cached =
+        isTarget && pane.pane_id === options.focusedPaneId
+          ? options.focusedContext
+          : undefined;
+      const full =
+        cached ??
+        (pane.agent
+          ? await this.#dependencies.focusedPaneContext(pane, this.#env)
+          : await this.#dependencies.siblingPaneContext(pane, this.#env));
+      paneContexts.push({
+        ...full,
+        focused: isTarget,
+      });
+    }
+    return {
       paneContexts,
       context: buildModelContext({ workspaceName, paneContexts }),
     };
@@ -258,6 +309,69 @@ export class AutoNameService {
     );
   }
 
+  private async suggestLabel(
+    state: SmartRenameState,
+    persist: () => Promise<void>,
+    record: OwnershipRecord | undefined,
+    surfaceId: string,
+    context: ReturnType<typeof buildModelContext>,
+    focusedContext: PaneContext | undefined,
+    isAgentSurface: boolean,
+    options: EvaluateOptions,
+    manualReason = "manual ownership",
+    activity?: () => Promise<() => Promise<void>>,
+  ): Promise<{ label: string | null; reason: string; usedModel: boolean }> {
+    if (record?.manual) {
+      return { label: null, reason: manualReason, usedModel: false };
+    }
+    const hasUserTask = Boolean(focusedContext?.userMessages.length);
+    const heuristic = hasUserTask
+      ? null
+      : heuristicTitle(focusedContext ? { focusedPane: focusedContext } : {});
+    if (heuristic && !options.forceModel) {
+      return {
+        label: heuristic,
+        reason: "process heuristic",
+        usedModel: false,
+      };
+    }
+    const weakCommandContext = !hasUserTask && !isAgentSurface;
+    const contextReady =
+      !weakCommandContext ||
+      options.forceModel ||
+      options.forceRefresh ||
+      observeStableContext(state, surfaceId, context);
+    if (!contextReady) {
+      return {
+        label: null,
+        reason: "waiting for stable command context",
+        usedModel: false,
+      };
+    }
+    const gate = shouldCallModel(state, surfaceId, context);
+    if (!gate.allowed && !options.forceModel && !options.forceRefresh) {
+      return {
+        label: null,
+        reason: "unchanged or rate-limited context",
+        usedModel: false,
+      };
+    }
+    markModelAttempt(state, surfaceId);
+    if (!this.#dryRun) await persist();
+    const stopActivity = activity ? await activity() : undefined;
+    try {
+      const suggestion = await this.#namer.suggest(context);
+      markModelSuccess(state, surfaceId, context);
+      return {
+        label: suggestion.tab,
+        reason: suggestion.reason,
+        usedModel: true,
+      };
+    } finally {
+      await stopActivity?.();
+    }
+  }
+
   private async evaluateWithState(
     state: SmartRenameState,
     persist: () => Promise<void>,
@@ -280,74 +394,86 @@ export class AutoNameService {
         state.workspaces[workspace.workspace_id],
       );
     }
+    if (options.resetKind === "pane") {
+      for (const pane of snap.panes.filter((item) => item.tab_id === tabId)) {
+        state.panes[pane.pane_id] = resetOwnership(state.panes[pane.pane_id]);
+      }
+    }
 
     let workspaceRecord = state.workspaces[workspace.workspace_id];
     let tabRecord = state.tabs[tab.tab_id];
     let workspaceManual = workspaceRecord?.manual ?? false;
     let tabManual = tabRecord?.manual ?? false;
 
-    if (workspaceManual && tabManual) {
-      return {
-        dryRun: this.#dryRun,
-        workspace: workspace.workspace_id,
-        tab: tab.tab_id,
-        candidate: { workspace: null, tab: null },
-        reason: "manual ownership",
-        usedModel: false,
-        ownership: { workspaceManual, tabManual },
-        changes: [],
-      };
-    }
-
     const { workspaceName } = await this.workspaceDetails(workspace, snap);
-    let tabName: string | null = null;
-    let reason = tabManual ? "manual tab ownership" : "";
     let usedModel = false;
 
-    if (!tabManual) {
-      const details = await this.contextFor(tab, snap, workspaceName);
-      const focusedContext = details.paneContexts.find((pane) => pane.focused);
-      const hasUserTask = Boolean(focusedContext?.userMessages.length);
-      const heuristic = hasUserTask
-        ? null
-        : heuristicTitle(focusedContext ? { focusedPane: focusedContext } : {});
-      if (heuristic && !options.forceModel) {
-        tabName = heuristic;
-        reason = "process heuristic";
-      } else {
-        const weakCommandContext = !hasUserTask && !details.focusedPane?.agent;
-        const contextReady =
-          !weakCommandContext ||
-          options.forceModel ||
-          options.forceRefresh ||
-          observeStableContext(state, tab.tab_id, details.context);
-        if (!contextReady) {
-          reason = "waiting for stable command context";
-        } else {
-          const gate = shouldCallModel(state, tab.tab_id, details.context);
-          if (gate.allowed || options.forceModel || options.forceRefresh) {
-            markModelAttempt(state, tab.tab_id);
-            if (!this.#dryRun) await persist();
-            const stopActivity = await this.#modelActivity?.(tab);
-            try {
-              const suggestion = await this.#namer.suggest(details.context);
-              markModelSuccess(state, tab.tab_id, details.context);
-              tabName = suggestion.tab;
-              reason = suggestion.reason;
-              usedModel = true;
-            } finally {
-              await stopActivity?.();
-            }
-          } else {
-            reason = "unchanged or rate-limited context";
-          }
+    const details = await this.contextFor(tab, snap, workspaceName);
+    const tabSuggestion = tabManual
+      ? {
+          label: null as string | null,
+          reason: "manual tab ownership",
+          usedModel: false,
         }
-      }
+      : await this.suggestLabel(
+          state,
+          persist,
+          tabRecord,
+          tab.tab_id,
+          details.context,
+          details.paneContexts.find((pane) => pane.focused),
+          Boolean(details.focusedPane?.agent),
+          options,
+          "manual tab ownership",
+          () =>
+            this.#modelActivity?.(tab!) ??
+            Promise.resolve(() => Promise.resolve()),
+        );
+    let tabName = tabSuggestion.label;
+    let reason = tabSuggestion.reason;
+    usedModel ||= tabSuggestion.usedModel;
+
+    const candidatePanes: Record<string, string | null> = {};
+    const agentPanes = snap.panes.filter(
+      (pane) => pane.tab_id === tabId && pane.agent,
+    );
+    const focusedPaneId = details.focusedPane?.pane_id;
+    const focusedContext = focusedPaneId
+      ? details.paneContexts.find(
+          (context, index) =>
+            details.panes[index]!.pane_id === focusedPaneId,
+        )
+      : undefined;
+    for (const pane of agentPanes) {
+      const paneRecord = state.panes[pane.pane_id];
+      const paneDetails = await this.paneContextFor(
+        pane,
+        snap,
+        workspaceName,
+        { focusedPaneId, focusedContext },
+      );
+      const paneFocusedContext = paneDetails.paneContexts.find(
+        (context) => context.focused,
+      );
+      const suggestion = await this.suggestLabel(
+        state,
+        persist,
+        paneRecord,
+        pane.pane_id,
+        paneDetails.context,
+        paneFocusedContext,
+        Boolean(pane.agent),
+        options,
+        "manual pane ownership",
+      );
+      candidatePanes[pane.pane_id] = suggestion.label;
+      usedModel ||= suggestion.usedModel;
     }
 
     if (!this.#dryRun) {
       const latest = await this.#dependencies.snapshot(this.#env);
       reconcileSnapshot(state, latest);
+      snap = latest;
       tab = latest.tabs.find((item) => item.tab_id === tabId);
       if (!tab) return null;
       workspace = latest.workspaces.find(
@@ -361,7 +487,11 @@ export class AutoNameService {
     }
 
     const changes: RenameChange[] = [];
-    if (!workspaceManual && workspaceName && workspace.label !== workspaceName) {
+    if (
+      !workspaceManual &&
+      workspaceName &&
+      workspace.label !== workspaceName
+    ) {
       changes.push({
         kind: "workspace",
         id: workspace.workspace_id,
@@ -377,11 +507,32 @@ export class AutoNameService {
         to: tabName,
       });
     }
+    for (const pane of snap.panes.filter(
+      (pane) => pane.tab_id === tabId && pane.agent,
+    )) {
+      const paneName = candidatePanes[pane.pane_id];
+      if (
+        !state.panes[pane.pane_id]?.manual &&
+        paneName &&
+        paneName !== (pane.label ?? "")
+      ) {
+        changes.push({
+          kind: "pane",
+          id: pane.pane_id,
+          from: pane.label ?? "",
+          to: paneName,
+        });
+      }
+    }
 
     if (!this.#dryRun) {
       for (const change of changes) {
         const collection =
-          change.kind === "tab" ? state.tabs : state.workspaces;
+          change.kind === "workspace"
+            ? state.workspaces
+            : change.kind === "tab"
+              ? state.tabs
+              : state.panes;
         const previous = collection[change.id];
         collection[change.id] = prepareRename(previous, change.to);
         await persist();
@@ -405,7 +556,7 @@ export class AutoNameService {
       dryRun: this.#dryRun,
       workspace: workspace.workspace_id,
       tab: tab.tab_id,
-      candidate: { workspace: workspaceName, tab: tabName },
+      candidate: { workspace: workspaceName, tab: tabName, panes: candidatePanes },
       reason,
       usedModel,
       ownership: { workspaceManual, tabManual },

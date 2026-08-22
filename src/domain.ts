@@ -13,6 +13,7 @@ export interface SmartRenameState {
   version: 1;
   workspaces: Record<string, OwnershipRecord>;
   tabs: Record<string, OwnershipRecord>;
+  panes: Record<string, OwnershipRecord>;
   modelAttempts: Record<string, number>;
   fingerprints: Record<string, string>;
   pendingFingerprints: Record<string, string>;
@@ -65,7 +66,7 @@ export interface NameSuggestion {
 }
 
 export interface RenameChange {
-  kind: "workspace" | "tab";
+  kind: "workspace" | "tab" | "pane";
   id: string;
   from: string;
   to: string;
@@ -75,7 +76,11 @@ export interface RenameResult {
   dryRun: boolean;
   workspace: string;
   tab: string;
-  candidate: { workspace: string | null; tab: string | null };
+  candidate: {
+    workspace: string | null;
+    tab: string | null;
+    panes?: Record<string, string | null>;
+  };
   reason: string;
   usedModel: boolean;
   ownership: { workspaceManual: boolean; tabManual: boolean };
@@ -91,6 +96,7 @@ export function emptyState(): SmartRenameState {
     version: 1,
     workspaces: {},
     tabs: {},
+    panes: {},
     modelAttempts: {},
     fingerprints: {},
     pendingFingerprints: {},

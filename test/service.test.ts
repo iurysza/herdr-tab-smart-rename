@@ -156,7 +156,7 @@ test("all-tab dry run visits tabs sequentially without writing state", async () 
   }
 });
 
-test("manual ownership short-circuits context and model work", async () => {
+test("manual ownership short-circuits tab context and model work but still names agent panes", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-manual-"));
   const paths = statePaths(dir);
   const snap = liveSnapshot("Manual Task");
@@ -164,23 +164,28 @@ test("manual ownership short-circuits context and model work", async () => {
     stateFile: paths.state,
     stateLock: paths.stateLock,
     namer: { suggest: async () => unexpectedModel() },
-    dependencies: dependencies(() => snap, {
-      focusedPaneContext: async () => {
-        throw new Error("unexpected context read");
-      },
-    }),
+    dependencies: dependencies(() => snap),
   });
   try {
     await service.initialize(snap);
     const result = await service.evaluate("t1", { snapshot: snap });
     assert.ok(result);
-    assert.equal(result.reason, "manual ownership");
+    assert.equal(result.reason, "manual tab ownership");
+    assert.equal(result.candidate.tab, null);
+    assert.equal(
+      result.changes.find((change) => change.kind === "pane")?.to,
+      "Run Tests",
+    );
+    assert.equal(
+      result.changes.find((change) => change.kind === "tab"),
+      undefined,
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test("explicit refresh reclaims manual tabs and bypasses model gates", async () => {
+test("explicit refresh reclaims manual tabs and bypasses model gates for tabs and panes", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-force-"));
   const paths = statePaths(dir);
   const snap = liveSnapshot("Manual Task");
@@ -206,6 +211,7 @@ test("explicit refresh reclaims manual tabs and bypasses model gates", async () 
         contextFor(pane, { userMessages: ["Give this tab a fresh name"] }),
       rename: async (kind, id, label) => {
         if (kind === "tab" && id === "t1") snap.tabs[0]!.label = label;
+        if (kind === "pane" && id === "p1") snap.panes[0]!.label = label;
       },
     }),
   });
@@ -223,7 +229,7 @@ test("explicit refresh reclaims manual tabs and bypasses model gates", async () 
     const forced = await service.evaluate("t1", { forceRefresh: true });
     assert.ok(forced);
     assert.equal(forced.usedModel, true);
-    assert.equal(calls, 2);
+    assert.equal(calls, 4);
     assert.deepEqual(activity, [
       "start:Manual Task",
       "stop",
@@ -296,6 +302,168 @@ test("failed model calls persist attempt backoff without success fingerprint", a
     const state = await loadState(paths.state);
     assert.equal(typeof state.modelAttempts.t1, "number");
     assert.equal(state.fingerprints.t1, undefined);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("two agent panes in one tab get independent pane labels while tab keeps one workstream title", async () => {
+  const dir = await mkdtemp(
+    path.join(os.tmpdir(), "tab-smart-rename-pane-labels-"),
+  );
+  const paths = statePaths(dir);
+  const snap = liveSnapshot();
+  snap.layouts[0]!.focused_pane_id = "p1";
+  snap.panes[0]!.pane_id = "p1";
+  snap.panes[0]!.agent = "pi";
+  snap.panes.push({
+    pane_id: "p2",
+    tab_id: "t1",
+    workspace_id: "w1",
+    agent: "pi",
+    cwd: "/tmp/agents",
+  });
+  const service = new AutoNameService({
+    stateFile: paths.state,
+    stateLock: paths.stateLock,
+    namer: {
+      suggest: async (context) => {
+        const requests = "userRequests" in context ? context.userRequests : [];
+        const first = requests[0] ?? "";
+        if (first.includes("debug")) return { tab: "Debug Auth Flow", reason: "debug task" };
+        if (first.includes("review")) return { tab: "Review API Changes", reason: "review task" };
+        return { tab: "Shared Work", reason: "fallback" };
+      },
+    },
+    dependencies: dependencies(() => snap, {
+      focusedPaneContext: async (pane) =>
+        pane.pane_id === "p1"
+          ? contextFor(pane, { userMessages: ["debug the auth flow"] })
+          : contextFor(pane, { userMessages: ["review the api changes"] }),
+      rename: async (kind, id, label) => {
+        if (kind === "tab" && id === "t1") snap.tabs[0]!.label = label;
+        const pane = snap.panes.find((item) => item.pane_id === id);
+        if (kind === "pane" && pane) pane.label = label;
+      },
+    }),
+  });
+  try {
+    await service.initialize(snap);
+    const result = await service.evaluate("t1", { forceRefresh: true });
+    assert.ok(result);
+    assert.equal(result.candidate.tab, "Debug Auth Flow");
+    assert.equal(result.candidate.panes?.p1, "Debug Auth Flow");
+    assert.equal(result.candidate.panes?.p2, "Review API Changes");
+    const paneChanges = result.changes.filter((change) => change.kind === "pane");
+    assert.equal(paneChanges.length, 2);
+    assert.deepEqual(
+      new Set(paneChanges.map((change) => change.to)),
+      new Set(["Debug Auth Flow", "Review API Changes"]),
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("manual pane ownership blocks automatic pane rename until reset", async () => {
+  const dir = await mkdtemp(
+    path.join(os.tmpdir(), "tab-smart-rename-pane-manual-"),
+  );
+  const paths = statePaths(dir);
+  const snap = liveSnapshot();
+  const service = new AutoNameService({
+    stateFile: paths.state,
+    stateLock: paths.stateLock,
+    namer: { suggest: async () => ({ tab: "Auto Pane Name", reason: "task" }) },
+    dependencies: dependencies(() => snap, {
+      focusedPaneContext: async (pane) =>
+        contextFor(pane, { userMessages: ["rename this pane automatically"] }),
+    }),
+  });
+  try {
+    await service.initialize(snap);
+    await withStateTransaction(paths.state, paths.stateLock, (state) => {
+      state.panes.p1 = { manual: true, observedLabel: "My Pane" };
+    });
+    const protectedRename = await service.evaluate("t1", { forceRefresh: true });
+    assert.ok(protectedRename);
+    assert.equal(
+      protectedRename.changes.find((change) => change.kind === "pane"),
+      undefined,
+    );
+
+    const reset = await service.evaluate("t1", {
+      resetKind: "pane",
+      forceRefresh: true,
+    });
+    assert.ok(reset);
+    assert.equal(
+      reset.changes.find((change) => change.kind === "pane")?.to,
+      "Auto Pane Name",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("pane renamed event marks manual ownership and is reconciled", async () => {
+  const dir = await mkdtemp(
+    path.join(os.tmpdir(), "tab-smart-rename-pane-event-"),
+  );
+  const paths = statePaths(dir);
+  const snap = liveSnapshot();
+  const service = new AutoNameService({
+    stateFile: paths.state,
+    stateLock: paths.stateLock,
+    namer: { suggest: async () => ({ tab: "Auto Pane Name", reason: "task" }) },
+    dependencies: dependencies(() => snap),
+  });
+  try {
+    await service.initialize(snap);
+    snap.panes[0]!.label = "User Pane Name";
+    await service.acknowledge("pane", "p1", "User Pane Name");
+    const result = await service.evaluate("t1", { forceRefresh: true });
+    assert.ok(result);
+    assert.equal(
+      result.changes.find((change) => change.kind === "pane"),
+      undefined,
+    );
+    assert.equal((await loadState(paths.state)).panes.p1?.manual, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("non-agent panes are not renamed", async () => {
+  const dir = await mkdtemp(
+    path.join(os.tmpdir(), "tab-smart-rename-pane-non-agent-"),
+  );
+  const paths = statePaths(dir);
+  const snap = liveSnapshot();
+  snap.panes.push({
+    pane_id: "server",
+    tab_id: "t1",
+    workspace_id: "w1",
+    cwd: "/tmp/agents",
+  });
+  const service = new AutoNameService({
+    stateFile: paths.state,
+    stateLock: paths.stateLock,
+    namer: { suggest: async () => ({ tab: "Should Not Apply", reason: "task" }) },
+    dependencies: dependencies(() => snap),
+  });
+  try {
+    await service.initialize(snap);
+    const result = await service.evaluate("t1", { forceRefresh: true });
+    assert.ok(result);
+    assert.equal(
+      result.changes.some((change) => change.kind === "pane" && change.id === "server"),
+      false,
+    );
+    assert.equal(
+      result.changes.find((change) => change.kind === "pane" && change.id === "p1")?.to,
+      "Run Tests",
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

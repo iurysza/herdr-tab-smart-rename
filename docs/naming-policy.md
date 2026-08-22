@@ -59,7 +59,8 @@ The model does not simulate or decide the rules below.
 
 - **Ownership:** meaningful existing names are manual. Unexpected renames become manual. Manual workspaces and tabs are neither inspected nor renamed. Reset and explicit rename actions reclaim their targets.
 - **Workspaces:** identity stays stable and resolves from Herdr worktree, meaningful existing name, Git root, then stable pane directory. Cross-project tabs do not rename workspaces.
-- **Pane choice:** focused agent, working or blocked agent, focused command, then first pane.
+- **Pane choice:** focused agent, working or blocked agent, focused command, then first pane. Agent panes are also named individually from their own session and process context; non-agent panes are left unchanged.
+- **Pane ownership:** meaningful existing pane names are manual. Unexpected pane renames become manual. Pane names are neither inspected nor renamed while manual. Reset and explicit rename actions reclaim their targets.
 - **Deterministic names:** test runner → `Run Tests`; development server → `Dev Server`; log follower → `View Logs`; SSH or Mosh → `Remote Shell`.
 - **Context:** agent sessions contribute origin, midpoint, and up to four recent user requests; focused commands contribute bounded process data and output; siblings contribute process summaries only.
 - **Safety:** context is sanitized and capped at 4,500 serialized characters; environment values are excluded; common credential shapes are redacted best-effort.

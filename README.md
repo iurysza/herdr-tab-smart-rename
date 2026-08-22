@@ -62,6 +62,7 @@ Every explicit rename ends with a notification: renamed, not renamed, or failed.
 | `rename-now` | Rename the current tab |
 | `rename-all` | Rename every tab |
 | `reset-tab` | Return the current tab to automatic naming |
+| `reset-pane` | Return the current pane to automatic naming |
 | `reset-workspace` | Return the workspace to automatic naming |
 | `configure-ai` | Edit provider settings |
 | `configure-prompt` | Edit naming instructions |
@@ -74,7 +75,9 @@ herdr plugin action invoke <action> --plugin tab-smart-rename
 
 ## Naming behavior
 
-Smart Rename uses one dominant pane: focused agent, another active agent, focused command, then first pane. Supporting servers and logs never replace an active agent's task.
+Smart Rename uses one dominant pane to name the shared tab workstream: focused agent, another active agent, focused command, then first pane. Supporting servers and logs never replace an active agent's task.
+
+Each recognised agent pane also gets its own label from its individual session and process context. Two agents in the same tab can show different task labels, while the tab keeps one shared workstream title. Manual pane names win until reset or reclaimed.
 
 Labels use 2–4 Title Case words, stay under 30 characters, and describe the task—not its tool, model, or project. Weak evidence produces no rename. Manual labels remain locked until reset or explicit rename.
 

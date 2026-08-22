@@ -35,6 +35,7 @@ test("Herdr events normalize while subscriptions avoid output spam", () => {
   assert.equal(normalizeHerdrEvent({ id: "response" }), null);
   const subscriptions: readonly string[] = LIFECYCLE_SUBSCRIPTIONS;
   assert.ok(subscriptions.includes("tab.renamed"));
+  assert.ok(subscriptions.includes("pane.renamed"));
   assert.equal(subscriptions.includes("pane.output_matched"), false);
   assert.equal(tabProgressBase("\u2063◆ Review Auth"), "Review Auth");
   assert.equal(tabProgressBase("◆ Review Auth"), null);

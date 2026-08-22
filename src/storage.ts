@@ -27,6 +27,7 @@ const StateSchema: z.ZodType<SmartRenameState> = z.looseObject({
   version: z.literal(1),
   workspaces: z.record(z.string(), OwnershipRecordSchema),
   tabs: z.record(z.string(), OwnershipRecordSchema),
+  panes: z.record(z.string(), OwnershipRecordSchema),
   modelAttempts: z.record(z.string(), z.number()),
   fingerprints: z.record(z.string(), z.string()),
   pendingFingerprints: z.record(z.string(), z.string()),

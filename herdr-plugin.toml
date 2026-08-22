@@ -72,6 +72,13 @@ contexts = ["tab", "pane"]
 command = ["bun", "src/cli.ts", "reset-tab"]
 
 [[actions]]
+id = "reset-pane"
+title = "Smart Rename: reset pane"
+description = "Clear the current pane's manual lock and evaluate its tab."
+contexts = ["pane", "tab"]
+command = ["sh", "src/run-bun.sh", "src/cli.ts", "reset-pane"]
+
+[[actions]]
 id = "reset-workspace"
 title = "Smart Rename: reset workspace"
 description = "Clear the current workspace's manual lock and evaluate it."

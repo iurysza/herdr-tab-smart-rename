@@ -121,6 +121,7 @@ export const LIFECYCLE_SUBSCRIPTIONS = [
   "tab.closed",
   "tab.focused",
   "pane.created",
+  "pane.renamed",
   "pane.closed",
   "pane.focused",
 ] as const;
@@ -181,7 +182,7 @@ export async function snapshot(
 }
 
 export async function rename(
-  kind: "workspace" | "tab",
+  kind: "workspace" | "tab" | "pane",
   id: string,
   label: string,
   env: NodeJS.ProcessEnv = process.env,
