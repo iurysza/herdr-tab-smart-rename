@@ -2,6 +2,7 @@
 import { appendFile, chmod } from "node:fs/promises";
 import { type Socket } from "node:net";
 import {
+  paneLabelUpdate,
   snapshot,
   subscribe,
   tabProgressBase,
@@ -125,8 +126,9 @@ export async function runWorker(
       if (event.tab_id) progressBases.delete(event.tab_id);
       return;
     }
-    if (event.type === "pane_renamed" && event.pane_id && event.label) {
-      await service.acknowledge("pane", event.pane_id, event.label);
+    const paneUpdate = paneLabelUpdate(event);
+    if (paneUpdate) {
+      await service.acknowledge("pane", paneUpdate.paneId, paneUpdate.label);
       return;
     }
     if (event.type === "workspace_closed") return;

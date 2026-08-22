@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { currentResultNotice, dispatch } from "../src/cli.ts";
+import {
+  currentResultNotice,
+  dispatch,
+  renamedTabCount,
+} from "../src/cli.ts";
 import { type RenameResult } from "../src/domain.ts";
 import { acquireLock, pidAlive, workerInfo } from "../src/storage.ts";
 import { shouldIgnoreProgressRename } from "../src/worker.ts";
@@ -75,6 +79,26 @@ test("CLI dispatch routes actions without executing on import", async () => {
       body: "1 -> Review Auth Changes",
       sound: "done",
     },
+  );
+  assert.equal(
+    renamedTabCount([
+      {
+        ...result,
+        changes: [
+          { kind: "tab", id: "t1", from: "1", to: "Review Auth Changes" },
+          { kind: "pane", id: "p1", from: "", to: "Review Auth Changes" },
+          { kind: "pane", id: "p2", from: "", to: "Fix Pane Naming" },
+        ],
+      },
+      {
+        ...result,
+        tab: "t2",
+        changes: [
+          { kind: "pane", id: "p3", from: "", to: "Run Integration Tests" },
+        ],
+      },
+    ]),
+    1,
   );
 });
 

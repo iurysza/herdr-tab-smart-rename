@@ -229,7 +229,7 @@ test("explicit refresh reclaims manual tabs and bypasses model gates for tabs an
     const forced = await service.evaluate("t1", { forceRefresh: true });
     assert.ok(forced);
     assert.equal(forced.usedModel, true);
-    assert.equal(calls, 4);
+    assert.equal(calls, 2);
     assert.deepEqual(activity, [
       "start:Manual Task",
       "stop",
@@ -307,6 +307,73 @@ test("failed model calls persist attempt backoff without success fingerprint", a
   }
 });
 
+test("pane model failure does not persist an unapplied tab fingerprint", async () => {
+  const dir = await mkdtemp(
+    path.join(os.tmpdir(), "tab-smart-rename-partial-failure-"),
+  );
+  const paths = statePaths(dir);
+  const snap = liveSnapshot();
+  snap.panes.push({
+    pane_id: "p2",
+    tab_id: "t1",
+    workspace_id: "w1",
+    agent: "pi",
+    cwd: "/tmp/agents",
+  });
+  let paneFails = true;
+  const renames: string[] = [];
+  const service = new AutoNameService({
+    stateFile: paths.state,
+    stateLock: paths.stateLock,
+    namer: {
+      suggest: async (context) => {
+        const requests = "userRequests" in context ? context.userRequests : [];
+        if (requests[0]?.includes("review") && paneFails) {
+          throw new Error("pane provider failure");
+        }
+        return requests[0]?.includes("review")
+          ? { tab: "Review API Changes", reason: "review task" }
+          : { tab: "Debug Auth Flow", reason: "debug task" };
+      },
+    },
+    dependencies: dependencies(() => snap, {
+      focusedPaneContext: async (pane) =>
+        pane.pane_id === "p1"
+          ? contextFor(pane, { userMessages: ["debug the auth flow"] })
+          : contextFor(pane, { userMessages: ["review the api changes"] }),
+      rename: async (kind, id, label) => {
+        renames.push(`${kind}:${id}`);
+        if (kind === "tab" && id === "t1") snap.tabs[0]!.label = label;
+        const pane = snap.panes.find((item) => item.pane_id === id);
+        if (kind === "pane" && pane) pane.label = label;
+      },
+    }),
+  });
+  try {
+    await service.initialize(snap);
+    await assert.rejects(service.evaluate("t1"), /pane provider failure/);
+    const failedState = await loadState(paths.state);
+    assert.equal(failedState.fingerprints.t1, undefined);
+    assert.equal(failedState.fingerprints.p1, undefined);
+    assert.deepEqual(renames, []);
+
+    await withStateTransaction(paths.state, paths.stateLock, (state) => {
+      state.modelAttempts.t1 = 0;
+      state.modelAttempts.p2 = 0;
+    });
+    paneFails = false;
+    const recovered = await service.evaluate("t1");
+    assert.ok(recovered);
+    assert.equal(
+      recovered.changes.find((change) => change.kind === "tab")?.to,
+      "Debug Auth Flow",
+    );
+    assert.equal(snap.tabs[0]!.label, "Debug Auth Flow");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("two agent panes in one tab get independent pane labels while tab keeps one workstream title", async () => {
   const dir = await mkdtemp(
     path.join(os.tmpdir(), "tab-smart-rename-pane-labels-"),
@@ -323,11 +390,15 @@ test("two agent panes in one tab get independent pane labels while tab keeps one
     agent: "pi",
     cwd: "/tmp/agents",
   });
+  let modelCalls = 0;
+  const fullReads: string[] = [];
+  const siblingReads: string[] = [];
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
     namer: {
       suggest: async (context) => {
+        modelCalls += 1;
         const requests = "userRequests" in context ? context.userRequests : [];
         const first = requests[0] ?? "";
         if (first.includes("debug")) return { tab: "Debug Auth Flow", reason: "debug task" };
@@ -336,10 +407,16 @@ test("two agent panes in one tab get independent pane labels while tab keeps one
       },
     },
     dependencies: dependencies(() => snap, {
-      focusedPaneContext: async (pane) =>
-        pane.pane_id === "p1"
+      focusedPaneContext: async (pane) => {
+        fullReads.push(pane.pane_id);
+        return pane.pane_id === "p1"
           ? contextFor(pane, { userMessages: ["debug the auth flow"] })
-          : contextFor(pane, { userMessages: ["review the api changes"] }),
+          : contextFor(pane, { userMessages: ["review the api changes"] });
+      },
+      siblingPaneContext: async (pane) => {
+        siblingReads.push(pane.pane_id);
+        return { ...contextFor(pane), focused: false, userMessages: [] };
+      },
       rename: async (kind, id, label) => {
         if (kind === "tab" && id === "t1") snap.tabs[0]!.label = label;
         const pane = snap.panes.find((item) => item.pane_id === id);
@@ -360,6 +437,9 @@ test("two agent panes in one tab get independent pane labels while tab keeps one
       new Set(paneChanges.map((change) => change.to)),
       new Set(["Debug Auth Flow", "Review API Changes"]),
     );
+    assert.equal(modelCalls, 2);
+    assert.deepEqual(fullReads, ["p1", "p2"]);
+    assert.deepEqual(siblingReads, ["p2"]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -394,6 +474,7 @@ test("manual pane ownership blocks automatic pane rename until reset", async () 
 
     const reset = await service.evaluate("t1", {
       resetKind: "pane",
+      targetPaneId: "p1",
       forceRefresh: true,
     });
     assert.ok(reset);
@@ -406,9 +487,80 @@ test("manual pane ownership blocks automatic pane rename until reset", async () 
   }
 });
 
-test("pane renamed event marks manual ownership and is reconciled", async () => {
+test("reset-pane preserves manual sibling panes and skips their context", async () => {
   const dir = await mkdtemp(
-    path.join(os.tmpdir(), "tab-smart-rename-pane-event-"),
+    path.join(os.tmpdir(), "tab-smart-rename-pane-target-"),
+  );
+  const paths = statePaths(dir);
+  const snap = liveSnapshot("Manual Tab");
+  snap.panes[0]!.label = "Protected One";
+  snap.panes.push({
+    pane_id: "p2",
+    tab_id: "t1",
+    workspace_id: "w1",
+    agent: "pi",
+    label: "Protected Two",
+    cwd: "/tmp/agents",
+  });
+  const contextReads: string[] = [];
+  const service = new AutoNameService({
+    stateFile: paths.state,
+    stateLock: paths.stateLock,
+    namer: {
+      suggest: async () => ({ tab: "Automatic Pane", reason: "task" }),
+    },
+    dependencies: dependencies(() => snap, {
+      focusedPaneContext: async (pane) => {
+        contextReads.push(`full:${pane.pane_id}`);
+        return contextFor(pane, { userMessages: ["rename this pane"] });
+      },
+      siblingPaneContext: async (pane) => {
+        contextReads.push(`sibling:${pane.pane_id}`);
+        return { ...contextFor(pane), focused: false, userMessages: [] };
+      },
+      rename: async (kind, id, label) => {
+        const pane = snap.panes.find((item) => item.pane_id === id);
+        if (kind === "pane" && pane) pane.label = label;
+      },
+    }),
+  });
+  try {
+    await service.initialize(snap);
+    await assert.rejects(
+      service.evaluate("t1", { resetKind: "pane", forceRefresh: true }),
+      /reset-pane requires a pane/,
+    );
+
+    const result = await service.evaluate("t1", {
+      resetKind: "pane",
+      targetPaneId: "p1",
+      forceRefresh: true,
+    });
+    assert.ok(result);
+    assert.deepEqual(
+      result.changes.filter((change) => change.kind === "pane"),
+      [
+        {
+          kind: "pane",
+          id: "p1",
+          from: "Protected One",
+          to: "Automatic Pane",
+        },
+      ],
+    );
+    assert.deepEqual(contextReads, ["full:p1"]);
+    const state = await loadState(paths.state);
+    assert.equal(state.panes.p1?.manual, false);
+    assert.equal(state.panes.p2?.manual, true);
+    assert.equal(snap.panes[1]!.label, "Protected Two");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("pane updated event marks manual ownership and is reconciled", async () => {
+  const dir = await mkdtemp(
+    path.join(os.tmpdir(), "tab-smart-rename-pane-update-"),
   );
   const paths = statePaths(dir);
   const snap = liveSnapshot();

@@ -1,6 +1,7 @@
 import {
   acknowledgeRename,
   buildModelContext,
+  fingerprint,
   heuristicTitle,
   isDefaultLabel,
   markModelAttempt,
@@ -11,6 +12,8 @@ import {
   resetOwnership,
   shouldCallModel,
   workspaceCandidate,
+  type NameSuggestion,
+  type NamingContext,
   type OwnershipRecord,
   type PaneContext,
   type RenameChange,
@@ -57,6 +60,7 @@ export interface ServiceDependencies {
 export interface EvaluateOptions {
   snapshot?: HerdrSnapshot;
   resetKind?: "workspace" | "tab" | "pane" | null;
+  targetPaneId?: string;
   forceModel?: boolean;
   forceRefresh?: boolean;
 }
@@ -75,6 +79,23 @@ interface ServiceOptions {
   dependencies?: Partial<ServiceDependencies>;
 }
 
+interface PaneContextCache {
+  full: Map<string, Promise<PaneContext>>;
+  sibling: Map<string, Promise<PaneContext>>;
+}
+
+interface ModelSuccess {
+  surfaceId: string;
+  context: NamingContext;
+}
+
+interface SuggestedLabel {
+  label: string | null;
+  reason: string;
+  usedModel: boolean;
+  modelSuccess?: ModelSuccess;
+}
+
 const defaultDependencies: ServiceDependencies = {
   snapshot,
   gitRoot,
@@ -86,8 +107,11 @@ const defaultDependencies: ServiceDependencies = {
 export function focusedPaneFor(
   tab: HerdrTab,
   snap: HerdrSnapshot,
+  candidates?: readonly HerdrPane[],
 ): HerdrPane | undefined {
-  const panes = snap.panes.filter((pane) => pane.tab_id === tab.tab_id);
+  const panes = candidates
+    ? [...candidates]
+    : snap.panes.filter((pane) => pane.tab_id === tab.tab_id);
   const layout = snap.layouts.find((item) => item.tab_id === tab.tab_id);
   const id = layout?.focused_pane_id ?? snap.focused_pane_id;
   const focused = panes.find((pane) => pane.pane_id === id);
@@ -183,29 +207,52 @@ export class AutoNameService {
     });
   }
 
+  private fullPaneContext(
+    pane: HerdrPane,
+    cache: PaneContextCache,
+  ): Promise<PaneContext> {
+    const cached = cache.full.get(pane.pane_id);
+    if (cached) return cached;
+    const current = this.#dependencies.focusedPaneContext(pane, this.#env);
+    cache.full.set(pane.pane_id, current);
+    return current;
+  }
+
+  private siblingPaneContext(
+    pane: HerdrPane,
+    cache: PaneContextCache,
+  ): Promise<PaneContext> {
+    const full = cache.full.get(pane.pane_id);
+    if (full) return full;
+    const cached = cache.sibling.get(pane.pane_id);
+    if (cached) return cached;
+    const current = this.#dependencies.siblingPaneContext(pane, this.#env);
+    cache.sibling.set(pane.pane_id, current);
+    return current;
+  }
+
   private async contextFor(
     tab: HerdrTab,
     snap: HerdrSnapshot,
     workspaceName: string,
+    panes: readonly HerdrPane[],
+    cache: PaneContextCache,
   ): Promise<{
     focusedPane: HerdrPane | undefined;
-    panes: HerdrPane[];
     paneContexts: PaneContext[];
     context: ReturnType<typeof buildModelContext>;
   }> {
-    const focusedPane = focusedPaneFor(tab, snap);
-    const panes = snap.panes.filter((pane) => pane.tab_id === tab.tab_id);
+    const focusedPane = focusedPaneFor(tab, snap, panes);
     const paneContexts: PaneContext[] = [];
     for (const pane of panes) {
-      paneContexts.push(
-        pane.pane_id === focusedPane?.pane_id
-          ? await this.#dependencies.focusedPaneContext(pane, this.#env)
-          : await this.#dependencies.siblingPaneContext(pane, this.#env),
-      );
+      const focused = pane.pane_id === focusedPane?.pane_id;
+      const context = focused
+        ? await this.fullPaneContext(pane, cache)
+        : await this.siblingPaneContext(pane, cache);
+      paneContexts.push({ ...context, focused });
     }
     return {
       focusedPane,
-      panes,
       paneContexts,
       context: buildModelContext({ workspaceName, paneContexts }),
     };
@@ -213,33 +260,20 @@ export class AutoNameService {
 
   private async paneContextFor(
     targetPane: HerdrPane,
-    snap: HerdrSnapshot,
+    panes: readonly HerdrPane[],
     workspaceName: string,
-    options: {
-      focusedPaneId?: string | undefined;
-      focusedContext?: PaneContext | undefined;
-    } = {},
+    cache: PaneContextCache,
   ): Promise<{
     paneContexts: PaneContext[];
     context: ReturnType<typeof buildModelContext>;
   }> {
-    const panes = snap.panes.filter((pane) => pane.tab_id === targetPane.tab_id);
     const paneContexts: PaneContext[] = [];
     for (const pane of panes) {
-      const isTarget = pane.pane_id === targetPane.pane_id;
-      const cached =
-        isTarget && pane.pane_id === options.focusedPaneId
-          ? options.focusedContext
-          : undefined;
-      const full =
-        cached ??
-        (pane.agent
-          ? await this.#dependencies.focusedPaneContext(pane, this.#env)
-          : await this.#dependencies.siblingPaneContext(pane, this.#env));
-      paneContexts.push({
-        ...full,
-        focused: isTarget,
-      });
+      const focused = pane.pane_id === targetPane.pane_id;
+      const context = focused
+        ? await this.fullPaneContext(pane, cache)
+        : await this.siblingPaneContext(pane, cache);
+      paneContexts.push({ ...context, focused });
     }
     return {
       paneContexts,
@@ -317,10 +351,11 @@ export class AutoNameService {
     context: ReturnType<typeof buildModelContext>,
     focusedContext: PaneContext | undefined,
     isAgentSurface: boolean,
+    suggestions: Map<string, Promise<NameSuggestion>>,
     options: EvaluateOptions,
     manualReason = "manual ownership",
     activity?: () => Promise<() => Promise<void>>,
-  ): Promise<{ label: string | null; reason: string; usedModel: boolean }> {
+  ): Promise<SuggestedLabel> {
     if (record?.manual) {
       return { label: null, reason: manualReason, usedModel: false };
     }
@@ -348,6 +383,19 @@ export class AutoNameService {
         usedModel: false,
       };
     }
+
+    const contextFingerprint = fingerprint(context);
+    const cached = suggestions.get(contextFingerprint);
+    if (cached) {
+      const suggestion = await cached;
+      return {
+        label: suggestion.tab,
+        reason: suggestion.reason,
+        usedModel: false,
+        modelSuccess: { surfaceId, context },
+      };
+    }
+
     const gate = shouldCallModel(state, surfaceId, context);
     if (!gate.allowed && !options.forceModel && !options.forceRefresh) {
       return {
@@ -359,14 +407,19 @@ export class AutoNameService {
     markModelAttempt(state, surfaceId);
     if (!this.#dryRun) await persist();
     const stopActivity = activity ? await activity() : undefined;
+    const pending = this.#namer.suggest(context);
+    suggestions.set(contextFingerprint, pending);
     try {
-      const suggestion = await this.#namer.suggest(context);
-      markModelSuccess(state, surfaceId, context);
+      const suggestion = await pending;
       return {
         label: suggestion.tab,
         reason: suggestion.reason,
         usedModel: true,
+        modelSuccess: { surfaceId, context },
       };
+    } catch (error) {
+      suggestions.delete(contextFingerprint);
+      throw error;
     } finally {
       await stopActivity?.();
     }
@@ -395,62 +448,110 @@ export class AutoNameService {
       );
     }
     if (options.resetKind === "pane") {
-      for (const pane of snap.panes.filter((item) => item.tab_id === tabId)) {
-        state.panes[pane.pane_id] = resetOwnership(state.panes[pane.pane_id]);
+      const targetPane = snap.panes.find(
+        (pane) =>
+          pane.pane_id === options.targetPaneId && pane.tab_id === tabId,
+      );
+      if (!targetPane) {
+        throw new Error("reset-pane requires a pane in the target tab");
       }
+      state.panes[targetPane.pane_id] = resetOwnership(
+        state.panes[targetPane.pane_id],
+      );
     }
 
     let workspaceRecord = state.workspaces[workspace.workspace_id];
     let tabRecord = state.tabs[tab.tab_id];
     let workspaceManual = workspaceRecord?.manual ?? false;
     let tabManual = tabRecord?.manual ?? false;
-
-    const { workspaceName } = await this.workspaceDetails(workspace, snap);
-    let usedModel = false;
-
-    const details = await this.contextFor(tab, snap, workspaceName);
-    const tabSuggestion = tabManual
-      ? {
-          label: null as string | null,
-          reason: "manual tab ownership",
-          usedModel: false,
-        }
-      : await this.suggestLabel(
-          state,
-          persist,
-          tabRecord,
-          tab.tab_id,
-          details.context,
-          details.paneContexts.find((pane) => pane.focused),
-          Boolean(details.focusedPane?.agent),
-          options,
-          "manual tab ownership",
-          () =>
-            this.#modelActivity?.(tab!) ??
-            Promise.resolve(() => Promise.resolve()),
-        );
-    let tabName = tabSuggestion.label;
-    let reason = tabSuggestion.reason;
-    usedModel ||= tabSuggestion.usedModel;
-
-    const candidatePanes: Record<string, string | null> = {};
     const agentPanes = snap.panes.filter(
       (pane) => pane.tab_id === tabId && pane.agent,
     );
-    const focusedPaneId = details.focusedPane?.pane_id;
-    const focusedContext = focusedPaneId
-      ? details.paneContexts.find(
-          (context, index) =>
-            details.panes[index]!.pane_id === focusedPaneId,
-        )
-      : undefined;
-    for (const pane of agentPanes) {
-      const paneRecord = state.panes[pane.pane_id];
-      const paneDetails = await this.paneContextFor(
-        pane,
+    const inspectablePanes = snap.panes.filter(
+      (pane) => pane.tab_id === tabId && !state.panes[pane.pane_id]?.manual,
+    );
+    const automaticAgentPanes = agentPanes.filter(
+      (pane) => !state.panes[pane.pane_id]?.manual,
+    );
+
+    if (workspaceManual && tabManual && automaticAgentPanes.length === 0) {
+      return {
+        dryRun: this.#dryRun,
+        workspace: workspace.workspace_id,
+        tab: tab.tab_id,
+        candidate: { workspace: null, tab: null, panes: {} },
+        reason: "manual ownership",
+        usedModel: false,
+        ownership: { workspaceManual, tabManual },
+        changes: [],
+      };
+    }
+
+    const { workspaceName } = await this.workspaceDetails(workspace, snap);
+    const contextCache: PaneContextCache = {
+      full: new Map(),
+      sibling: new Map(),
+    };
+    const suggestions = new Map<string, Promise<NameSuggestion>>();
+    const modelSuccesses: ModelSuccess[] = [];
+    let usedModel = false;
+
+    let tabSuggestion: SuggestedLabel;
+    if (tabManual) {
+      tabSuggestion = {
+        label: null,
+        reason: "manual tab ownership",
+        usedModel: false,
+      };
+    } else if (inspectablePanes.length === 0) {
+      tabSuggestion = {
+        label: null,
+        reason: "manual pane ownership",
+        usedModel: false,
+      };
+    } else {
+      const details = await this.contextFor(
+        tab,
         snap,
         workspaceName,
-        { focusedPaneId, focusedContext },
+        inspectablePanes,
+        contextCache,
+      );
+      tabSuggestion = await this.suggestLabel(
+        state,
+        persist,
+        tabRecord,
+        tab.tab_id,
+        details.context,
+        details.paneContexts.find((pane) => pane.focused),
+        Boolean(details.focusedPane?.agent),
+        suggestions,
+        options,
+        "manual tab ownership",
+        () =>
+          this.#modelActivity?.(tab!) ??
+          Promise.resolve(() => Promise.resolve()),
+      );
+    }
+    const tabName = tabSuggestion.label;
+    let reason = tabSuggestion.reason;
+    usedModel ||= tabSuggestion.usedModel;
+    if (tabSuggestion.modelSuccess) {
+      modelSuccesses.push(tabSuggestion.modelSuccess);
+    }
+
+    const candidatePanes: Record<string, string | null> = {};
+    for (const pane of agentPanes) {
+      const paneRecord = state.panes[pane.pane_id];
+      if (paneRecord?.manual) {
+        candidatePanes[pane.pane_id] = null;
+        continue;
+      }
+      const paneDetails = await this.paneContextFor(
+        pane,
+        inspectablePanes,
+        workspaceName,
+        contextCache,
       );
       const paneFocusedContext = paneDetails.paneContexts.find(
         (context) => context.focused,
@@ -463,11 +564,15 @@ export class AutoNameService {
         paneDetails.context,
         paneFocusedContext,
         Boolean(pane.agent),
+        suggestions,
         options,
         "manual pane ownership",
       );
       candidatePanes[pane.pane_id] = suggestion.label;
       usedModel ||= suggestion.usedModel;
+      if (suggestion.modelSuccess) {
+        modelSuccesses.push(suggestion.modelSuccess);
+      }
     }
 
     if (!this.#dryRun) {
@@ -552,11 +657,19 @@ export class AutoNameService {
       }
     }
 
+    for (const success of modelSuccesses) {
+      markModelSuccess(state, success.surfaceId, success.context);
+    }
+
     return {
       dryRun: this.#dryRun,
       workspace: workspace.workspace_id,
       tab: tab.tab_id,
-      candidate: { workspace: workspaceName, tab: tabName, panes: candidatePanes },
+      candidate: {
+        workspace: workspaceName,
+        tab: tabName,
+        panes: candidatePanes,
+      },
       reason,
       usedModel,
       ownership: { workspaceManual, tabManual },

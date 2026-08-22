@@ -19,9 +19,17 @@ function manifestCliCommands(source: string): string[] {
     const encodedArgs = block.match(/^command = \[(.*)\]$/m)?.[1];
     assert.ok(encodedArgs, "plugin action command not found");
     const args = JSON.parse(`[${encodedArgs}]`) as string[];
-    assert.deepEqual(args.slice(0, 2), ["bun", "src/cli.ts"]);
-    assert.ok(args[2], "plugin action CLI command not found");
-    commands.push(args[2]);
+    const cliArgs =
+      args[0] === "bun" && args[1] === "src/cli.ts"
+        ? args.slice(2)
+        : args[0] === "sh" &&
+            args[1] === "src/run-bun.sh" &&
+            args[2] === "src/cli.ts"
+          ? args.slice(3)
+          : null;
+    assert.ok(cliArgs, "plugin action must invoke src/cli.ts through Bun");
+    assert.ok(cliArgs[0], "plugin action CLI command not found");
+    commands.push(cliArgs[0]);
   }
   return commands;
 }

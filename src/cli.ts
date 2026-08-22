@@ -42,6 +42,14 @@ async function notify(
   }).catch(() => {});
 }
 
+export function renamedTabCount(results: readonly RenameResult[]): number {
+  return results.reduce(
+    (count, result) =>
+      count + result.changes.filter((change) => change.kind === "tab").length,
+    0,
+  );
+}
+
 export function currentResultNotice(result: RenameResult | null): {
   title: string;
   body: string;
@@ -188,15 +196,22 @@ async function once({
   targetPaneId = null,
 }: OnceOptions = {}): Promise<RenameResult | null> {
   const current = await snapshot();
-  let tabId: string | undefined;
-  if (resetKind === "pane") {
-    const paneId =
-      targetPaneId ?? process.env.HERDR_PANE_ID ?? current.focused_pane_id;
-    tabId = current.panes.find((pane) => pane.pane_id === paneId)?.tab_id;
+  const paneId =
+    resetKind === "pane"
+      ? targetPaneId ?? process.env.HERDR_PANE_ID ?? current.focused_pane_id
+      : undefined;
+  const targetPane = paneId
+    ? current.panes.find((pane) => pane.pane_id === paneId)
+    : undefined;
+  if (resetKind === "pane" && !targetPane) {
+    throw new Error("No current Herdr pane");
   }
-  tabId ??= process.env.HERDR_TAB_ID ?? current.focused_tab_id;
+  const tabId =
+    targetPane?.tab_id ?? process.env.HERDR_TAB_ID ?? current.focused_tab_id;
   const workspaceId =
-    process.env.HERDR_WORKSPACE_ID ?? current.focused_workspace_id;
+    targetPane?.workspace_id ??
+    process.env.HERDR_WORKSPACE_ID ??
+    current.focused_workspace_id;
   if (!tabId || !workspaceId) throw new Error("No current Herdr tab/workspace");
 
   const stateDir = dryRun
@@ -217,6 +232,7 @@ async function once({
   const result = await service.evaluate(targetTab, {
     snapshot: current,
     resetKind,
+    ...(targetPane ? { targetPaneId: targetPane.pane_id } : {}),
     forceRefresh,
   });
   console.log(JSON.stringify(result, null, 2));
@@ -274,14 +290,7 @@ async function renameNow(): Promise<void> {
 async function renameEveryTab(): Promise<void> {
   await notify("Renaming tabs");
   const results = await renameAll();
-  const renamed = results.reduce(
-    (count, result) =>
-      count +
-      result.changes.filter(
-        (item) => item.kind === "tab" || item.kind === "pane",
-      ).length,
-    0,
-  );
+  const renamed = renamedTabCount(results);
   await notify(
     renamed ? "Tabs renamed" : "No tabs renamed",
     `${renamed}/${results.length}`,
