@@ -348,13 +348,19 @@ export function normalizeHerdrEvent(message: unknown): HerdrEvent | null {
 }
 
 const WINDOWS_PIPE_PREFIX = "\\\\.\\pipe\\";
+const WINDOWS_PIPE_PREFIX_FORWARD = "//./pipe/";
 
 export function resolveSocketPath(
   socketPath: string,
   platform: NodeJS.Platform = process.platform,
 ): string {
   if (platform !== "win32") return socketPath;
-  if (socketPath.startsWith(WINDOWS_PIPE_PREFIX)) return socketPath;
+  if (
+    socketPath.startsWith(WINDOWS_PIPE_PREFIX) ||
+    socketPath.startsWith(WINDOWS_PIPE_PREFIX_FORWARD)
+  ) {
+    return socketPath;
+  }
   return `${WINDOWS_PIPE_PREFIX}${socketPath}`;
 }
 

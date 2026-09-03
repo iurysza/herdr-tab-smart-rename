@@ -29,13 +29,31 @@ herdr plugin action invoke start --plugin tab-smart-rename
 OPENAI_API_KEY=...
 ```
 
+Or keep the key in an existing secrets file and point Smart Rename at it:
+
+```dotenv
+SMART_RENAME_ENV_FILE=/absolute/path/to/secrets.env
+```
+
+The external file is reloaded before each model call. Smart Rename uses only
+the key selected by `SMART_RENAME_PROVIDER`; other variables are ignored.
+
 Without a key, deterministic names still work.
 
 ### Windows
 
 Herdr's Windows preview is supported with Bun available on `PATH`. The plugin
 uses direct Bun commands instead of a Unix shell launcher, and inspects worker
-processes through PowerShell.
+processes through PowerShell. Its event subscriber maps Herdr's `.sock` pointer
+path to the native Windows named-pipe endpoint, including the `//./pipe/`
+alias. Worker lock files treat `EACCES`/`EPERM` sharing violations as
+contention instead of hard failures.
+
+Windows paths can use forward slashes in `provider.env`, for example:
+
+```dotenv
+SMART_RENAME_ENV_FILE=C:/Users/you/secrets.env
+```
 
 ## Keybindings
 
@@ -92,7 +110,7 @@ SMART_RENAME_REASONING_EFFORT=medium
 SMART_RENAME_TIMEOUT_MS=45000
 ```
 
-Use `SMART_RENAME_API_KEY` for another OpenAI-compatible provider. `OPENAI_API_KEY` and Kimi's `KIMI_API_KEY` are also supported when their provider is selected. Config reloads before every model request.
+Use `SMART_RENAME_API_KEY` for another OpenAI-compatible provider. `OPENAI_API_KEY` and Kimi's `KIMI_API_KEY` are also supported when their provider is selected. Set `SMART_RENAME_ENV_FILE` to read that selected key from another dotenv file without copying it into Herdr's config. Config reloads before every model request.
 
 ### Custom prompt
 
@@ -117,7 +135,7 @@ Set `SMART_RENAME_PROMPT_PATH` to use another file. Prompts reload per request; 
 
 Model requests contain bounded, sanitized evidence from the dominant pane. Pi panes may contribute short user-request excerpts; sibling panes contribute process summaries only. Smart Rename removes terminal formatting, common secret shapes, and the local home path before sending context.
 
-Provider keys stay in Herdr's private plugin config and never enter Smart Rename state or logs.
+Provider keys stay in Herdr's private plugin config or the explicitly selected external env file and never enter Smart Rename state or logs.
 
 ## Troubleshooting
 

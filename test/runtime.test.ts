@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { currentResultNotice, dispatch } from "../src/cli.ts";
 import { type RenameResult } from "../src/domain.ts";
-import { acquireLock, pidAlive, workerInfo } from "../src/storage.ts";
+import { acquireLock, isLockContended, pidAlive, workerInfo } from "../src/storage.ts";
 import { shouldIgnoreProgressRename } from "../src/worker.ts";
 
 test("CLI dispatch routes actions without executing on import", async () => {
@@ -105,6 +105,24 @@ test("Bun launcher survives Herdr's minimal server PATH", async () => {
     assert.equal(stdout.trim(), "fake-bun:src/cli.ts status");
   } finally {
     await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("Windows lock contention treats sharing violations as retries", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-lock-"));
+  const lock = path.join(dir, "state.lock");
+  try {
+    await writeFile(lock, '{"pid":1,"nonce":"held"}\n');
+    assert.equal(await isLockContended({ code: "EEXIST" }, lock), true);
+    assert.equal(await isLockContended({ code: "EACCES" }, lock), process.platform === "win32");
+    assert.equal(await isLockContended({ code: "EPERM" }, lock), process.platform === "win32");
+    assert.equal(
+      await isLockContended({ code: "EACCES" }, `${lock}.missing`),
+      process.platform === "win32",
+    );
+    assert.equal(await isLockContended({ code: "EIO" }, lock), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });
 

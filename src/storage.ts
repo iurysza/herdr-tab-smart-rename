@@ -129,6 +129,25 @@ function errorCode(error: unknown): string | undefined {
     : undefined;
 }
 
+export async function isLockContended(
+  error: unknown,
+  lockFile: string,
+): Promise<boolean> {
+  const code = errorCode(error);
+  if (code === "EEXIST") return true;
+  if (process.platform !== "win32" || !["EACCES", "EPERM"].includes(code || "")) {
+    return false;
+  }
+  try {
+    await stat(lockFile);
+    return true;
+  } catch (probeError) {
+    // Windows can report a sharing violation after the competing owner has
+    // already released the file. Retry only for that vanished-file race.
+    return errorCode(probeError) === "ENOENT";
+  }
+}
+
 export function pidAlive(
   pid: number,
   signal: typeof process.kill = process.kill,
@@ -268,7 +287,7 @@ export async function acquireLock(
         }
       };
     } catch (error) {
-      if (errorCode(error) !== "EEXIST") throw error;
+      if (!(await isLockContended(error, lockFile))) throw error;
       if (await staleLock(lockFile, staleMs)) {
         await rm(lockFile, { force: true });
         continue;

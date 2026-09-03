@@ -88,6 +88,40 @@ test("provider config preserves defaults and process-over-file precedence", asyn
   }
 });
 
+test("provider config reloads a selected key from an external env file", async () => {
+  const fixture = await tempConfig();
+  const secrets = path.join(fixture.root, "secrets.env");
+  try {
+    await writeFile(
+      fixture.file,
+      [
+        `SMART_RENAME_ENV_FILE=${secrets.replaceAll("\\", "/")}`,
+        "SMART_RENAME_MODEL=external-secret-model",
+      ].join("\n"),
+    );
+    await writeFile(
+      secrets,
+      "UNRELATED_SECRET=ignored\nOPENAI_API_KEY=first-external-key\n",
+    );
+    assert.equal((await loadProviderConfig(fixture.env)).apiKey, "first-external-key");
+
+    await writeFile(secrets, "OPENAI_API_KEY=second-external-key\n");
+    assert.equal((await loadProviderConfig(fixture.env)).apiKey, "second-external-key");
+
+    assert.equal(
+      (
+        await loadProviderConfig({
+          ...fixture.env,
+          OPENAI_API_KEY: "process-key",
+        })
+      ).apiKey,
+      "process-key",
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("private provider and prompt config enforce templates, permissions, and bounds", async () => {
   const fixture = await tempConfig();
   await rm(fixture.root, { recursive: true, force: true });

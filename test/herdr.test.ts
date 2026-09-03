@@ -24,3 +24,8 @@ test("resolveSocketPath does not double-prefix an already-resolved pipe path", (
   const alreadyResolved = "\\\\.\\pipe\\C:\\Users\\me\\AppData\\Roaming\\herdr\\herdr.sock";
   assert.equal(resolveSocketPath(alreadyResolved, "win32"), alreadyResolved);
 });
+
+test("resolveSocketPath accepts the forward-slash Windows pipe alias", () => {
+  const forwardSlash = "//./pipe/C:/Users/me/AppData/Roaming/herdr/herdr.sock";
+  assert.equal(resolveSocketPath(forwardSlash, "win32"), forwardSlash);
+});

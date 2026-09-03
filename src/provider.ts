@@ -12,6 +12,7 @@ import {
 import { sanitizeText } from "./text.ts";
 
 const PROVIDER_ENV_BYTES = 16 * 1024;
+const EXTERNAL_ENV_BYTES = 64 * 1024;
 const NAMING_PROMPT_BYTES = 32 * 1024;
 const PROVIDER_EXAMPLE_URL = new URL("../provider.env.example", import.meta.url);
 const BUNDLED_NAMING_PROMPT = fileURLToPath(
@@ -84,6 +85,27 @@ async function readProviderEnv(
   return text === null ? {} : parseEnv(text);
 }
 
+function resolveConfigPath(value: string, env: NodeJS.ProcessEnv): string {
+  if (path.isAbsolute(value)) return value;
+  return path.resolve(env.HERDR_PLUGIN_CONFIG_DIR || process.cwd(), value);
+}
+
+async function readExternalEnv(
+  processEnv: NodeJS.ProcessEnv,
+  fileEnv: Record<string, string>,
+): Promise<Record<string, string>> {
+  const configured =
+    processEnv.SMART_RENAME_ENV_FILE || fileEnv.SMART_RENAME_ENV_FILE;
+  if (!configured) return {};
+  const text = await readBoundedText(
+    resolveConfigPath(configured, processEnv),
+    "SMART_RENAME_ENV_FILE",
+    EXTERNAL_ENV_BYTES,
+    true,
+  );
+  return text === null ? {} : parseEnv(text);
+}
+
 export async function providerExampleText(): Promise<string> {
   return (
     (await readBoundedText(
@@ -109,14 +131,14 @@ function pick(
 }
 
 function resolvePromptPath(value: string, env: NodeJS.ProcessEnv): string {
-  if (path.isAbsolute(value)) return value;
-  return path.resolve(env.HERDR_PLUGIN_CONFIG_DIR || process.cwd(), value);
+  return resolveConfigPath(value, env);
 }
 
 function providerApiKey(
   provider: string,
   processEnv: NodeJS.ProcessEnv,
   fileEnv: Record<string, string>,
+  externalEnv: Record<string, string>,
 ): string {
   const providerKey =
     provider === "openai"
@@ -128,6 +150,8 @@ function providerApiKey(
     processEnv.SMART_RENAME_API_KEY ||
     fileEnv.SMART_RENAME_API_KEY ||
     (providerKey ? processEnv[providerKey] || fileEnv[providerKey] : "") ||
+    externalEnv.SMART_RENAME_API_KEY ||
+    (providerKey ? externalEnv[providerKey] : "") ||
     ""
   );
 }
@@ -164,7 +188,7 @@ function configError(error: z.ZodError): Error {
     timeoutMs: "SMART_RENAME_TIMEOUT_MS must be 1000-300000",
     reasoningEffort: "SMART_RENAME_REASONING_EFFORT must be low, medium, or high",
     promptPath: "SMART_RENAME_PROMPT_PATH is invalid",
-    apiKey: `AI key missing. Run configure-ai or set a provider key in ${PROVIDER_ENV_NAME}`,
+    apiKey: `AI key missing. Run configure-ai or set a provider key in ${PROVIDER_ENV_NAME} or SMART_RENAME_ENV_FILE`,
   };
   return new Error(messages[field ?? ""] ?? "AI provider configuration is invalid");
 }
@@ -176,6 +200,7 @@ export async function loadProviderConfig(
     readProviderEnv(PROVIDER_EXAMPLE_URL, true),
     readProviderEnv(providerEnvPath(env)),
   ]);
+  const externalEnv = await readExternalEnv(env, fileEnv);
   const provider = pick(env, fileEnv, defaults, "SMART_RENAME_PROVIDER");
   const configuredReasoning =
     env.SMART_RENAME_REASONING_EFFORT || fileEnv.SMART_RENAME_REASONING_EFFORT;
@@ -195,7 +220,7 @@ export async function loadProviderConfig(
     ...(configuredPrompt
       ? { promptPath: resolvePromptPath(configuredPrompt, env) }
       : {}),
-    apiKey: providerApiKey(provider, env, fileEnv),
+    apiKey: providerApiKey(provider, env, fileEnv, externalEnv),
   };
   const parsed = ProviderConfigSchema.safeParse(input);
   if (!parsed.success) throw configError(parsed.error);
