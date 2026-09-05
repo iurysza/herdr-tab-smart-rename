@@ -23,6 +23,8 @@ herdr plugin install iurysza/herdr-tab-smart-rename
 herdr plugin action invoke setup --plugin tab-smart-rename
 ```
 
+<img width="492" height="407" alt="smart-rename" src="https://github.com/user-attachments/assets/9b5a1bf4-48d8-4544-a65e-9fc01f65daca" />
+
 For a local checkout, run `bun install --frozen-lockfile`, then `herdr plugin link "$PWD"`.
 
 Setup keeps valid configuration by default. Choose Pi or OpenCode to reuse a connected provider and model, or Direct to enter an OpenAI-compatible API key. It validates without a model completion, shows optional keybinding instructions, then starts the worker for the current Herdr session.
