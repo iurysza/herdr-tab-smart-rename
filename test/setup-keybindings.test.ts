@@ -104,7 +104,7 @@ test("returns uncertainty for missing, invalid, and unreadable ownership boundar
 
 test("resolves explicit, XDG, and HOME config paths without writing them", async () => {
   assert.equal(resolveHerdrConfigPath({ HERDR_CONFIG_PATH: "/custom.toml", HOME: "/home/user" }), "/custom.toml");
-  assert.equal(resolveHerdrConfigPath({ XDG_CONFIG_HOME: "/xdg" }), "/xdg/herdr/config.toml");
-  assert.equal(resolveHerdrConfigPath({ HOME: "/home/user" }), "/home/user/.config/herdr/config.toml");
+  assert.equal(resolveHerdrConfigPath({ XDG_CONFIG_HOME: "/xdg" }), path.join("/xdg", "herdr", "config.toml"));
+  assert.equal(resolveHerdrConfigPath({ HOME: "/home/user" }), path.join("/home/user", ".config", "herdr", "config.toml"));
   assert.equal(resolveHerdrConfigPath({}), undefined);
 });
