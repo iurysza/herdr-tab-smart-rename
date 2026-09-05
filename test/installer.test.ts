@@ -46,13 +46,13 @@ async function fixture(): Promise<Fixture> {
   const plugin = {
     result: {
       plugins: [{
-        id: "tab-smart-rename",
-        root: managedRoot,
+        plugin_id: "tab-smart-rename",
+        plugin_root: managedRoot,
         source: {
           kind: "github",
           owner: "iurysza",
           repo: "herdr-tab-smart-rename",
-          ref: tag,
+          requested_ref: tag,
           resolved_commit: commit,
         },
       }],

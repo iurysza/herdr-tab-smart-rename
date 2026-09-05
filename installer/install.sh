@@ -101,9 +101,10 @@ const value = JSON.parse(await Bun.file(process.env.SMART_RENAME_MANAGED_JSON).t
 const plugins = value?.result?.plugins;
 const plugin = Array.isArray(plugins) ? plugins.find((item) => (item.plugin_id ?? item.id) === "tab-smart-rename") : undefined;
 const source = plugin?.source ?? {};
+const ref = source.requested_ref ?? source.ref;
 const commit = plugin?.resolved_commit ?? plugin?.commit ?? source.resolved_commit ?? source.commit;
 const root = plugin?.plugin_root ?? plugin?.root;
-if (!root || source.kind !== "github" || source.owner !== "iurysza" || source.repo !== "herdr-tab-smart-rename" || source.ref !== process.env.SMART_RENAME_RELEASE_TAG || commit !== process.env.SMART_RENAME_RELEASE_COMMIT) process.exit(1);
+if (!root || source.kind !== "github" || source.owner !== "iurysza" || source.repo !== "herdr-tab-smart-rename" || ref !== process.env.SMART_RENAME_RELEASE_TAG || commit !== process.env.SMART_RENAME_RELEASE_COMMIT) process.exit(1);
 process.stdout.write(root);
 '
 }

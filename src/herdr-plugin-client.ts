@@ -48,6 +48,7 @@ const PluginSchema = z.looseObject({
       owner: z.string().optional(),
       repo: z.string().optional(),
       ref: z.string().optional(),
+      requested_ref: z.string().optional(),
       commit: z.string().optional(),
       resolved_commit: z.string().optional(),
     })
@@ -160,6 +161,7 @@ export class HerdrPluginClient {
     const root = plugin.plugin_root ?? plugin.root;
     if (!root) throw new Error(`Herdr did not report a managed root for ${this.#pluginId}`);
     const source = plugin.source ?? { kind: "unknown" };
+    const ref = source.requested_ref ?? source.ref;
     const commit =
       plugin.resolved_commit ?? plugin.commit ?? source.resolved_commit ?? source.commit;
     return {
@@ -169,7 +171,7 @@ export class HerdrPluginClient {
         kind: source.kind,
         ...(source.owner ? { owner: source.owner } : {}),
         ...(source.repo ? { repo: source.repo } : {}),
-        ...(source.ref ? { ref: source.ref } : {}),
+        ...(ref ? { ref } : {}),
       },
       ...(commit !== undefined ? { commit } : {}),
     };

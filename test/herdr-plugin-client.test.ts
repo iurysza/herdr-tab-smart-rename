@@ -67,7 +67,7 @@ test("finds a managed plugin, reports missing plugin, and rejects missing root",
         {
           plugin_id: "tab-smart-rename",
           plugin_root: "/managed/root",
-          source: { kind: "github", owner: "iurysza", repo: "herdr-tab-smart-rename", ref: "v0.2.0", resolved_commit: "abc" },
+          source: { kind: "github", owner: "iurysza", repo: "herdr-tab-smart-rename", requested_ref: "v0.2.0", resolved_commit: "abc" },
         },
       ],
     },
