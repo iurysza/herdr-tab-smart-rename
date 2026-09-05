@@ -57,11 +57,15 @@ Return `null` when evidence is vague, stale, conflicting, project-only, startup 
 
 The model does not simulate or decide the rules below.
 
-- **Ownership:** meaningful existing names are manual. Unexpected renames become manual. Manual workspaces and tabs are neither inspected nor renamed. Reset and explicit rename actions reclaim their targets.
+- **Ownership:** meaningful existing names are manual. Unexpected label changes become manual. Repeated unchanged status events leave ownership alone. Ownership protects only that workspace, tab, or pane label. Explicit actions reclaim only their named targets.
 - **Workspaces:** identity stays stable and resolves from Herdr worktree, meaningful existing name, Git root, then stable pane directory. Cross-project tabs do not rename workspaces.
-- **Pane choice:** focused agent, working or blocked agent, focused command, then first pane.
+- **Pane choice:** focused agent, working or blocked agent, focused command, then first pane. Agent panes are also named individually from their own session and process context; non-agent panes are left unchanged.
+- **Pane ownership:** manual pane labels stay protected until `reset-pane`. A manually named pane can still supply evidence for its automatic tab. Pane naming uses the target pane alone.
 - **Deterministic names:** test runner → `Run Tests`; development server → `Dev Server`; log follower → `View Logs`; SSH or Mosh → `Remote Shell`.
 - **Context:** agent sessions contribute origin, midpoint, and up to four recent user requests; focused commands contribute bounded process data and output; siblings contribute process summaries only.
 - **Safety:** context is sanitized and capped at 4,500 serialized characters; environment values are excluded; common credential shapes are redacted best-effort.
-- **Churn control:** events are debounced; a 60-second sweep catches silent task changes; unchanged successes are skipped; background model attempts wait 10 minutes per tab; explicit actions bypass those gates.
+- **Churn control:** events are debounced; a 60-second sweep catches silent task changes; unchanged successes are skipped; background model attempts wait 10 minutes per target; explicit actions bypass those gates.
 - **Validation:** invalid JSON, unchanged labels, and labels outside the word, length, or format rules are rejected.
+
+- **Concurrency:** model calls run outside the shared state lock. Each write rechecks ownership, target existence, and source-pane identity. New explicit requests supersede older work. Independent target failures are reported separately.
+- **Closure:** stale results from closed or replaced panes are discarded. Already-sent model requests may still complete. Closed naming records are pruned from fresh snapshots.

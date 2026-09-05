@@ -47,12 +47,12 @@ flowchart TB
 
 ## Cross-Cutting Concerns
 
-- Manual ownership: manual labels stop inspection, provider calls, and writes until reset or explicit reclaim.
+- Manual ownership protects the named label. A manual pane label does not block its tab from using pane context.
 - Bounded data: terminal output, process fields, session windows, provider files, prompts, errors, and notifications all have limits.
 - Secret safety: `strip-ansi` and `secret-sniff` handle common terminal and credential forms before data leaves the machine.
 - Runtime validation: Zod validates Herdr JSON, Pi records, provider configuration, model output, state, locks, and worker metadata.
-- Concurrency: one cross-process state lock covers reconciliation, model gates, expected writes, and rename rollback.
-- Resilience: the worker serializes tasks, debounces tab events, sweeps every 60 seconds, and reconnects after socket closure.
+- Concurrency: short cross-process state transactions cover reconciliation, request gates, and writes. Model calls run outside the lock. Decision IDs reject superseded results.
+- Resilience: the worker handles events separately from model-backed evaluations, debounces tab events, sweeps every 60 seconds, and reconnects after socket closure.
 - Provider independence: Pi supplies optional context only. Model authentication comes from Smart Rename's private provider file.
 - User customization: provider and prompt files reload per request; fixed schemas still reject unsafe or malformed output.
 - Feedback: explicit actions emit start, success, no-change, and sanitized failure notifications.
@@ -73,7 +73,7 @@ sequenceDiagram
 
     U->>C: rename-now or rename-all
     C->>S: evaluate with reclaim and refresh
-    S->>F: lock, load, reconcile
+    S->>F: lock, reconcile, reserve request, unlock
     S->>H: snapshot and pane evidence
     alt deterministic process
         S->>S: choose fixed label
@@ -87,8 +87,9 @@ sequenceDiagram
             S->>H: restore original label
         end
     end
-    S->>F: persist expected label
+    S->>F: lock, recheck ownership and request, persist expected label
     S->>H: rename workspace or tab
+    S->>F: unlock
     H-->>S: rename event
     S->>F: confirm automatic ownership
     C-->>U: result notification
@@ -98,7 +99,7 @@ sequenceDiagram
 
 1. `worker.ts` subscribes to Herdr lifecycle events.
 2. It resolves the affected tab and debounces evaluation by 400 milliseconds.
-3. `AutoNameService` runs evaluations through one promise queue and one state transaction at a time.
+3. Evaluations use one worker queue. Events use a separate queue. `AutoNameService` holds the state lock only for short snapshot and write operations.
 4. A 60-second sweep catches task changes without lifecycle events.
 5. Fingerprints and cooldowns suppress unchanged model work.
 
@@ -135,4 +136,4 @@ sequenceDiagram
 | Progress label | current tab label | invisible marker, one-cell diamond frame, exact-label guard | transient prefixed label or original label |
 | Herdr rename | candidate label | expected-write persistence before command | confirmed automatic ownership or rollback |
 
-Updated-at: 7e32aa2d5e70910bedbadb0e06dcdfde50767317
+Updated: 2026-09-05, rename reliability repair

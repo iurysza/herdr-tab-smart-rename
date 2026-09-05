@@ -1,0 +1,36 @@
+name: Installer assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1.34
+      - run: bun install --frozen-lockfile
+      - name: Render the matching installer
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          commit="$(git rev-parse HEAD)"
+          bun scripts/check-release-version.ts "$RELEASE_TAG" "$commit"
+          mkdir download
+          bun scripts/render-installer.ts "$RELEASE_TAG" "$commit" download/install.sh
+          sh -n download/install.sh
+          (cd download && sha256sum install.sh > SHA256SUMS)
+      - name: Attach installer and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" download/install.sh download/SHA256SUMS

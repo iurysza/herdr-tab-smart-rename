@@ -81,7 +81,14 @@ const EventEnvelopeSchema = z.object({
     label: z.string().optional(),
     workspace: z.object({ workspace_id: z.string().optional() }).optional(),
     tab: z.object({ tab_id: z.string().optional() }).optional(),
-    pane: z.object({ tab_id: z.string().optional() }).optional(),
+    pane: z
+      .looseObject({
+        pane_id: z.string(),
+        workspace_id: z.string(),
+        tab_id: z.string(),
+        label: z.string().nullable().optional(),
+      })
+      .optional(),
   }),
 });
 
@@ -121,6 +128,7 @@ export const LIFECYCLE_SUBSCRIPTIONS = [
   "tab.closed",
   "tab.focused",
   "pane.created",
+  "pane.updated",
   "pane.closed",
   "pane.focused",
 ] as const;
@@ -181,7 +189,7 @@ export async function snapshot(
 }
 
 export async function rename(
-  kind: "workspace" | "tab",
+  kind: "workspace" | "tab" | "pane",
   id: string,
   label: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -193,6 +201,8 @@ export async function beginTabProgress(
   tab: HerdrTab,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<() => Promise<void>> {
+  // Another request may already own a pulse. Never nest or restore its label.
+  if (tabProgressBase(tab.label) !== null) return async () => {};
   const base = tab.label;
   let expected = base;
   let frame = 0;
@@ -345,6 +355,14 @@ export function normalizeHerdrEvent(message: unknown): HerdrEvent | null {
     type:
       envelope.data.data.type ?? envelope.data.event.replaceAll(".", "_"),
   };
+}
+
+export function paneLabelUpdate(
+  event: HerdrEvent,
+): { paneId: string; label: string } | null {
+  if (event.type !== "pane_updated" || !event.pane) return null;
+  if (!("label" in event.pane)) return null;
+  return { paneId: event.pane.pane_id, label: event.pane.label ?? "" };
 }
 
 const WINDOWS_PIPE_PREFIX = "\\\\.\\pipe\\";

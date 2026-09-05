@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { currentResultNotice, dispatch } from "../src/cli.ts";
+import { currentResultNotice, dispatch, renamedTabCount } from "../src/cli.ts";
 import { type RenameResult } from "../src/domain.ts";
 import { acquireLock, pidAlive, workerInfo } from "../src/storage.ts";
 import { shouldIgnoreProgressRename } from "../src/worker.ts";
@@ -13,12 +13,16 @@ test("CLI dispatch routes actions without executing on import", async () => {
   const actions = {
     status: (options: { dryRun: boolean }) => calls.push(["status", options]),
     once: (options: { dryRun: boolean }) => calls.push(["once", options]),
+    "reset-pane": (options: { dryRun: boolean }) =>
+      calls.push(["reset-pane", options]),
   };
   await dispatch("status", { actions });
   await dispatch("once", { actions, dryRun: true });
+  await dispatch("reset-pane", { actions });
   assert.deepEqual(calls, [
     ["status", { dryRun: false }],
     ["once", { dryRun: true }],
+    ["reset-pane", { dryRun: false }],
   ]);
   await assert.rejects(dispatch("unknown", { actions }), /^Error: usage:/);
 
@@ -28,7 +32,10 @@ test("CLI dispatch routes actions without executing on import", async () => {
     true,
   );
   assert.equal(shouldIgnoreProgressRename(progress, "t1", "Review Auth"), true);
-  assert.equal(shouldIgnoreProgressRename(progress, "t1", "Manual Name"), false);
+  assert.equal(
+    shouldIgnoreProgressRename(progress, "t1", "Manual Name"),
+    false,
+  );
 
   const result: RenameResult = {
     dryRun: false,
@@ -72,6 +79,26 @@ test("CLI dispatch routes actions without executing on import", async () => {
       sound: "done",
     },
   );
+  assert.equal(
+    renamedTabCount([
+      {
+        ...result,
+        changes: [
+          { kind: "tab", id: "t1", from: "1", to: "Review Auth Changes" },
+          { kind: "pane", id: "p1", from: "", to: "Review Auth Changes" },
+          { kind: "pane", id: "p2", from: "", to: "Fix Pane Naming" },
+        ],
+      },
+      {
+        ...result,
+        tab: "t2",
+        changes: [
+          { kind: "pane", id: "p3", from: "", to: "Run Integration Tests" },
+        ],
+      },
+    ]),
+    1,
+  );
 });
 
 test("Bun launcher survives Herdr's minimal server PATH", async () => {
@@ -109,16 +136,24 @@ test("Bun launcher survives Herdr's minimal server PATH", async () => {
 });
 
 test("locks recover dead owners and workers require exact Bun scripts", async () => {
-  assert.equal(pidAlive(42, () => true), true);
+  assert.equal(
+    pidAlive(42, () => true),
+    true,
+  );
   assert.equal(
     pidAlive(42, () => {
       throw new Error("gone");
     }),
     false,
   );
-  assert.equal(pidAlive(1, () => true), false);
+  assert.equal(
+    pidAlive(1, () => true),
+    false,
+  );
 
-  const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-runtime-"));
+  const dir = await mkdtemp(
+    path.join(os.tmpdir(), "tab-smart-rename-runtime-"),
+  );
   const lock = path.join(dir, "state.lock");
   const pidFile = path.join(dir, "worker.json");
   const expected = "/repo/herdr-tab-smart-rename/src/worker.ts";
@@ -150,7 +185,9 @@ test(
   "worker inspection uses the native process lookup on Windows",
   async () => {
     if (process.platform !== "win32") return;
-    const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-process-"));
+    const dir = await mkdtemp(
+      path.join(os.tmpdir(), "tab-smart-rename-process-"),
+    );
     const pidFile = path.join(dir, "worker.json");
     try {
       await writeFile(
@@ -165,3 +202,35 @@ test(
   // Hosted Windows cold-starts Windows PowerShell beyond Bun's 5s default.
   { timeout: 15_000 },
 );
+
+test("CLI notices distinguish ownership, stale targets, and provider failure", () => {
+  const result: RenameResult = {
+    dryRun: false,
+    workspace: "w1",
+    tab: "t1",
+    candidate: { workspace: null, tab: null },
+    usedModel: false,
+    ownership: { workspaceManual: false, tabManual: false },
+    changes: [],
+    reason: "manual pane ownership",
+  };
+  assert.equal(currentResultNotice(result).body, "manual pane ownership");
+  assert.equal(
+    currentResultNotice({ ...result, reason: "target or source changed" }).body,
+    "target or source changed",
+  );
+  assert.deepEqual(
+    currentResultNotice({
+      ...result,
+      outcomes: [
+        {
+          kind: "tab",
+          id: "t1",
+          status: "failed",
+          reason: "provider unavailable",
+        },
+      ],
+    }),
+    { title: "Rename failed", body: "provider unavailable", sound: "request" },
+  );
+});

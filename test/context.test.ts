@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   LIFECYCLE_SUBSCRIPTIONS,
   normalizeHerdrEvent,
+  paneLabelUpdate,
   tabProgressBase,
 } from "../src/herdr.ts";
 import {
@@ -33,8 +34,31 @@ test("Herdr events normalize while subscriptions avoid output spam", () => {
     },
   );
   assert.equal(normalizeHerdrEvent({ id: "response" }), null);
+  const paneUpdated = normalizeHerdrEvent({
+    event: "pane.updated",
+    data: {
+      type: "pane_updated",
+      pane: {
+        pane_id: "p1",
+        workspace_id: "w1",
+        tab_id: "t1",
+        focused: true,
+        agent_status: "working",
+        revision: 42,
+        label: "Review Auth",
+      },
+    },
+  });
+  assert.ok(paneUpdated);
+  assert.deepEqual(paneLabelUpdate(paneUpdated), {
+    paneId: "p1",
+    label: "Review Auth",
+  });
+
   const subscriptions: readonly string[] = LIFECYCLE_SUBSCRIPTIONS;
   assert.ok(subscriptions.includes("tab.renamed"));
+  assert.ok(subscriptions.includes("pane.updated"));
+  assert.equal(subscriptions.includes("pane.renamed"), false);
   assert.equal(subscriptions.includes("pane.output_matched"), false);
   assert.equal(tabProgressBase("\u2063◆ Review Auth"), "Review Auth");
   assert.equal(tabProgressBase("◆ Review Auth"), null);

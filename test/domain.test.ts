@@ -53,7 +53,11 @@ test("label, workspace, and process policy stays deterministic", () => {
     assert.equal(validateTabLabel(label), valid, label);
   }
   assert.equal(
-    workspaceCandidate({ label: "var", number: 1 }, { cwd: "/code/other" }, "/code/other"),
+    workspaceCandidate(
+      { label: "var", number: 1 },
+      { cwd: "/code/other" },
+      "/code/other",
+    ),
     "VAR",
   );
   for (const [command, title] of [
@@ -64,7 +68,10 @@ test("label, workspace, and process policy stays deterministic", () => {
     ["ssh host", "Remote Shell"],
     ["zsh", null],
   ] as const) {
-    assert.equal(heuristicTitle({ focusedPane: { process: { command } } }), title);
+    assert.equal(
+      heuristicTitle({ focusedPane: { process: { command } } }),
+      title,
+    );
   }
 });
 
@@ -89,7 +96,11 @@ test("model context keeps weighted session evidence under the hard cap", () => {
   });
   assert.ok(JSON.stringify(context).length <= MAX_CONTEXT_CHARS);
   assert.ok("sessionTimeline" in context);
-  assert.deepEqual(Object.keys(context.sessionTimeline), ["origin", "middle", "recent"]);
+  assert.deepEqual(Object.keys(context.sessionTimeline), [
+    "origin",
+    "middle",
+    "recent",
+  ]);
   assert.equal("currentTab" in context, false);
 });
 
@@ -123,12 +134,43 @@ test("stable fingerprints and model cooldown suppress churn", () => {
   markModelAttempt(state, "t1", 1_000_000);
   assert.equal(shouldCallModel(state, "t1", context, 1_000_001).allowed, false);
   assert.equal(
-    shouldCallModel(state, "t1", context, 1_000_000 + MODEL_RATE_MS + 1).allowed,
+    shouldCallModel(state, "t1", context, 1_000_000 + MODEL_RATE_MS + 1)
+      .allowed,
     true,
   );
   markModelSuccess(state, "t1", context);
   assert.equal(
-    shouldCallModel(state, "t1", context, 1_000_000 + MODEL_RATE_MS * 2).allowed,
+    shouldCallModel(state, "t1", context, 1_000_000 + MODEL_RATE_MS * 2)
+      .allowed,
     false,
   );
+});
+
+test("process hints match real invocations, not paths, output, or arbitrary arguments", () => {
+  for (const [command, label] of [
+    ["node apps/landing-next/index.js", null],
+    ["node inspect.js node_modules/vite webpack.config.js", null],
+    ["cat node_modules/jest/package.json", null],
+    ["echo npm run dev", null],
+    ["next build", null],
+    ["astro check", null],
+    ["vite build", null],
+    ["/opt/homebrew/bin/pytest -q", "Run Tests"],
+    ["next dev", "Dev Server"],
+    ["astro dev", "Dev Server"],
+    ["vite --host", "Dev Server"],
+    ["webpack serve", "Dev Server"],
+    ['"C:\\Program Files\\nodejs\\node.exe" --test', "Run Tests"],
+  ] as const) {
+    assert.equal(
+      heuristicTitle({
+        focusedPane: {
+          process: { name: "node", command },
+          recentOutput: "following logs",
+        },
+      }),
+      label,
+      command,
+    );
+  }
 });

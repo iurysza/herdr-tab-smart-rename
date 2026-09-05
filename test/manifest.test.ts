@@ -19,9 +19,15 @@ function manifestCliCommands(source: string): string[] {
     const encodedArgs = block.match(/^command = \[(.*)\]$/m)?.[1];
     assert.ok(encodedArgs, "plugin action command not found");
     const args = JSON.parse(`[${encodedArgs}]`) as string[];
-    assert.deepEqual(args.slice(0, 2), ["bun", "src/cli.ts"]);
-    assert.ok(args[2], "plugin action CLI command not found");
-    commands.push(args[2]);
+    assert.equal(
+      args[0],
+      "bun",
+      "all actions declare Windows support and must not require sh",
+    );
+    assert.equal(args[1], "src/cli.ts");
+    const cliArgs = args.slice(2);
+    assert.ok(cliArgs[0], "plugin action CLI command not found");
+    commands.push(cliArgs[0]);
   }
   return commands;
 }
@@ -34,5 +40,7 @@ test("documented CLI actions are registered in the Herdr manifest", async () => 
   const documented = documentedCliCommands(cli).filter(
     (command) => !INTERNAL_COMMANDS.has(command),
   );
-  assert.deepEqual(manifestCliCommands(manifest).sort(), documented.sort());
+  const registered = manifestCliCommands(manifest);
+  assert.ok(registered.includes("configure-ai"), "keep the deprecated setup alias");
+  assert.deepEqual(registered.filter((command) => command !== "configure-ai").sort(), documented.sort());
 });

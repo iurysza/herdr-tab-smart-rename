@@ -21,7 +21,10 @@ A personal token is required so pull requests and tags created by release-please
 4. Merge the release PR.
 5. The next `Release Please` run creates `vX.Y.Z` and publishes the matching GitHub Release.
 
-This plugin ships as source. There are no release assets to build or upload: Herdr checks out the selected ref and runs the Bun production install from `herdr-plugin.toml`.
+6. Wait for `Installer assets` to attach `install.sh` and `SHA256SUMS`. The workflow checks version agreement and binds the installer to the release tag and commit. It does not overwrite existing assets.
+7. Download both assets with `gh release download vX.Y.Z --pattern install.sh --pattern SHA256SUMS`. Check `shasum -a 256 -c SHA256SUMS` and `sh -n install.sh` before testing the installer.
+
+The plugin ships as source. Herdr checks out the selected ref and runs the Bun production install from `herdr-plugin.toml`. The shell installer provides optional onboarding, not a compiled runtime.
 
 Install a specific release with:
 

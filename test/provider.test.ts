@@ -52,7 +52,10 @@ test("provider config preserves defaults and process-over-file precedence", asyn
       apiKey: "standalone-key",
     });
     await assert.rejects(
-      loadProviderConfig({ ...fixture.env, KIMI_API_KEY: "wrong-provider-key" }),
+      loadProviderConfig({
+        ...fixture.env,
+        KIMI_API_KEY: "wrong-provider-key",
+      }),
       /AI key missing/,
     );
 
@@ -99,9 +102,15 @@ test("private provider and prompt config enforce templates, permissions, and bou
       assert.equal((await stat(file)).mode & 0o777, 0o600);
       assert.equal((await stat(prompt)).mode & 0o777, 0o600);
     }
-    assert.match(await readFile(file, "utf8"), /SMART_RENAME_MODEL=gpt-5\.6-luna/);
+    assert.match(
+      await readFile(file, "utf8"),
+      /SMART_RENAME_MODEL=gpt-5\.6-luna/,
+    );
     assert.match(await readFile(prompt, "utf8"), /^# Naming policy/);
-    await assert.rejects(loadProviderConfig(fixture.env), /AI key missing.*provider\.env/i);
+    await assert.rejects(
+      loadProviderConfig(fixture.env),
+      /AI key missing.*provider\.env/i,
+    );
     await writeFile(file, "x".repeat(16 * 1024 + 1));
     await assert.rejects(loadProviderConfig(fixture.env), /exceeds 16 KiB/);
   } finally {
@@ -147,7 +156,8 @@ test("namer sends one bounded completion and validates model output", async () =
 
 test("provider transport uses the provider-compatible output-token parameter", async () => {
   let requestBody: Record<string, unknown> | undefined;
-  const responseText = '{"tab":"Bound Provider Output","reason":"transport contract"}';
+  const responseText =
+    '{"tab":"Bound Provider Output","reason":"transport contract"}';
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
@@ -217,20 +227,22 @@ test("provider transport uses the provider-compatible output-token parameter", a
 });
 
 test("OpenAI request transform preserves native completion-token values", () => {
-  assert.deepEqual(
-    transformOpenAiRequestBody({ model: "m", max_tokens: 5 }),
-    { model: "m", max_completion_tokens: 5 },
-  );
+  assert.deepEqual(transformOpenAiRequestBody({ model: "m", max_tokens: 5 }), {
+    model: "m",
+    max_completion_tokens: 5,
+  });
   assert.deepEqual(
     transformOpenAiRequestBody({ max_tokens: 5, max_completion_tokens: 7 }),
     { max_completion_tokens: 5 },
   );
+  assert.deepEqual(transformOpenAiRequestBody({ max_completion_tokens: 123 }), {
+    max_completion_tokens: 123,
+  });
   assert.deepEqual(
-    transformOpenAiRequestBody({ max_completion_tokens: 123 }),
-    { max_completion_tokens: 123 },
-  );
-  assert.deepEqual(
-    transformOpenAiRequestBody({ max_tokens: null, max_completion_tokens: 123 }),
+    transformOpenAiRequestBody({
+      max_tokens: null,
+      max_completion_tokens: 123,
+    }),
     { max_completion_tokens: 123 },
   );
 });
@@ -262,12 +274,9 @@ test("namer reloads provider.env and naming-prompt.md, then redacts failures", a
     assert.deepEqual(systems, ["First naming prompt", "Second naming prompt"]);
 
     const key = "standalone-secret-value";
-    const failing = new AiSdkNamer(
-      { SMART_RENAME_API_KEY: key },
-      async () => {
-        throw new Error(`401 Authorization: Bearer ${key}`);
-      },
-    );
+    const failing = new AiSdkNamer({ SMART_RENAME_API_KEY: key }, async () => {
+      throw new Error(`401 Authorization: Bearer ${key}`);
+    });
     await assert.rejects(failing.suggest(context), (error: unknown) => {
       assert.ok(error instanceof Error);
       assert.match(error.message, /AI request failed/);
@@ -294,15 +303,9 @@ test("manifest uses portable Bun runtime without Pi model coupling", async () =>
     manifest,
     /command = \["bun", "install", "--production", "--frozen-lockfile"\]/,
   );
-  assert.match(
-    manifest,
-    /platforms = \["linux", "macos", "windows"\]/,
-  );
-  assert.match(
-    manifest,
-    /command = \["bun", "src\/cli\.ts", "start"\]/,
-  );
-  assert.match(manifest, /id = "provider-config"[\s\S]*placement = "overlay"/);
+  assert.match(manifest, /platforms = \["linux", "macos", "windows"\]/);
+  assert.match(manifest, /command = \["bun", "src\/cli\.ts", "start"\]/);
+  assert.match(manifest, /id = "setup"[\s\S]*placement = "overlay"/);
   assert.match(manifest, /id = "prompt-config"[\s\S]*placement = "overlay"/);
 
   const src = new URL("../src/", import.meta.url);
@@ -313,7 +316,36 @@ test("manifest uses portable Bun runtime without Pi model coupling", async () =>
         .map((file) => readFile(new URL(file, src), "utf8")),
     )
   ).join("\n");
-  for (const forbidden of ["PiRpc", 'spawn("pi")', '"--mode", "rpc"', "kimi-coding/"]) {
+  for (const forbidden of [
+    "PiRpc",
+    'spawn("pi")',
+    '"--mode", "rpc"',
+    "kimi-coding/",
+  ]) {
     assert.equal(source.includes(forbidden), false, forbidden);
+  }
+});
+
+test("fenced JSON permits surrounding prose but still rejects invalid names and objects", async () => {
+  for (const [response, valid] of [
+    [
+      '```json\n{"tab":"Repair Task Naming","reason":"task"}\n```\nExplanation after fence.',
+      true,
+    ],
+    [
+      'Here is the title:\n```json\n{"tab":"Repair Task Naming","reason":"task"}\n```',
+      true,
+    ],
+    ['```json\n{"tab":null,"reason":"unclear"}\n```\nExplanation.', true],
+    ['```json\n{"tab":"bad","reason":"invalid"}\n```', false],
+    ['```json\n{"tab":"Repair Task Naming"}\n```', false],
+    ['```json\n{"tab":"Repair Task Naming",}\n```', false],
+  ] as const) {
+    const namer = new AiSdkNamer(
+      { SMART_RENAME_API_KEY: "test-key" },
+      async () => response,
+    );
+    if (valid) await namer.suggest(context);
+    else await assert.rejects(namer.suggest(context));
   }
 });
