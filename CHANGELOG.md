@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.2.0...v0.3.0) (2026-09-05)
+
+
+### Features
+
+* finish rename reliability and optional model setup ([364a5a0](https://github.com/iurysza/herdr-tab-smart-rename/commit/364a5a0fda0181261f1eb09d95d412250cdbfbaf))
+* **panes:** add smart pane renaming ([b5cdeba](https://github.com/iurysza/herdr-tab-smart-rename/commit/b5cdebab6ccf7ceb1377d5a08ee6771480e08c59))
+* **setup:** reuse Pi and OpenCode models with optional onboarding ([4fe26ea](https://github.com/iurysza/herdr-tab-smart-rename/commit/4fe26ea36e801a8a43187e26629f9b351ad61199))
+
+
+### Bug Fixes
+
+* **installer:** verify Herdr's requested release ref ([fc1f07d](https://github.com/iurysza/herdr-tab-smart-rename/commit/fc1f07d9dd2c74bb8254ccea2e10261a93a66cea))
+* isolate rename ownership and discard stale results ([c745243](https://github.com/iurysza/herdr-tab-smart-rename/commit/c745243cd9d7f748191333a209e74bcfb21ddfef))
+* **panes:** correct pane rename workflow ([45c994e](https://github.com/iurysza/herdr-tab-smart-rename/commit/45c994e29692a8da1ed771d34c545c83f24e7584))
+
 ## [0.2.0](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.1.1...v0.2.0) (2026-08-19)
 
 
