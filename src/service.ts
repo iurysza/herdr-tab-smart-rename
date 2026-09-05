@@ -33,7 +33,8 @@ import {
   type HerdrTab,
   type HerdrWorkspace,
 } from "./herdr.ts";
-import { AiSdkNamer, type Namer } from "./provider.ts";
+import type { Namer } from "./provider.ts";
+import { ModelSourceNamer } from "./model-namer.ts";
 import { sanitizeText } from "./text.ts";
 import { loadState, statePaths, withStateTransaction } from "./storage.ts";
 
@@ -236,6 +237,10 @@ export class AutoNameService {
         return current;
       },
     );
+  }
+
+  async close(): Promise<void> {
+    await this.#namer.close?.();
   }
 
   async acknowledge(
@@ -676,7 +681,7 @@ export function createService({
   stateDir = null,
   env = process.env,
   dryRun = false,
-  namer = new AiSdkNamer(env),
+  namer = new ModelSourceNamer(env),
   modelActivity,
   dependencies = {},
 }: CompositionOptions = {}): AutoNameService {

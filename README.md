@@ -6,30 +6,37 @@
 
 <p align="center"><strong>Tabs that say what the work is.</strong></p>
 
-Smart Rename turns numbered Herdr tabs into short task labels. Known processes get instant names such as `Run Tests`, `Dev Server`, and `View Logs`; ambiguous work uses an OpenAI-compatible model. Manual names always win.
+Smart Rename turns numbered Herdr tabs into short task labels. Known processes get instant names such as `Run Tests`, `Dev Server`, and `View Logs`; ambiguous work uses your selected Pi, OpenCode, or Direct model. Manual names always win.
 
 ## Demo
 
 https://github.com/user-attachments/assets/c9d12c33-e458-4a29-986c-c403d64aff02
 
-## Quick start
+## Install and optional setup
 
-Requires Herdr 0.7.0+ and Bun 1.1.34+.
+Requires Herdr 0.7.0+ and Bun 1.1.34+. Existing Direct configurations keep working without setup. Deterministic names work without a model.
+
+Install the plugin, then run setup if you want to choose a model:
 
 ```sh
 herdr plugin install iurysza/herdr-tab-smart-rename
-herdr plugin action invoke configure-ai --plugin tab-smart-rename
-herdr plugin action invoke check-ai --plugin tab-smart-rename
-herdr plugin action invoke start --plugin tab-smart-rename
+herdr plugin action invoke setup --plugin tab-smart-rename
 ```
 
-`configure-ai` opens `~/.config/herdr/plugins/config/tab-smart-rename/provider.env`. For the default OpenAI GPT-5.6 Luna setup, add:
+For a local checkout, run `bun install --frozen-lockfile`, then `herdr plugin link "$PWD"`.
 
-```dotenv
-OPENAI_API_KEY=...
+Setup keeps valid configuration by default. Choose Pi or OpenCode to reuse a connected provider and model, or Direct to enter an OpenAI-compatible API key. It validates without a model completion, shows optional keybinding instructions, then starts the worker for the current Herdr session.
+
+Cancelling leaves configuration and worker state unchanged. Failed saves or validation restore the previous configuration. A worker-start failure keeps validated configuration and prints a retry command. Setup never edits or reloads your Herdr configuration.
+
+For macOS and Linux, each release includes a tag-bound `install.sh` and `SHA256SUMS`. Download both from the [release page](https://github.com/iurysza/herdr-tab-smart-rename/releases/latest), inspect the script, then run:
+
+```sh
+shasum -a 256 -c SHA256SUMS
+sh install.sh
 ```
 
-Without a key, deterministic names still work.
+Use `sh install.sh --install-only --yes` to install without interactive setup.
 
 ### Windows
 
@@ -64,9 +71,9 @@ Every explicit rename ends with a notification: renamed, not renamed, or failed.
 | `reset-tab` | Return the current tab to automatic naming |
 | `reset-pane` | Reclaim and rename only the current agent pane |
 | `reset-workspace` | Reclaim and rename only the current workspace |
-| `configure-ai` | Edit provider settings |
+| `setup` | Choose a source/model, validate, and start the worker |
 | `configure-prompt` | Edit naming instructions |
-| `check-ai` | Validate config without calling the provider |
+| `check-ai` | Validate source, model, and prompt without a completion |
 | `start` / `stop` / `status` | Control the worker |
 
 ```sh
@@ -87,7 +94,17 @@ If a pane closes, moves, or changes agent session during inference, Smart Rename
 
 See the [naming policy](docs/naming-policy.md) for the full contract.
 
-## Configuration
+## Model sources
+
+Setup stores only the source, provider, model, and optional thinking level or variant in private `model-selection.json`. The selection reloads before each model-backed rename. A failed source never falls back to another source.
+
+- **Pi** uses Pi's public model runtime and its built-in or `models.json` providers. Pi owns API keys and subscription authentication. Smart Rename does not launch a Pi agent or load its tools and extensions.
+- **OpenCode** uses an installed OpenCode executable and its connected providers. It makes each naming request in a temporary session with tool execution denied, then deletes the session and closes its own server. OpenCode can still send tool definitions to the provider.
+- **Direct** keeps the existing standalone OpenAI-compatible path and private `provider.env`. Process configuration still overrides the file.
+
+`configure-ai` remains a compatibility alias for `setup`.
+
+### Direct configuration
 
 Provider defaults live in [`provider.env.example`](provider.env.example):
 
@@ -124,13 +141,15 @@ Set `SMART_RENAME_PROMPT_PATH` to use another file. Prompts reload per request; 
 
 Tab requests use bounded, sanitized evidence from the dominant pane, with sibling process summaries as supporting context. Pane requests use that pane alone. Pi panes may contribute short user-request excerpts. A manual label protects the label, not its pane content from use as tab context. Smart Rename removes terminal formatting, common secret shapes, and the local home path before sending context.
 
-Provider keys stay in Herdr's private plugin config and never enter Smart Rename state or logs.
+Direct keys stay in Herdr's private plugin config. Pi and OpenCode retain their own credentials. Smart Rename does not copy harness credentials, and no key enters its naming state or logs.
 
 ## Troubleshooting
 
 - Worker stopped: `herdr plugin action invoke start --plugin tab-smart-rename`
-- Config invalid: run `configure-ai`, then `check-ai`.
-- Authentication fails: ensure the key matches the configured endpoint and model; `check-ai` does not make an API request.
+- Config invalid: run `setup`.
+- Pi or OpenCode provider missing: connect it in that tool, then rerun `setup`.
+- Direct authentication fails: check the endpoint and key. `check-ai` validates configuration, not a paid completion.
+- Worker belongs to another Herdr socket: stop it in the owning session before starting it here. Setup never moves it automatically.
 - Bun is outside Herdr's server `PATH`: make `bun` available to the Herdr server. All actions invoke Bun directly, including on Windows.
 - Manual label stays: use `reset-tab` or an explicit rename.
 - Explicit actions report the skip or failure reason. Provider failures exit nonzero. `status` checks the worker process, not provider health.
@@ -144,6 +163,15 @@ bun install --frozen-lockfile
 bun run check
 bun test
 ```
+
+On this Mac, run host-isolated checks instead:
+
+```sh
+bun scripts/test-contained.ts
+bun scripts/test-contained.ts --harness test/harness-runtime.test.ts
+```
+
+The macOS runner blocks source and home writes and external network access. It supplies temporary homes and fake credentials. The harness check uses the installed OpenCode executable and Pi runtime against a local fake provider, including an OpenCode tool-denial sentinel. Test directories remain as evidence.
 
 From a Herdr pane, run the opt-in integration checks:
 

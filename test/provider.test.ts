@@ -305,7 +305,7 @@ test("manifest uses portable Bun runtime without Pi model coupling", async () =>
   );
   assert.match(manifest, /platforms = \["linux", "macos", "windows"\]/);
   assert.match(manifest, /command = \["bun", "src\/cli\.ts", "start"\]/);
-  assert.match(manifest, /id = "provider-config"[\s\S]*placement = "overlay"/);
+  assert.match(manifest, /id = "setup"[\s\S]*placement = "overlay"/);
   assert.match(manifest, /id = "prompt-config"[\s\S]*placement = "overlay"/);
 
   const src = new URL("../src/", import.meta.url);

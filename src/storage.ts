@@ -40,6 +40,8 @@ const WorkerInfoSchema = z.object({
   pid: z.number().int().positive(),
   script: z.string().min(1),
   startedAt: z.string().min(1),
+  socket: z.string().min(1).optional(),
+  readyAt: z.string().min(1).optional(),
 });
 
 const LockOwnerSchema = z.object({
@@ -49,6 +51,52 @@ const LockOwnerSchema = z.object({
 });
 
 export type WorkerInfo = z.infer<typeof WorkerInfoSchema>;
+
+export type WorkerOwnership = "same-target" | "other-target" | "legacy-unknown";
+
+export function workerOwnership(
+  info: WorkerInfo,
+  targetSocket: string | undefined,
+): WorkerOwnership {
+  if (!info.socket || !targetSocket) return "legacy-unknown";
+  return info.socket === targetSocket ? "same-target" : "other-target";
+}
+
+export function workerIsReady(
+  info: WorkerInfo,
+  targetSocket: string | undefined,
+): boolean {
+  return workerOwnership(info, targetSocket) === "same-target" && Boolean(info.readyAt);
+}
+
+export async function markWorkerReady(
+  pidFile: string,
+  pid: number,
+  socket: string,
+): Promise<boolean> {
+  try {
+    const current = WorkerInfoSchema.parse(JSON.parse(await readFile(pidFile, "utf8")));
+    if (current.pid !== pid || current.socket !== socket) return false;
+    const temporary = `${pidFile}.${process.pid}.${randomUUID()}.ready.tmp`;
+    try {
+      await writeFile(
+        temporary,
+        `${JSON.stringify({ ...current, readyAt: new Date().toISOString() })}\n`,
+        { mode: 0o600 },
+      );
+      await chmod(temporary, 0o600);
+      await rename(temporary, pidFile);
+      await chmod(pidFile, 0o600);
+      return true;
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => {});
+      throw error;
+    }
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return false;
+    throw error;
+  }
+}
 
 export interface StatePaths {
   state: string;

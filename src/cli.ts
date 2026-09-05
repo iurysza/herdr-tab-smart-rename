@@ -1,9 +1,16 @@
 #!/usr/bin/env bun
 import { chmod, closeSync, openSync } from "node:fs";
-import { chmod as chmodAsync, writeFile } from "node:fs/promises";
+import { chmod as chmodAsync, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { type RenameResult } from "./domain.ts";
 import { beginTabProgress, run, snapshot } from "./herdr.ts";
+import { loadModelSelection } from "./model-selection.ts";
+import {
+  selectionLabel,
+  type ModelSelection,
+  type ModelSource,
+} from "./model-source.ts";
+import { loadModelSource } from "./model-sources/index.ts";
 import { loadNamingPrompt, loadProviderConfig } from "./provider.ts";
 import { createService } from "./service.ts";
 import {
@@ -11,6 +18,8 @@ import {
   ensurePrivateDir,
   statePaths,
   workerInfo,
+  workerIsReady,
+  workerOwnership,
 } from "./storage.ts";
 import { sanitizeText } from "./text.ts";
 
@@ -103,10 +112,62 @@ export function currentResultNotice(result: RenameResult | null): {
   };
 }
 
+export function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\\"'\\\"'")}'`;
+}
+
+export function otherSocketRecovery(ownerSocket: string): string {
+  return [
+    `HERDR_SOCKET_PATH=${shellQuote(ownerSocket)} herdr plugin action invoke stop --plugin tab-smart-rename`,
+    "herdr plugin action invoke start --plugin tab-smart-rename",
+  ].join("\n");
+}
+
+// Receipt (2026-08-19): isolated starts took 493ms normally and 306ms with a held start lock; 5000ms is just over ten times the slower observed start.
+export const WORKER_READY_TIMEOUT_MS = 5_000;
+export const WORKER_READY_POLL_INTERVAL_MS = 50;
+
+export interface WorkerReadinessDependencies {
+  readonly lookup: () => Promise<Awaited<ReturnType<typeof workerInfo>>>;
+  readonly sleep?: (milliseconds: number) => Promise<void>;
+  readonly now?: () => number;
+  readonly timeoutMs?: number;
+  readonly pollIntervalMs?: number;
+}
+
+export async function waitForWorkerReadiness(
+  targetSocket: string,
+  {
+    lookup,
+    sleep = (milliseconds) => Bun.sleep(milliseconds),
+    now = () => Date.now(),
+    timeoutMs = WORKER_READY_TIMEOUT_MS,
+    pollIntervalMs = WORKER_READY_POLL_INTERVAL_MS,
+  }: WorkerReadinessDependencies,
+): Promise<void> {
+  const startedAt = now();
+  while (true) {
+    const info = await lookup();
+    if (!info) throw new Error("Smart Rename worker exited before readiness.");
+    if (workerIsReady(info, targetSocket)) return;
+    const elapsed = now() - startedAt;
+    if (elapsed >= timeoutMs) {
+      throw new Error(
+        `Smart Rename worker did not become ready for ${targetSocket} after ${elapsed}ms (configured readiness timeout ${timeoutMs}ms).`,
+      );
+    }
+    await sleep(pollIntervalMs);
+  }
+}
+
 async function start(): Promise<void> {
   const stateDir = requireStateDir();
   await ensurePrivateDir(stateDir);
   const paths = statePaths(stateDir);
+  const targetSocket = process.env.HERDR_SOCKET_PATH;
+  if (!targetSocket) {
+    throw new Error("HERDR_SOCKET_PATH is required to prove Smart Rename worker readiness.");
+  }
   const release = await acquireLock(paths.startLock, {
     timeoutMs: 2_000,
     staleMs: 30_000,
@@ -114,8 +175,22 @@ async function start(): Promise<void> {
   try {
     const existing = await workerInfo(paths.pid, workerScript);
     if (existing) {
-      console.log(`Smart Rename already running (pid ${existing.pid})`);
-      return;
+      const ownership = workerOwnership(existing, targetSocket);
+      if (ownership === "same-target") {
+        await waitForWorkerReadiness(targetSocket, {
+          lookup: () => workerInfo(paths.pid, workerScript),
+        });
+        console.log(`Smart Rename already running (pid ${existing.pid})`);
+        return;
+      }
+      if (ownership === "other-target") {
+        throw new Error(
+          `Smart Rename is already serving another Herdr session. Stop it there, then retry here:\n${otherSocketRecovery(existing.socket!)}`,
+        );
+      }
+      throw new Error(
+        "Smart Rename has a live legacy worker with unknown Herdr socket ownership. Stop it with `herdr plugin action invoke stop --plugin tab-smart-rename`, then retry start.",
+      );
     }
 
     const logFd = openSync(paths.log, "a", 0o600);
@@ -127,7 +202,6 @@ async function start(): Promise<void> {
       stdin: "ignore",
       stdout: logFd,
       stderr: logFd,
-      windowsHide: true,
     });
     child.unref();
     closeSync(logFd);
@@ -137,11 +211,21 @@ async function start(): Promise<void> {
         pid: child.pid,
         script: workerScript,
         startedAt: new Date().toISOString(),
+        socket: targetSocket,
       })}\n`,
       { mode: 0o600 },
     );
     await chmodAsync(paths.pid, 0o600);
-    console.log(`Smart Rename started (pid ${child.pid})`);
+    try {
+      await waitForWorkerReadiness(targetSocket, {
+        lookup: () => workerInfo(paths.pid, workerScript),
+      });
+    } catch (error) {
+      child.kill();
+      await rm(paths.pid, { force: true });
+      throw error;
+    }
+    console.log(`Smart Rename started and ready (pid ${child.pid})`);
   } finally {
     await release();
   }
@@ -153,6 +237,9 @@ async function stop(): Promise<void> {
   if (!info) {
     console.log("Smart Rename is not running");
     return;
+  }
+  if (workerOwnership(info, process.env.HERDR_SOCKET_PATH) === "other-target") {
+    throw new Error("Smart Rename is serving another Herdr session and cannot be stopped from this session.");
   }
   process.kill(info.pid, "SIGTERM");
   for (let count = 0; count < 30; count += 1) {
@@ -172,22 +259,30 @@ async function status(): Promise<void> {
     console.log("Smart Rename stopped");
     return;
   }
-  console.log(
-    `Smart Rename running (pid ${info.pid}, since ${info.startedAt})`,
-  );
+  const ownership = workerOwnership(info, process.env.HERDR_SOCKET_PATH);
+  const target = ownership === "same-target"
+    ? "serving this Herdr session"
+    : ownership === "other-target"
+      ? "serving another Herdr session"
+      : "with legacy-unknown Herdr socket ownership";
+  console.log(`Smart Rename running (pid ${info.pid}, since ${info.startedAt}; ${target})`);
 }
 
 async function renameAll(): Promise<RenameResult[]> {
   const stateDir = requireStateDir();
   await ensurePrivateDir(stateDir);
   const service = createService({ stateDir });
-  const initial = await service.initialize();
-  const results = await service.evaluateAll(initial, {
-    resetKind: "tab",
-    forceRefresh: true,
-  });
-  console.log(JSON.stringify(results, null, 2));
-  return results;
+  try {
+    const initial = await service.initialize();
+    const results = await service.evaluateAll(initial, {
+      resetKind: "tab",
+      forceRefresh: true,
+    });
+    console.log(JSON.stringify(results, null, 2));
+    return results;
+  } finally {
+    await service.close();
+  }
 }
 
 interface OnceOptions {
@@ -233,20 +328,24 @@ async function once({
     ...(progress ? { modelActivity: beginTabProgress } : {}),
     dryRun,
   });
-  await service.initialize(current);
-  const targetTab =
-    resetKind === "workspace"
-      ? current.workspaces.find((item) => item.workspace_id === workspaceId)
-          ?.active_tab_id || tabId
-      : tabId;
-  const result = await service.evaluate(targetTab, {
-    snapshot: current,
-    resetKind,
-    ...(targetPane ? { targetPaneId: targetPane.pane_id } : {}),
-    forceRefresh,
-  });
-  console.log(JSON.stringify(result, null, 2));
-  return result;
+  try {
+    await service.initialize(current);
+    const targetTab =
+      resetKind === "workspace"
+        ? current.workspaces.find((item) => item.workspace_id === workspaceId)
+            ?.active_tab_id || tabId
+        : tabId;
+    const result = await service.evaluate(targetTab, {
+      snapshot: current,
+      resetKind,
+      ...(targetPane ? { targetPaneId: targetPane.pane_id } : {}),
+      forceRefresh,
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return result;
+  } finally {
+    await service.close();
+  }
 }
 
 async function openConfigPane(entrypoint: string): Promise<void> {
@@ -267,25 +366,51 @@ async function openConfigPane(entrypoint: string): Promise<void> {
   );
 }
 
-async function configureAi(): Promise<void> {
-  await openConfigPane("provider-config");
+async function setup(): Promise<void> {
+  await openConfigPane("setup");
 }
 
 async function configurePrompt(): Promise<void> {
   await openConfigPane("prompt-config");
 }
 
-async function checkAi(): Promise<void> {
+export interface CheckAiDependencies {
+  loadSelection?: (env: NodeJS.ProcessEnv) => Promise<ModelSelection>;
+  loadPrompt?: (env: NodeJS.ProcessEnv) => Promise<string>;
+  sourceFactory?: (
+    selection: ModelSelection,
+    env: NodeJS.ProcessEnv,
+  ) => Promise<ModelSource>;
+  notify?: typeof notify;
+  report?: (summary: string) => void;
+}
+
+export async function checkAi(
+  env: NodeJS.ProcessEnv = process.env,
+  {
+    loadSelection = (value) =>
+      loadModelSelection(value.HERDR_PLUGIN_CONFIG_DIR, value),
+    loadPrompt = loadNamingPrompt,
+    sourceFactory = loadModelSource,
+    notify: sendNotice = notify,
+    report = console.log,
+  }: CheckAiDependencies = {},
+): Promise<string> {
+  const selection = await loadSelection(env);
+  const source = await sourceFactory(selection, env);
   try {
-    const config = await loadProviderConfig(process.env);
-    await loadNamingPrompt(config, process.env);
-    const summary = `${config.provider}/${config.model}`;
-    await notify("AI ready", summary);
-    console.log(summary);
+    await Promise.all([source.validate(selection), loadPrompt(env)]);
+    const config = selection.source === "direct" ? await loadProviderConfig(env) : undefined;
+    const summary = config ? `${config.provider}/${config.model}` : selectionLabel(selection);
+    await sendNotice("AI ready", summary);
+    report(summary);
+    return summary;
   } catch (error) {
     const message = errorMessage(error);
-    await notify("Config missing", message, "request");
+    await sendNotice("AI config needs attention", message, "request");
     throw error;
+  } finally {
+    await source.close?.();
   }
 }
 
@@ -330,9 +455,10 @@ const defaultActions: NonNullable<DispatchOptions["actions"]> = {
   start,
   stop,
   status,
-  "configure-ai": configureAi,
+  setup,
+  "configure-ai": setup,
   "configure-prompt": configurePrompt,
-  "check-ai": checkAi,
+  "check-ai": () => checkAi(),
   once: ({ dryRun }) => once({ dryRun }),
   "dry-run": () => once({ dryRun: true }),
   "rename-now": renameNow,
@@ -349,7 +475,7 @@ export async function dispatch(
   const action = command ? actions[command] : undefined;
   if (!action) {
     throw new Error(
-      "usage: cli.ts start|stop|status|configure-ai|configure-prompt|check-ai|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-pane|reset-workspace",
+      "usage: cli.ts start|stop|status|setup|configure-prompt|check-ai|once [--dry-run]|dry-run|rename-now|all|reset-tab|reset-pane|reset-workspace",
     );
   }
   return action({ dryRun });

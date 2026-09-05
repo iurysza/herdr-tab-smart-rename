@@ -40,5 +40,7 @@ test("documented CLI actions are registered in the Herdr manifest", async () => 
   const documented = documentedCliCommands(cli).filter(
     (command) => !INTERNAL_COMMANDS.has(command),
   );
-  assert.deepEqual(manifestCliCommands(manifest).sort(), documented.sort());
+  const registered = manifestCliCommands(manifest);
+  assert.ok(registered.includes("configure-ai"), "keep the deprecated setup alias");
+  assert.deepEqual(registered.filter((command) => command !== "configure-ai").sort(), documented.sort());
 });

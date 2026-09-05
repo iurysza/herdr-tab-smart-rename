@@ -45,6 +45,7 @@ export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
 export interface Namer {
   suggest(context: NamingContext): Promise<NameSuggestion>;
+  close?(): Promise<void>;
 }
 
 export function providerEnvPath(env: NodeJS.ProcessEnv = process.env): string | null {
@@ -164,7 +165,7 @@ function configError(error: z.ZodError): Error {
     timeoutMs: "SMART_RENAME_TIMEOUT_MS must be 1000-300000",
     reasoningEffort: "SMART_RENAME_REASONING_EFFORT must be low, medium, or high",
     promptPath: "SMART_RENAME_PROMPT_PATH is invalid",
-    apiKey: `AI key missing. Run configure-ai or set a provider key in ${PROVIDER_ENV_NAME}`,
+    apiKey: `AI key missing. Run setup or set a provider key in ${PROVIDER_ENV_NAME}`,
   };
   return new Error(messages[field ?? ""] ?? "AI provider configuration is invalid");
 }
@@ -178,9 +179,9 @@ export async function loadProviderConfig(
   ]);
   const provider = pick(env, fileEnv, defaults, "SMART_RENAME_PROVIDER");
   const configuredReasoning =
-    env.SMART_RENAME_REASONING_EFFORT || fileEnv.SMART_RENAME_REASONING_EFFORT;
+    env.SMART_RENAME_REASONING_EFFORT ?? fileEnv.SMART_RENAME_REASONING_EFFORT;
   const reasoningEffort =
-    configuredReasoning ||
+    configuredReasoning ??
     (provider === defaults.SMART_RENAME_PROVIDER
       ? defaults.SMART_RENAME_REASONING_EFFORT
       : "");
@@ -202,11 +203,22 @@ export async function loadProviderConfig(
   return parsed.data;
 }
 
+export async function loadNamingPrompt(config: ProviderConfig, env?: NodeJS.ProcessEnv): Promise<string>;
+export async function loadNamingPrompt(env?: NodeJS.ProcessEnv): Promise<string>;
 export async function loadNamingPrompt(
-  config: ProviderConfig,
-  env: NodeJS.ProcessEnv = process.env,
+  configOrEnv: ProviderConfig | NodeJS.ProcessEnv = process.env,
+  suppliedEnv?: NodeJS.ProcessEnv,
 ): Promise<string> {
-  if (config.promptPath) return readNamingPrompt(config.promptPath, true);
+  const isConfig = typeof configOrEnv.baseURL === "string";
+  const env = isConfig ? suppliedEnv ?? process.env : configOrEnv as NodeJS.ProcessEnv;
+  const promptPath = isConfig
+    ? (configOrEnv as ProviderConfig).promptPath
+    : await configuredNamingPromptPath(env);
+  if (isConfig && promptPath) return readNamingPrompt(promptPath, true);
+  if (!isConfig && promptPath) {
+    const privateDefault = env.HERDR_PLUGIN_CONFIG_DIR && path.join(env.HERDR_PLUGIN_CONFIG_DIR, NAMING_PROMPT_NAME);
+    if (promptPath !== privateDefault) return readNamingPrompt(promptPath, true);
+  }
 
   if (env.HERDR_PLUGIN_CONFIG_DIR) {
     const privatePrompt = path.join(env.HERDR_PLUGIN_CONFIG_DIR, NAMING_PROMPT_NAME);
@@ -225,7 +237,7 @@ export async function loadNamingPrompt(
   return bundledNamingPrompt();
 }
 
-function parseSuggestion(text: string): NameSuggestion {
+export function parseSuggestion(text: string): NameSuggestion {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const cleaned = (fenced?.[1] ?? text).trim();
   const output = ModelOutputSchema.parse(JSON.parse(cleaned));
@@ -264,7 +276,7 @@ export function transformOpenAiRequestBody(
     : { ...rest, max_completion_tokens: max_tokens };
 }
 
-async function completeWithAiSdk(request: CompletionRequest): Promise<string> {
+export async function completeWithAiSdk(request: CompletionRequest): Promise<string> {
   const provider = createOpenAICompatible({
     name: request.config.provider,
     baseURL: request.config.baseURL,

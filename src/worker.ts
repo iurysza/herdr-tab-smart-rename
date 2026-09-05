@@ -12,6 +12,7 @@ import {
 import { createService } from "./service.ts";
 import {
   ensurePrivateDir,
+  markWorkerReady,
   removeOwnedWorkerPid,
   statePaths,
 } from "./storage.ts";
@@ -194,6 +195,11 @@ export async function runWorker(
         .catch((error: unknown) => log(`event failed: ${errorMessage(error)}`));
     });
     socket = connection;
+    connection.once("connect", () => {
+      void markWorkerReady(paths.pid, process.pid, socketPath)
+        .then((marked) => log(marked ? `ready socket=${socketPath}` : "ready metadata was not owned"))
+        .catch((error: unknown) => log(`could not mark ready: ${errorMessage(error)}`));
+    });
     connection.on(
       "error",
       (error) => void log(`socket error: ${error.message}`),
@@ -214,6 +220,7 @@ export async function runWorker(
     socket?.destroy();
     await events.catch(() => {});
     await work.catch(() => {});
+    await service.close();
     await removeOwnedWorkerPid(paths.pid, process.pid);
     await log(`stopped by ${signal}`);
     process.exit(0);
