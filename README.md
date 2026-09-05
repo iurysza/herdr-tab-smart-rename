@@ -1,192 +1,113 @@
-<p align="center">
-  <img src="assets/herdr-tab-smart-rename-banner.png" width="720" alt="Pixel wand renaming a terminal tab">
-</p>
+# Smart Rename
 
-<h1 align="center">herdr-tab-smart-rename</h1>
+![Smart Rename](./assets/herdr-tab-smart-rename-banner.png)
 
-<p align="center"><strong>Tabs that say what the work is.</strong></p>
+Name your Herdr tabs and agent panes after their current task.
 
-Smart Rename turns numbered Herdr tabs into short task labels. Known processes get instant names such as `Run Tests`, `Dev Server`, and `View Logs`; ambiguous work uses your selected Pi, OpenCode, or Direct model. Manual names always win.
+An agent reviewing authentication can show `Review Auth Changes`. A test run can show `Run Tests`. Smart Rename updates these labels in the background so you can find the right tab without opening it.
+
+- Give agents separate pane labels, even when they share a tab.
+- Keep names you set yourself until you explicitly reset or rename them.
+- Name known commands without an AI call. Use a model to interpret other tasks.
+- Reuse connected Pi or OpenCode providers, or supply an OpenAI-compatible API key.
 
 ## Demo
 
 https://github.com/user-attachments/assets/c9d12c33-e458-4a29-986c-c403d64aff02
 
-## Install and optional setup
+## Install on macOS or Linux
 
-Requires Herdr 0.7.0+ and Bun 1.1.34+. Existing Direct configurations keep working without setup. Deterministic names work without a model.
+You need Herdr 0.7.0+ and Bun 1.1.34+ installed. Pi and OpenCode are optional.
 
-Install the plugin, then run setup if you want to choose a model:
+From a Herdr terminal, download the installer and its checksum file:
 
 ```sh
-herdr plugin install iurysza/herdr-tab-smart-rename
+release="https://github.com/iurysza/herdr-tab-smart-rename/releases/latest/download"
+curl --proto '=https' --tlsv1.2 -fsSLO "$release/install.sh" &&
+curl --proto '=https' --tlsv1.2 -fsSLO "$release/SHA256SUMS"
+```
+
+Review `install.sh`, then verify its checksum and run it:
+
+```sh
+shasum -a 256 -c SHA256SUMS && sh install.sh
+```
+
+The installer checks your tools, installs its exact release through Herdr, and opens setup. Herdr installs the plugin's dependencies for you.
+
+For Windows, use the [Herdr installation commands](./docs/install.md#windows). For an existing installation, follow the [upgrade guide](./docs/install.md#upgrade-an-existing-install) or [local-checkout migration](./docs/install.md#move-from-a-local-checkout).
+
+## Choose a model
+
+Setup offers three sources:
+
+- Direct uses an OpenAI-compatible endpoint, model ID, and API key. Neither Pi nor OpenCode needs to be installed.
+- Pi reuses a provider you have connected in Pi, with its models and supported thinking levels.
+- OpenCode reuses a provider you have connected in an installed OpenCode, with its models and variants.
+
+If you already have valid settings, setup offers to keep them. To switch sources, choose **No** at **Keep existing AI setup?**
+
+![Setup switching from Direct to Pi, with model selection and optional shortcut instructions](https://github.com/user-attachments/assets/9b5a1bf4-48d8-4544-a65e-9fc01f65daca)
+
+Choose whether to see shortcut instructions, review your settings, and confirm **Apply this setup?** Setup saves your choice and starts background naming. It never edits your Herdr keybindings.
+
+Cancel before applying to leave your settings unchanged. Existing Direct keys and custom naming instructions still work. Pi and OpenCode keep their own credentials.
+
+To change the model later, reopen setup:
+
+```sh
 herdr plugin action invoke setup --plugin tab-smart-rename
 ```
 
-<img width="492" height="407" alt="smart-rename" src="https://github.com/user-attachments/assets/9b5a1bf4-48d8-4544-a65e-9fc01f65daca" />
+## Rename your current tab
 
-For a local checkout, run `bun install --frozen-lockfile`, then `herdr plugin link "$PWD"`.
+After setup, use your terminal as usual. Known commands get names such as `Run Tests` or `Dev Server`. For other tasks, Smart Rename asks your selected model for a short label.
 
-Setup keeps valid configuration by default. Choose Pi or OpenCode to reuse a connected provider and model, or Direct to enter an OpenAI-compatible API key. It validates without a model completion, shows optional keybinding instructions, then starts the worker for the current Herdr session.
-
-Cancelling leaves configuration and worker state unchanged. Failed saves or validation restore the previous configuration. A worker-start failure keeps validated configuration and prints a retry command. Setup never edits or reloads your Herdr configuration.
-
-For macOS and Linux, each release includes a tag-bound `install.sh` and `SHA256SUMS`. Download both from the [release page](https://github.com/iurysza/herdr-tab-smart-rename/releases/latest), inspect the script, then run:
+To request a name now:
 
 ```sh
-shasum -a 256 -c SHA256SUMS
-sh install.sh
+herdr plugin action invoke rename-now --plugin tab-smart-rename
 ```
 
-Use `sh install.sh --install-only --yes` to install without interactive setup.
+This action can replace a name you set yourself. It affects only the current tab, leaving pane and workspace labels alone. A notification reports the result or explains why the tab was not renamed.
 
-### Windows
-
-Herdr's Windows preview is supported with Bun available on `PATH`. The plugin
-uses direct Bun commands instead of a Unix shell launcher, and inspects worker
-processes through PowerShell.
-
-## Keybindings
-
-```toml
-[[keys.command]]
-key = "prefix+t"
-type = "plugin_action"
-command = "tab-smart-rename.rename-now"
-description = "smart rename current tab"
-
-[[keys.command]]
-key = "prefix+alt+t"
-type = "plugin_action"
-command = "tab-smart-rename.rename-all"
-description = "force smart rename all tabs"
-```
-
-Every explicit rename ends with a notification: renamed, not renamed, or failed. During a model-backed current-tab rename, a diamond pulse appears before its label.
-
-## Actions
-
-| Action | Effect |
-| --- | --- |
-| `rename-now` | Reclaim and rename only the current tab |
-| `rename-all` | Reclaim and rename tabs, without changing panes or workspaces |
-| `reset-tab` | Return the current tab to automatic naming |
-| `reset-pane` | Reclaim and rename only the current agent pane |
-| `reset-workspace` | Reclaim and rename only the current workspace |
-| `setup` | Choose a source/model, validate, and start the worker |
-| `configure-prompt` | Edit naming instructions |
-| `check-ai` | Validate source, model, and prompt without a completion |
-| `start` / `stop` / `status` | Control the worker |
+To check or stop background naming:
 
 ```sh
-herdr plugin action invoke <action> --plugin tab-smart-rename
+herdr plugin action invoke status --plugin tab-smart-rename
+herdr plugin action invoke stop --plugin tab-smart-rename
 ```
 
-## Naming behavior
+Use `start` to resume it. See [actions and shortcuts](./docs/configuration.md) for pane resets, all-tab renames, and keyboard bindings.
 
-Smart Rename uses one dominant pane to name the shared tab workstream: focused agent, another active agent, focused command, then first pane. Supporting servers and logs never replace an active agent's task.
+## How naming works
 
-Each recognised agent pane also gets its own label from its individual session and process context. Two agents in the same tab can show different task labels, while the tab keeps one shared workstream title. Manual pane names remain protected until `reset-pane`. A manually named pane can still supply task context for its tab.
+Smart Rename uses the focused agent's task to name a shared tab, or another active pane when needed. Supporting servers and logs do not replace an active agent's task. Each recognized agent pane gets its own label.
 
-Labels use 2–4 Title Case words, stay under 30 characters, and describe the task—not its tool, model, or project. Weak evidence produces no rename. Manual labels remain locked until reset or explicit rename.
+Background naming preserves manual labels. Weak evidence leaves a name unchanged, and results from closed panes or changed agent sessions are discarded.
 
-Background naming handles each automatic workspace, tab, and agent pane independently. One failed pane request does not block a valid tab name. Explicit actions affect only their named targets.
+Model-backed naming sends bounded terminal context to your selected provider. Pi panes can also contribute short user-request excerpts. Secret redaction is best-effort, and a manual name does not exclude its pane's content. Read [privacy and context](./docs/configuration.md#private-files-and-context) before using it with sensitive work.
 
-If a pane closes, moves, or changes agent session during inference, Smart Rename discards names based on that old context. Closing a pane does not cancel an already-sent provider request. Closed-item records are removed when the next snapshot is reconciled.
+## Documentation
 
-See the [naming policy](docs/naming-policy.md) for the full contract.
+- [Installation](./docs/install.md): platforms, upgrades, and migration from a local checkout.
+- [Configuration and controls](./docs/configuration.md): actions, shortcuts, model sources, and troubleshooting.
+- [Naming policy](./docs/naming-policy.md): the default instructions used to generate labels.
+- [Release process](./docs/releasing.md) and [changelog](./CHANGELOG.md).
 
-## Model sources
+## Development
 
-Setup stores only the source, provider, model, and optional thinking level or variant in private `model-selection.json`. The selection reloads before each model-backed rename. A failed source never falls back to another source.
-
-- **Pi** uses Pi's public model runtime and its built-in or `models.json` providers. Pi owns API keys and subscription authentication. Smart Rename does not launch a Pi agent or load its tools and extensions.
-- **OpenCode** uses an installed OpenCode executable and its connected providers. It makes each naming request in a temporary session with tool execution denied, then deletes the session and closes its own server. OpenCode can still send tool definitions to the provider.
-- **Direct** keeps the existing standalone OpenAI-compatible path and private `provider.env`. Process configuration still overrides the file.
-
-`configure-ai` remains a compatibility alias for `setup`.
-
-### Direct configuration
-
-Provider defaults live in [`provider.env.example`](provider.env.example):
-
-```dotenv
-SMART_RENAME_PROVIDER=openai
-SMART_RENAME_BASE_URL=https://api.openai.com/v1
-SMART_RENAME_MODEL=gpt-5.6-luna
-SMART_RENAME_REASONING_EFFORT=medium
-SMART_RENAME_TIMEOUT_MS=45000
-```
-
-Use `SMART_RENAME_API_KEY` for another OpenAI-compatible provider. `OPENAI_API_KEY` and Kimi's `KIMI_API_KEY` are also supported when their provider is selected. Config reloads before every model request.
-
-### Custom prompt
-
-The default system prompt is [`docs/naming-policy.md`](docs/naming-policy.md). Create a private editable copy with:
-
-```sh
-herdr plugin action invoke configure-prompt --plugin tab-smart-rename
-```
-
-It opens `~/.config/herdr/plugins/config/tab-smart-rename/naming-prompt.md`. A prompt can be this small:
-
-```md
-Name the current persistent task in 2–4 Title Case words.
-Omit project, app, agent, and model names.
-Return JSON only: {"tab":"Assess Python Migration","reason":"Current task."}
-If unclear: {"tab":null,"reason":"no meaningful task"}
-```
-
-Set `SMART_RENAME_PROMPT_PATH` to use another file. Prompts reload per request; built-in JSON and label validation still applies.
-
-## Privacy
-
-Tab requests use bounded, sanitized evidence from the dominant pane, with sibling process summaries as supporting context. Pane requests use that pane alone. Pi panes may contribute short user-request excerpts. A manual label protects the label, not its pane content from use as tab context. Smart Rename removes terminal formatting, common secret shapes, and the local home path before sending context.
-
-Direct keys stay in Herdr's private plugin config. Pi and OpenCode retain their own credentials. Smart Rename does not copy harness credentials, and no key enters its naming state or logs.
-
-## Troubleshooting
-
-- Worker stopped: `herdr plugin action invoke start --plugin tab-smart-rename`
-- Config invalid: run `setup`.
-- Pi or OpenCode provider missing: connect it in that tool, then rerun `setup`.
-- Direct authentication fails: check the endpoint and key. `check-ai` validates configuration, not a paid completion.
-- Worker belongs to another Herdr socket: stop it in the owning session before starting it here. Setup never moves it automatically.
-- Bun is outside Herdr's server `PATH`: make `bun` available to the Herdr server. All actions invoke Bun directly, including on Windows.
-- Manual label stays: use `reset-tab` or an explicit rename.
-- Explicit actions report the skip or failure reason. Provider failures exit nonzero. `status` checks the worker process, not provider health.
-- Action logs: `herdr plugin log list --plugin tab-smart-rename --limit 10`
-- Background failures: `~/.local/state/herdr/plugins/tab-smart-rename/worker.log`
-
-## Development checks
+Smart Rename runs TypeScript directly with Bun. There is no build step.
 
 ```sh
 bun install --frozen-lockfile
 bun run check
-bun test
 ```
 
-On this Mac, run host-isolated checks instead:
+On macOS, run tests with the contained runner to keep them away from your real credentials and Herdr sessions:
 
 ```sh
 bun scripts/test-contained.ts
-bun scripts/test-contained.ts --harness test/harness-runtime.test.ts
 ```
 
-The macOS runner blocks source and home writes and external network access. It supplies temporary homes and fake credentials. The harness check uses the installed OpenCode executable and Pi runtime against a local fake provider, including an OpenCode tool-denial sentinel. Test directories remain as evidence.
-
-From a Herdr pane, run the opt-in integration checks:
-
-```sh
-SMART_RENAME_LIVE_TEST=1 bun test test/herdr-live.test.ts
-```
-
-These tests create background tabs, report fixture agent states, and close only their own tabs. They use a local mock provider, not a billed API. They cover pane closure during inference, manual-label protection, exact action scope, and CLI failure cleanup.
-
-## Documentation
-
-- [Naming policy](docs/naming-policy.md)
-- [Release process](docs/releasing.md)
-- [Changelog](CHANGELOG.md)
-- [Semantic map](ai-artifacts/SEMANTIC_MAP.md)
-- [Architecture](ai-artifacts/ARCHITECTURE.md)
+The naming service lives in `src/service.ts`, with model adapters in `src/model-sources/`. See [development](./docs/development.md) for other platforms, integration tests, and linking a checkout to Herdr.
