@@ -26,9 +26,11 @@ test("release renders a tag-bound shell installer and validates version agreemen
     assert.match(installer, new RegExp(`^RELEASE_COMMIT="${commit}"$`, "m"));
     assert.doesNotMatch(installer, /__RELEASE_(?:TAG|COMMIT)__/);
 
-    const version = await command(["scripts/check-release-version.ts", "v0.2.0", commit]);
+    const { version: packageVersion } = await Bun.file(new URL("../package.json", import.meta.url)).json();
+    const version = await command(["scripts/check-release-version.ts", `v${packageVersion}`, commit]);
     assert.equal(version.exitCode, 0, version.stderr);
-    const mismatch = await command(["scripts/check-release-version.ts", "v0.2.1", commit]);
+    const [major, minor, patch] = packageVersion.split(".").map(Number);
+    const mismatch = await command(["scripts/check-release-version.ts", `v${major}.${minor}.${patch + 1}`, commit]);
     assert.notEqual(mismatch.exitCode, 0);
   } finally {
     await rm(root, { recursive: true, force: true });
