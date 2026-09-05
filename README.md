@@ -19,21 +19,13 @@ https://github.com/user-attachments/assets/c9d12c33-e458-4a29-986c-c403d64aff02
 
 You need Herdr 0.7.0+ and Bun 1.1.34+ installed. Pi and OpenCode are optional.
 
-From a Herdr terminal, download the installer and its checksum file:
+Run this from a Herdr terminal:
 
 ```sh
-release="https://github.com/iurysza/herdr-tab-smart-rename/releases/latest/download"
-curl --proto '=https' --tlsv1.2 -fsSLO "$release/install.sh" &&
-curl --proto '=https' --tlsv1.2 -fsSLO "$release/SHA256SUMS"
+curl -fsSL https://github.com/iurysza/herdr-tab-smart-rename/releases/latest/download/install.sh | sh
 ```
 
-Review `install.sh`, then verify its checksum and run it:
-
-```sh
-shasum -a 256 -c SHA256SUMS && sh install.sh
-```
-
-The installer checks your tools, installs its exact release through Herdr, and opens setup. Herdr installs the plugin's dependencies for you.
+The installer installs the plugin and opens setup. Choose a model, confirm, and background naming starts.
 
 For Windows, use the [Herdr installation commands](./docs/install.md#windows). For an existing installation, follow the [upgrade guide](./docs/install.md#upgrade-an-existing-install) or [local-checkout migration](./docs/install.md#move-from-a-local-checkout).
 
