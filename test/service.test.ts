@@ -3,24 +3,14 @@ import assert from "node:assert/strict";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import {
-  type PaneContext,
-  type NameSuggestion,
-} from "../src/domain.ts";
-import {
-  type HerdrPane,
-  type HerdrSnapshot,
-} from "../src/herdr.ts";
+import { type PaneContext, type NameSuggestion } from "../src/domain.ts";
+import { type HerdrPane, type HerdrSnapshot } from "../src/herdr.ts";
 import {
   AutoNameService,
   focusedPaneFor,
   type ServiceDependencies,
 } from "../src/service.ts";
-import {
-  loadState,
-  statePaths,
-  withStateTransaction,
-} from "../src/storage.ts";
+import { loadState, statePaths, withStateTransaction } from "../src/storage.ts";
 
 function liveSnapshot(tabLabel = "1"): HerdrSnapshot {
   return {
@@ -146,10 +136,10 @@ test("all-tab dry run visits tabs sequentially without writing state", async () 
   try {
     const results = await service.evaluateAll(snap);
     assert.deepEqual(visits, ["p1", "p2"]);
-    assert.deepEqual(results.map((result) => result.candidate.tab), [
-      "Run Tests",
-      "Run Tests",
-    ]);
+    assert.deepEqual(
+      results.map((result) => result.candidate.tab),
+      ["Run Tests", "Run Tests"],
+    );
     await assert.rejects(access(paths.state));
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -185,7 +175,7 @@ test("manual ownership short-circuits tab context and model work but still names
   }
 });
 
-test("explicit refresh reclaims manual tabs and bypasses model gates for tabs and panes", async () => {
+test("explicit tab refresh reclaims only the tab; background work still names panes", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-force-"));
   const paths = statePaths(dir);
   const snap = liveSnapshot("Manual Task");
@@ -229,7 +219,15 @@ test("explicit refresh reclaims manual tabs and bypasses model gates for tabs an
     const forced = await service.evaluate("t1", { forceRefresh: true });
     assert.ok(forced);
     assert.equal(forced.usedModel, true);
-    assert.equal(calls, 2);
+    assert.equal(calls, 3);
+    assert.equal(
+      first.changes.some((change) => change.kind === "pane"),
+      false,
+    );
+    assert.equal(
+      gated.changes.some((change) => change.kind === "pane"),
+      true,
+    );
     assert.deepEqual(activity, [
       "start:Manual Task",
       "stop",
@@ -275,7 +273,9 @@ test("concurrent evaluations keep expected writes durable and avoid stale races"
 });
 
 test("failed model calls persist attempt backoff without success fingerprint", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-failure-"));
+  const dir = await mkdtemp(
+    path.join(os.tmpdir(), "tab-smart-rename-failure-"),
+  );
   const paths = statePaths(dir);
   const snap = liveSnapshot();
   let stopped = false;
@@ -297,7 +297,13 @@ test("failed model calls persist attempt backoff without success fingerprint", a
   });
   try {
     await service.initialize(snap);
-    await assert.rejects(service.evaluate("t1"), /provider unavailable/);
+    const result = await service.evaluate("t1");
+    assert.ok(
+      result?.outcomes?.some(
+        (item) =>
+          item.status === "failed" && item.reason === "provider unavailable",
+      ),
+    );
     assert.equal(stopped, true);
     const state = await loadState(paths.state);
     assert.equal(typeof state.modelAttempts.t1, "number");
@@ -307,7 +313,7 @@ test("failed model calls persist attempt backoff without success fingerprint", a
   }
 });
 
-test("pane model failure does not persist an unapplied tab fingerprint", async () => {
+test("pane model failure preserves successful independent tab and pane writes", async () => {
   const dir = await mkdtemp(
     path.join(os.tmpdir(), "tab-smart-rename-partial-failure-"),
   );
@@ -351,11 +357,17 @@ test("pane model failure does not persist an unapplied tab fingerprint", async (
   });
   try {
     await service.initialize(snap);
-    await assert.rejects(service.evaluate("t1"), /pane provider failure/);
+    const partial = await service.evaluate("t1");
+    assert.ok(
+      partial?.outcomes?.some(
+        (item) => item.id === "p2" && item.status === "failed",
+      ),
+    );
     const failedState = await loadState(paths.state);
-    assert.equal(failedState.fingerprints.t1, undefined);
-    assert.equal(failedState.fingerprints.p1, undefined);
-    assert.deepEqual(renames, []);
+    assert.equal(typeof failedState.fingerprints.t1, "string");
+    assert.equal(typeof failedState.fingerprints.p1, "string");
+    assert.equal(failedState.fingerprints.p2, undefined);
+    assert.deepEqual(renames, ["tab:t1", "pane:p1"]);
 
     await withStateTransaction(paths.state, paths.stateLock, (state) => {
       state.modelAttempts.t1 = 0;
@@ -365,8 +377,10 @@ test("pane model failure does not persist an unapplied tab fingerprint", async (
     const recovered = await service.evaluate("t1");
     assert.ok(recovered);
     assert.equal(
-      recovered.changes.find((change) => change.kind === "tab")?.to,
-      "Debug Auth Flow",
+      recovered.changes.find(
+        (change) => change.kind === "pane" && change.id === "p2",
+      )?.to,
+      "Review API Changes",
     );
     assert.equal(snap.tabs[0]!.label, "Debug Auth Flow");
   } finally {
@@ -401,8 +415,10 @@ test("two agent panes in one tab get independent pane labels while tab keeps one
         modelCalls += 1;
         const requests = "userRequests" in context ? context.userRequests : [];
         const first = requests[0] ?? "";
-        if (first.includes("debug")) return { tab: "Debug Auth Flow", reason: "debug task" };
-        if (first.includes("review")) return { tab: "Review API Changes", reason: "review task" };
+        if (first.includes("debug"))
+          return { tab: "Debug Auth Flow", reason: "debug task" };
+        if (first.includes("review"))
+          return { tab: "Review API Changes", reason: "review task" };
         return { tab: "Shared Work", reason: "fallback" };
       },
     },
@@ -431,7 +447,9 @@ test("two agent panes in one tab get independent pane labels while tab keeps one
     assert.equal(result.candidate.tab, "Debug Auth Flow");
     assert.equal(result.candidate.panes?.p1, "Debug Auth Flow");
     assert.equal(result.candidate.panes?.p2, "Review API Changes");
-    const paneChanges = result.changes.filter((change) => change.kind === "pane");
+    const paneChanges = result.changes.filter(
+      (change) => change.kind === "pane",
+    );
     assert.equal(paneChanges.length, 2);
     assert.deepEqual(
       new Set(paneChanges.map((change) => change.to)),
@@ -465,7 +483,9 @@ test("manual pane ownership blocks automatic pane rename until reset", async () 
     await withStateTransaction(paths.state, paths.stateLock, (state) => {
       state.panes.p1 = { manual: true, observedLabel: "My Pane" };
     });
-    const protectedRename = await service.evaluate("t1", { forceRefresh: true });
+    const protectedRename = await service.evaluate("t1", {
+      forceRefresh: true,
+    });
     assert.ok(protectedRename);
     assert.equal(
       protectedRename.changes.find((change) => change.kind === "pane"),
@@ -601,7 +621,9 @@ test("non-agent panes are not renamed", async () => {
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
-    namer: { suggest: async () => ({ tab: "Should Not Apply", reason: "task" }) },
+    namer: {
+      suggest: async () => ({ tab: "Should Not Apply", reason: "task" }),
+    },
     dependencies: dependencies(() => snap),
   });
   try {
@@ -609,11 +631,15 @@ test("non-agent panes are not renamed", async () => {
     const result = await service.evaluate("t1", { forceRefresh: true });
     assert.ok(result);
     assert.equal(
-      result.changes.some((change) => change.kind === "pane" && change.id === "server"),
+      result.changes.some(
+        (change) => change.kind === "pane" && change.id === "server",
+      ),
       false,
     );
     assert.equal(
-      result.changes.find((change) => change.kind === "pane" && change.id === "p1")?.to,
+      result.changes.find(
+        (change) => change.kind === "pane" && change.id === "p1",
+      )?.to,
       "Run Tests",
     );
   } finally {

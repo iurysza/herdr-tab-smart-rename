@@ -226,10 +226,8 @@ export async function loadNamingPrompt(
 }
 
 function parseSuggestion(text: string): NameSuggestion {
-  const cleaned = text
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const cleaned = (fenced?.[1] ?? text).trim();
   const output = ModelOutputSchema.parse(JSON.parse(cleaned));
   if (output.tab === null) {
     return { tab: null, reason: sanitizeText(output.reason) };

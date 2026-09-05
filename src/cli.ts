@@ -14,7 +14,8 @@ import {
 } from "./storage.ts";
 import { sanitizeText } from "./text.ts";
 
-const root = process.env.HERDR_PLUGIN_ROOT || path.resolve(import.meta.dir, "..");
+const root =
+  process.env.HERDR_PLUGIN_ROOT || path.resolve(import.meta.dir, "..");
 const workerScript = path.join(root, "src", "worker.ts");
 
 function requireStateDir(): string {
@@ -55,8 +56,13 @@ export function currentResultNotice(result: RenameResult | null): {
   body: string;
   sound: "done" | "request";
 } {
+  const failure = result?.outcomes?.find((item) => item.status === "failed");
+  if (failure) {
+    return { title: "Rename failed", body: failure.reason, sound: "request" };
+  }
   const tabChange = result?.changes.find((item) => item.kind === "tab");
-  const paneChanges = result?.changes.filter((item) => item.kind === "pane") ?? [];
+  const paneChanges =
+    result?.changes.filter((item) => item.kind === "pane") ?? [];
   if (tabChange) {
     return {
       title: "Tab renamed",
@@ -90,7 +96,9 @@ export function currentResultNotice(result: RenameResult | null): {
     title: "Tab not renamed",
     body: result.candidate.tab
       ? `Already named ${result.candidate.tab}`
-      : "No meaningful task found",
+      : result.reason === "no meaningful task"
+        ? "No meaningful task found"
+        : result.reason,
     sound: "request",
   };
 }
@@ -164,7 +172,9 @@ async function status(): Promise<void> {
     console.log("Smart Rename stopped");
     return;
   }
-  console.log(`Smart Rename running (pid ${info.pid}, since ${info.startedAt})`);
+  console.log(
+    `Smart Rename running (pid ${info.pid}, since ${info.startedAt})`,
+  );
 }
 
 async function renameAll(): Promise<RenameResult[]> {
@@ -198,7 +208,7 @@ async function once({
   const current = await snapshot();
   const paneId =
     resetKind === "pane"
-      ? targetPaneId ?? process.env.HERDR_PANE_ID ?? current.focused_pane_id
+      ? (targetPaneId ?? process.env.HERDR_PANE_ID ?? current.focused_pane_id)
       : undefined;
   const targetPane = paneId
     ? current.panes.find((pane) => pane.pane_id === paneId)
@@ -281,9 +291,14 @@ async function checkAi(): Promise<void> {
 
 async function renameNow(): Promise<void> {
   await notify("Renaming tab");
-  const notice = currentResultNotice(
-    await once({ resetKind: "tab", forceRefresh: true, progress: true }),
-  );
+  const result = await once({
+    resetKind: "tab",
+    forceRefresh: true,
+    progress: true,
+  });
+  if (result?.outcomes?.some((item) => item.status === "failed"))
+    process.exitCode = 1;
+  const notice = currentResultNotice(result);
   await notify(notice.title, notice.body, notice.sound);
 }
 
@@ -291,10 +306,18 @@ async function renameEveryTab(): Promise<void> {
   await notify("Renaming tabs");
   const results = await renameAll();
   const renamed = renamedTabCount(results);
+  const failed = results.filter((result) =>
+    result.outcomes?.some((item) => item.status === "failed"),
+  ).length;
+  if (failed) process.exitCode = 1;
   await notify(
-    renamed ? "Tabs renamed" : "No tabs renamed",
-    `${renamed}/${results.length}`,
-    renamed ? "done" : "request",
+    failed
+      ? "Some renames failed"
+      : renamed
+        ? "Tabs renamed"
+        : "No tabs renamed",
+    `${renamed}/${results.length}${failed ? `, ${failed} failed` : ""}`,
+    failed || !renamed ? "request" : "done",
   );
 }
 
@@ -315,8 +338,7 @@ const defaultActions: NonNullable<DispatchOptions["actions"]> = {
   "rename-now": renameNow,
   all: renameEveryTab,
   "reset-tab": () => once({ resetKind: "tab", forceRefresh: true }),
-  "reset-workspace": () =>
-    once({ resetKind: "workspace", forceRefresh: true }),
+  "reset-workspace": () => once({ resetKind: "workspace", forceRefresh: true }),
   "reset-pane": () => once({ resetKind: "pane", forceRefresh: true }),
 };
 
@@ -336,7 +358,18 @@ export async function dispatch(
 async function main(argv = process.argv.slice(2)): Promise<void> {
   const command = argv[0];
   try {
-    await dispatch(command, { dryRun: argv.includes("--dry-run") });
+    const result = await dispatch(command, {
+      dryRun: argv.includes("--dry-run"),
+    });
+    if (
+      result &&
+      typeof result === "object" &&
+      "outcomes" in result &&
+      Array.isArray(result.outcomes)
+    ) {
+      if (result.outcomes.some((outcome) => outcome.status === "failed"))
+        process.exitCode = 1;
+    }
   } catch (error) {
     const message = errorMessage(error);
     if (command === "rename-now" || command === "all") {

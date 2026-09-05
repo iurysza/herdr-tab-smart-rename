@@ -59,11 +59,11 @@ Every explicit rename ends with a notification: renamed, not renamed, or failed.
 
 | Action | Effect |
 | --- | --- |
-| `rename-now` | Rename the current tab |
-| `rename-all` | Rename every tab |
+| `rename-now` | Reclaim and rename only the current tab |
+| `rename-all` | Reclaim and rename tabs, without changing panes or workspaces |
 | `reset-tab` | Return the current tab to automatic naming |
-| `reset-pane` | Return the current pane to automatic naming |
-| `reset-workspace` | Return the workspace to automatic naming |
+| `reset-pane` | Reclaim and rename only the current agent pane |
+| `reset-workspace` | Reclaim and rename only the current workspace |
 | `configure-ai` | Edit provider settings |
 | `configure-prompt` | Edit naming instructions |
 | `check-ai` | Validate config without calling the provider |
@@ -77,9 +77,13 @@ herdr plugin action invoke <action> --plugin tab-smart-rename
 
 Smart Rename uses one dominant pane to name the shared tab workstream: focused agent, another active agent, focused command, then first pane. Supporting servers and logs never replace an active agent's task.
 
-Each recognised agent pane also gets its own label from its individual session and process context. Two agents in the same tab can show different task labels, while the tab keeps one shared workstream title. Manual pane names win until reset or reclaimed.
+Each recognised agent pane also gets its own label from its individual session and process context. Two agents in the same tab can show different task labels, while the tab keeps one shared workstream title. Manual pane names remain protected until `reset-pane`. A manually named pane can still supply task context for its tab.
 
 Labels use 2–4 Title Case words, stay under 30 characters, and describe the task—not its tool, model, or project. Weak evidence produces no rename. Manual labels remain locked until reset or explicit rename.
+
+Background naming handles each automatic workspace, tab, and agent pane independently. One failed pane request does not block a valid tab name. Explicit actions affect only their named targets.
+
+If a pane closes, moves, or changes agent session during inference, Smart Rename discards names based on that old context. Closing a pane does not cancel an already-sent provider request. Closed-item records are removed when the next snapshot is reconciled.
 
 See the [naming policy](docs/naming-policy.md) for the full contract.
 
@@ -118,7 +122,7 @@ Set `SMART_RENAME_PROMPT_PATH` to use another file. Prompts reload per request; 
 
 ## Privacy
 
-Model requests contain bounded, sanitized evidence from the dominant pane. Pi panes may contribute short user-request excerpts; sibling panes contribute process summaries only. Smart Rename removes terminal formatting, common secret shapes, and the local home path before sending context.
+Tab requests use bounded, sanitized evidence from the dominant pane, with sibling process summaries as supporting context. Pane requests use that pane alone. Pi panes may contribute short user-request excerpts. A manual label protects the label, not its pane content from use as tab context. Smart Rename removes terminal formatting, common secret shapes, and the local home path before sending context.
 
 Provider keys stay in Herdr's private plugin config and never enter Smart Rename state or logs.
 
@@ -127,9 +131,27 @@ Provider keys stay in Herdr's private plugin config and never enter Smart Rename
 - Worker stopped: `herdr plugin action invoke start --plugin tab-smart-rename`
 - Config invalid: run `configure-ai`, then `check-ai`.
 - Authentication fails: ensure the key matches the configured endpoint and model; `check-ai` does not make an API request.
-- Bun is outside Herdr's server `PATH`: runtime actions also check standard Bun and Homebrew locations.
+- Bun is outside Herdr's server `PATH`: make `bun` available to the Herdr server. All actions invoke Bun directly, including on Windows.
 - Manual label stays: use `reset-tab` or an explicit rename.
-- Logs: `herdr plugin log list --plugin tab-smart-rename --limit 10`
+- Explicit actions report the skip or failure reason. Provider failures exit nonzero. `status` checks the worker process, not provider health.
+- Action logs: `herdr plugin log list --plugin tab-smart-rename --limit 10`
+- Background failures: `~/.local/state/herdr/plugins/tab-smart-rename/worker.log`
+
+## Development checks
+
+```sh
+bun install --frozen-lockfile
+bun run check
+bun test
+```
+
+From a Herdr pane, run the opt-in integration checks:
+
+```sh
+SMART_RENAME_LIVE_TEST=1 bun test test/herdr-live.test.ts
+```
+
+These tests create background tabs, report fixture agent states, and close only their own tabs. They use a local mock provider, not a billed API. They cover pane closure during inference, manual-label protection, exact action scope, and CLI failure cleanup.
 
 ## Documentation
 

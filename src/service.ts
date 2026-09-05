@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   acknowledgeRename,
   buildModelContext,
@@ -14,10 +15,10 @@ import {
   workspaceCandidate,
   type NameSuggestion,
   type NamingContext,
-  type OwnershipRecord,
   type PaneContext,
   type RenameChange,
   type RenameResult,
+  type RenameOutcome,
   type SmartRenameState,
 } from "./domain.ts";
 import {
@@ -26,17 +27,15 @@ import {
   rename,
   siblingPaneContext,
   snapshot,
+  tabProgressBase,
   type HerdrPane,
   type HerdrSnapshot,
   type HerdrTab,
   type HerdrWorkspace,
 } from "./herdr.ts";
 import { AiSdkNamer, type Namer } from "./provider.ts";
-import {
-  loadState,
-  statePaths,
-  withStateTransaction,
-} from "./storage.ts";
+import { sanitizeText } from "./text.ts";
+import { loadState, statePaths, withStateTransaction } from "./storage.ts";
 
 export interface ServiceDependencies {
   snapshot(env?: NodeJS.ProcessEnv): Promise<HerdrSnapshot>;
@@ -65,9 +64,7 @@ export interface EvaluateOptions {
   forceRefresh?: boolean;
 }
 
-export type ModelActivity = (
-  tab: HerdrTab,
-) => Promise<() => Promise<void>>;
+export type ModelActivity = (tab: HerdrTab) => Promise<() => Promise<void>>;
 
 interface ServiceOptions {
   stateFile?: string | null;
@@ -84,16 +81,42 @@ interface PaneContextCache {
   sibling: Map<string, Promise<PaneContext>>;
 }
 
-interface ModelSuccess {
-  surfaceId: string;
-  context: NamingContext;
+interface RenameTarget {
+  kind: RenameChange["kind"];
+  id: string;
 }
 
-interface SuggestedLabel {
-  label: string | null;
-  reason: string;
-  usedModel: boolean;
-  modelSuccess?: ModelSuccess;
+function records(state: SmartRenameState, kind: RenameTarget["kind"]) {
+  return kind === "pane"
+    ? state.panes
+    : kind === "tab"
+      ? state.tabs
+      : state.workspaces;
+}
+
+function targetLabel(
+  target: RenameTarget,
+  snap: HerdrSnapshot,
+): string | undefined {
+  if (target.kind === "workspace")
+    return snap.workspaces.find((w) => w.workspace_id === target.id)?.label;
+  if (target.kind === "tab") {
+    const label = snap.tabs.find((t) => t.tab_id === target.id)?.label;
+    return label === undefined ? undefined : (tabProgressBase(label) ?? label);
+  }
+  const pane = snap.panes.find((p) => p.pane_id === target.id && p.agent);
+  return pane ? (pane.label ?? "") : undefined;
+}
+
+function paneIdentity(pane: HerdrPane): string {
+  return fingerprint([
+    pane.pane_id,
+    pane.tab_id,
+    pane.workspace_id,
+    pane.agent,
+    pane.agent_session,
+    pane.foreground_cwd ?? pane.cwd,
+  ]);
 }
 
 const defaultDependencies: ServiceDependencies = {
@@ -138,10 +161,11 @@ export function reconcileSnapshot(
     );
   }
   for (const tab of snap.tabs) {
+    const label = tabProgressBase(tab.label) ?? tab.label;
     state.tabs[tab.tab_id] = reconcileItem(
       state.tabs[tab.tab_id],
-      tab.label,
-      isDefaultLabel(tab.label, tab.number),
+      label,
+      isDefaultLabel(label, tab.number),
     );
   }
   for (const pane of snap.panes) {
@@ -150,6 +174,24 @@ export function reconcileSnapshot(
       pane.label ?? "",
       isDefaultLabel(pane.label),
     );
+  }
+  const liveIds = new Set([
+    ...snap.workspaces.map((w) => w.workspace_id),
+    ...snap.tabs.map((t) => t.tab_id),
+    ...snap.panes.map((p) => p.pane_id),
+  ]);
+  for (const collection of [
+    state.workspaces,
+    state.tabs,
+    state.panes,
+    state.modelAttempts,
+    state.fingerprints,
+    state.pendingFingerprints,
+    state.evaluations,
+  ]) {
+    for (const id of Object.keys(collection)) {
+      if (!liveIds.has(id)) delete collection[id];
+    }
   }
   return state;
 }
@@ -182,12 +224,18 @@ export class AutoNameService {
   }
 
   async initialize(initial?: HerdrSnapshot | null): Promise<HerdrSnapshot> {
-    const current = initial ?? (await this.#dependencies.snapshot(this.#env));
-    if (this.#dryRun || !this.#stateFile || !this.#stateLock) return current;
-    await withStateTransaction(this.#stateFile, this.#stateLock, (state) => {
-      reconcileSnapshot(state, current);
-    });
-    return current;
+    if (this.#dryRun || !this.#stateFile || !this.#stateLock) {
+      return initial ?? this.#dependencies.snapshot(this.#env);
+    }
+    return withStateTransaction(
+      this.#stateFile,
+      this.#stateLock,
+      async (state) => {
+        const current = await this.#dependencies.snapshot(this.#env);
+        reconcileSnapshot(state, current);
+        return current;
+      },
+    );
   }
 
   async acknowledge(
@@ -196,15 +244,18 @@ export class AutoNameService {
     label: string,
   ): Promise<void> {
     if (!this.#stateFile || !this.#stateLock) return;
-    await withStateTransaction(this.#stateFile, this.#stateLock, (state) => {
-      const collection =
-        kind === "pane"
-          ? state.panes
-          : kind === "tab"
-            ? state.tabs
-            : state.workspaces;
-      collection[id] = acknowledgeRename(collection[id], label);
-    });
+    await withStateTransaction(
+      this.#stateFile,
+      this.#stateLock,
+      async (state) => {
+        const current = await this.#dependencies.snapshot(this.#env);
+        reconcileSnapshot(state, current);
+        // Events can wait behind earlier writes. Never replay an obsolete label.
+        if (targetLabel({ kind, id }, current) !== label) return;
+        const collection = records(state, kind);
+        collection[id] = acknowledgeRename(collection[id], label);
+      },
+    );
   }
 
   private fullPaneContext(
@@ -319,362 +370,296 @@ export class AutoNameService {
     tabId: string,
     options: EvaluateOptions = {},
   ): Promise<RenameResult | null> {
-    if (this.#dryRun || !this.#stateFile || !this.#stateLock) {
-      const snap =
-        options.snapshot ?? (await this.#dependencies.snapshot(this.#env));
-      const state = await loadState(this.#stateFile);
-      reconcileSnapshot(state, snap);
-      return this.evaluateWithState(
-        state,
-        async () => {},
-        tabId,
-        snap,
-        options,
-      );
-    }
-    return withStateTransaction(
-      this.#stateFile,
-      this.#stateLock,
-      async (state, persist) => {
-        const snap = await this.#dependencies.snapshot(this.#env);
+    // Only short state/Herdr operations run under the shared lock. Context
+    // collection and model latency must not block unrelated tabs or ownership.
+    const localState = await loadState(this.#dryRun ? this.#stateFile : null);
+    const transaction = async <T>(
+      operation: (
+        state: SmartRenameState,
+        snap: HerdrSnapshot,
+        persist: () => Promise<void>,
+      ) => Promise<T> | T,
+    ): Promise<T> => {
+      const run = async (
+        state: SmartRenameState,
+        persist: () => Promise<void>,
+      ) => {
+        const snap =
+          this.#dryRun && options.snapshot
+            ? options.snapshot
+            : await this.#dependencies.snapshot(this.#env);
         reconcileSnapshot(state, snap);
-        return this.evaluateWithState(state, persist, tabId, snap, options);
-      },
-    );
-  }
-
-  private async suggestLabel(
-    state: SmartRenameState,
-    persist: () => Promise<void>,
-    record: OwnershipRecord | undefined,
-    surfaceId: string,
-    context: ReturnType<typeof buildModelContext>,
-    focusedContext: PaneContext | undefined,
-    isAgentSurface: boolean,
-    suggestions: Map<string, Promise<NameSuggestion>>,
-    options: EvaluateOptions,
-    manualReason = "manual ownership",
-    activity?: () => Promise<() => Promise<void>>,
-  ): Promise<SuggestedLabel> {
-    if (record?.manual) {
-      return { label: null, reason: manualReason, usedModel: false };
-    }
-    const hasUserTask = Boolean(focusedContext?.userMessages.length);
-    const heuristic = hasUserTask
-      ? null
-      : heuristicTitle(focusedContext ? { focusedPane: focusedContext } : {});
-    if (heuristic && !options.forceModel) {
-      return {
-        label: heuristic,
-        reason: "process heuristic",
-        usedModel: false,
+        return operation(state, snap, persist);
       };
-    }
-    const weakCommandContext = !hasUserTask && !isAgentSurface;
-    const contextReady =
-      !weakCommandContext ||
-      options.forceModel ||
-      options.forceRefresh ||
-      observeStableContext(state, surfaceId, context);
-    if (!contextReady) {
-      return {
-        label: null,
-        reason: "waiting for stable command context",
-        usedModel: false,
-      };
-    }
-
-    const contextFingerprint = fingerprint(context);
-    const cached = suggestions.get(contextFingerprint);
-    if (cached) {
-      const suggestion = await cached;
-      return {
-        label: suggestion.tab,
-        reason: suggestion.reason,
-        usedModel: false,
-        modelSuccess: { surfaceId, context },
-      };
-    }
-
-    const gate = shouldCallModel(state, surfaceId, context);
-    if (!gate.allowed && !options.forceModel && !options.forceRefresh) {
-      return {
-        label: null,
-        reason: "unchanged or rate-limited context",
-        usedModel: false,
-      };
-    }
-    markModelAttempt(state, surfaceId);
-    if (!this.#dryRun) await persist();
-    const stopActivity = activity ? await activity() : undefined;
-    const pending = this.#namer.suggest(context);
-    suggestions.set(contextFingerprint, pending);
-    try {
-      const suggestion = await pending;
-      return {
-        label: suggestion.tab,
-        reason: suggestion.reason,
-        usedModel: true,
-        modelSuccess: { surfaceId, context },
-      };
-    } catch (error) {
-      suggestions.delete(contextFingerprint);
-      throw error;
-    } finally {
-      await stopActivity?.();
-    }
-  }
-
-  private async evaluateWithState(
-    state: SmartRenameState,
-    persist: () => Promise<void>,
-    tabId: string,
-    snap: HerdrSnapshot,
-    options: EvaluateOptions,
-  ): Promise<RenameResult | null> {
-    let tab = snap.tabs.find((item) => item.tab_id === tabId);
-    if (!tab) return null;
-    let workspace = snap.workspaces.find(
-      (item) => item.workspace_id === tab!.workspace_id,
-    );
-    if (!workspace) return null;
-
-    if (options.resetKind === "tab") {
-      state.tabs[tab.tab_id] = resetOwnership(state.tabs[tab.tab_id]);
-    }
-    if (options.resetKind === "workspace") {
-      state.workspaces[workspace.workspace_id] = resetOwnership(
-        state.workspaces[workspace.workspace_id],
-      );
-    }
-    if (options.resetKind === "pane") {
-      const targetPane = snap.panes.find(
-        (pane) =>
-          pane.pane_id === options.targetPaneId && pane.tab_id === tabId,
-      );
-      if (!targetPane) {
-        throw new Error("reset-pane requires a pane in the target tab");
-      }
-      state.panes[targetPane.pane_id] = resetOwnership(
-        state.panes[targetPane.pane_id],
-      );
-    }
-
-    let workspaceRecord = state.workspaces[workspace.workspace_id];
-    let tabRecord = state.tabs[tab.tab_id];
-    let workspaceManual = workspaceRecord?.manual ?? false;
-    let tabManual = tabRecord?.manual ?? false;
-    const agentPanes = snap.panes.filter(
-      (pane) => pane.tab_id === tabId && pane.agent,
-    );
-    const inspectablePanes = snap.panes.filter(
-      (pane) => pane.tab_id === tabId && !state.panes[pane.pane_id]?.manual,
-    );
-    const automaticAgentPanes = agentPanes.filter(
-      (pane) => !state.panes[pane.pane_id]?.manual,
-    );
-
-    if (workspaceManual && tabManual && automaticAgentPanes.length === 0) {
-      return {
-        dryRun: this.#dryRun,
-        workspace: workspace.workspace_id,
-        tab: tab.tab_id,
-        candidate: { workspace: null, tab: null, panes: {} },
-        reason: "manual ownership",
-        usedModel: false,
-        ownership: { workspaceManual, tabManual },
-        changes: [],
-      };
-    }
-
-    const { workspaceName } = await this.workspaceDetails(workspace, snap);
-    const contextCache: PaneContextCache = {
-      full: new Map(),
-      sibling: new Map(),
+      return !this.#dryRun && this.#stateFile && this.#stateLock
+        ? withStateTransaction(this.#stateFile, this.#stateLock, run)
+        : run(localState, async () => {});
     };
-    const suggestions = new Map<string, Promise<NameSuggestion>>();
-    const modelSuccesses: ModelSuccess[] = [];
-    let usedModel = false;
 
-    let tabSuggestion: SuggestedLabel;
-    if (tabManual) {
-      tabSuggestion = {
-        label: null,
-        reason: "manual tab ownership",
-        usedModel: false,
-      };
-    } else if (inspectablePanes.length === 0) {
-      tabSuggestion = {
-        label: null,
-        reason: "manual pane ownership",
-        usedModel: false,
-      };
-    } else {
-      const details = await this.contextFor(
-        tab,
-        snap,
-        workspaceName,
-        inspectablePanes,
-        contextCache,
+    const initial = await transaction((state, snap) => {
+      const tab = snap.tabs.find((t) => t.tab_id === tabId);
+      const workspace = snap.workspaces.find(
+        (w) => w.workspace_id === tab?.workspace_id,
       );
-      tabSuggestion = await this.suggestLabel(
-        state,
-        persist,
-        tabRecord,
-        tab.tab_id,
-        details.context,
-        details.paneContexts.find((pane) => pane.focused),
-        Boolean(details.focusedPane?.agent),
-        suggestions,
-        options,
-        "manual tab ownership",
-        () =>
-          this.#modelActivity?.(tab!) ??
-          Promise.resolve(() => Promise.resolve()),
-      );
-    }
-    const tabName = tabSuggestion.label;
-    let reason = tabSuggestion.reason;
-    usedModel ||= tabSuggestion.usedModel;
-    if (tabSuggestion.modelSuccess) {
-      modelSuccesses.push(tabSuggestion.modelSuccess);
-    }
-
-    const candidatePanes: Record<string, string | null> = {};
-    for (const pane of agentPanes) {
-      const paneRecord = state.panes[pane.pane_id];
-      if (paneRecord?.manual) {
-        candidatePanes[pane.pane_id] = null;
-        continue;
+      if (!tab || !workspace) return null;
+      const targets: RenameTarget[] = [];
+      const scope = options.resetKind;
+      if (!scope || scope === "workspace")
+        targets.push({ kind: "workspace", id: workspace.workspace_id });
+      if (!scope || scope === "tab") targets.push({ kind: "tab", id: tabId });
+      if (scope === "pane") {
+        const pane = snap.panes.find(
+          (p) => p.pane_id === options.targetPaneId && p.tab_id === tabId,
+        );
+        if (!pane)
+          throw new Error("reset-pane requires a pane in the target tab");
+        targets.push({ kind: "pane", id: pane.pane_id });
+      } else if (!scope) {
+        targets.push(
+          ...snap.panes
+            .filter((p) => p.tab_id === tabId && p.agent)
+            .map((p): RenameTarget => ({ kind: "pane", id: p.pane_id })),
+        );
       }
-      const paneDetails = await this.paneContextFor(
-        pane,
-        inspectablePanes,
-        workspaceName,
-        contextCache,
-      );
-      const paneFocusedContext = paneDetails.paneContexts.find(
-        (context) => context.focused,
-      );
-      const suggestion = await this.suggestLabel(
-        state,
-        persist,
-        paneRecord,
-        pane.pane_id,
-        paneDetails.context,
-        paneFocusedContext,
-        Boolean(pane.agent),
-        suggestions,
-        options,
-        "manual pane ownership",
-      );
-      candidatePanes[pane.pane_id] = suggestion.label;
-      usedModel ||= suggestion.usedModel;
-      if (suggestion.modelSuccess) {
-        modelSuccesses.push(suggestion.modelSuccess);
-      }
-    }
-
-    if (!this.#dryRun) {
-      const latest = await this.#dependencies.snapshot(this.#env);
-      reconcileSnapshot(state, latest);
-      snap = latest;
-      tab = latest.tabs.find((item) => item.tab_id === tabId);
-      if (!tab) return null;
-      workspace = latest.workspaces.find(
-        (item) => item.workspace_id === tab!.workspace_id,
-      );
-      if (!workspace) return null;
-      workspaceRecord = state.workspaces[workspace.workspace_id];
-      tabRecord = state.tabs[tab.tab_id];
-      workspaceManual = workspaceRecord?.manual ?? false;
-      tabManual = tabRecord?.manual ?? false;
-    }
-
-    const changes: RenameChange[] = [];
-    if (
-      !workspaceManual &&
-      workspaceName &&
-      workspace.label !== workspaceName
-    ) {
-      changes.push({
-        kind: "workspace",
-        id: workspace.workspace_id,
-        from: workspace.label,
-        to: workspaceName,
-      });
-    }
-    if (!tabManual && tabName && tab.label !== tabName) {
-      changes.push({
-        kind: "tab",
-        id: tab.tab_id,
-        from: tab.label,
-        to: tabName,
-      });
-    }
-    for (const pane of snap.panes.filter(
-      (pane) => pane.tab_id === tabId && pane.agent,
-    )) {
-      const paneName = candidatePanes[pane.pane_id];
-      if (
-        !state.panes[pane.pane_id]?.manual &&
-        paneName &&
-        paneName !== (pane.label ?? "")
-      ) {
-        changes.push({
-          kind: "pane",
-          id: pane.pane_id,
-          from: pane.label ?? "",
-          to: paneName,
-        });
-      }
-    }
-
-    if (!this.#dryRun) {
-      for (const change of changes) {
-        const collection =
-          change.kind === "workspace"
-            ? state.workspaces
-            : change.kind === "tab"
-              ? state.tabs
-              : state.panes;
-        const previous = collection[change.id];
-        collection[change.id] = prepareRename(previous, change.to);
-        await persist();
-        try {
-          await this.#dependencies.rename(
-            change.kind,
-            change.id,
-            change.to,
-            this.#env,
-          );
-        } catch (error) {
-          if (previous) collection[change.id] = previous;
-          else delete collection[change.id];
-          await persist();
-          throw error;
+      if (scope) {
+        for (const target of targets) {
+          const collection = records(state, target.kind);
+          collection[target.id] = resetOwnership(collection[target.id]);
+          state.evaluations[target.id] = randomUUID();
         }
       }
-    }
-
-    for (const success of modelSuccesses) {
-      markModelSuccess(state, success.surfaceId, success.context);
-    }
-
-    return {
+      return { tab, workspace, targets, snap, state: structuredClone(state) };
+    });
+    if (!initial) return null;
+    const { tab, workspace, targets, snap } = initial;
+    const result: RenameResult & { outcomes: RenameOutcome[] } = {
       dryRun: this.#dryRun,
       workspace: workspace.workspace_id,
-      tab: tab.tab_id,
-      candidate: {
-        workspace: workspaceName,
-        tab: tabName,
-        panes: candidatePanes,
+      tab: tabId,
+      candidate: { workspace: null, tab: null, panes: {} },
+      reason: "no eligible target",
+      usedModel: false,
+      ownership: {
+        workspaceManual:
+          initial.state.workspaces[workspace.workspace_id]?.manual ?? false,
+        tabManual: initial.state.tabs[tabId]?.manual ?? false,
       },
-      reason,
-      usedModel,
-      ownership: { workspaceManual, tabManual },
-      changes,
+      changes: [],
+      outcomes: [],
     };
+    const cache: PaneContextCache = { full: new Map(), sibling: new Map() };
+    const suggestions = new Map<string, Promise<NameSuggestion>>();
+    // Label ownership controls writes, not whether a pane supplies tab evidence.
+    const panes = snap.panes.filter((p) => p.tab_id === tabId);
+    let workspaceName: string | undefined;
+
+    for (const target of targets) {
+      const outcome: RenameOutcome = {
+        ...target,
+        status: "skipped",
+        reason: "no meaningful task",
+      };
+      result.outcomes.push(outcome);
+      let ticket: string | undefined;
+      try {
+        if (records(initial.state, target.kind)[target.id]?.manual) {
+          outcome.reason = `manual ${target.kind} ownership`;
+          continue;
+        }
+        if (targetLabel(target, snap) === undefined) {
+          outcome.reason = "target closed or no longer an agent";
+          continue;
+        }
+        workspaceName ??= (await this.workspaceDetails(workspace, snap))
+          .workspaceName;
+        let context: NamingContext | undefined;
+        let focused: PaneContext | undefined;
+        let sourcePanes: HerdrPane[] = [];
+        let agent = false;
+        if (target.kind === "tab") {
+          const details = await this.contextFor(
+            tab,
+            snap,
+            workspaceName,
+            panes,
+            cache,
+          );
+          context = details.context;
+          focused = details.paneContexts.find((p) => p.focused);
+          agent = Boolean(details.focusedPane?.agent);
+          sourcePanes = details.focusedPane ? [details.focusedPane] : [];
+        } else if (target.kind === "pane") {
+          const pane = panes.find((p) => p.pane_id === target.id)!;
+          // A pane's task does not depend on naming or inspecting its siblings.
+          const details = await this.paneContextFor(
+            pane,
+            [pane],
+            workspaceName,
+            cache,
+          );
+          context = details.context;
+          focused = details.paneContexts[0];
+          agent = true;
+          sourcePanes = [pane];
+        }
+        if (context && "focusedPane" in context && target.kind === "tab")
+          sourcePanes = panes;
+        const sourcesStillLive = (latest: HerdrSnapshot) =>
+          sourcePanes.every((p) =>
+            latest.panes.some(
+              (next) =>
+                next.pane_id === p.pane_id &&
+                paneIdentity(next) === paneIdentity(p),
+            ),
+          );
+        const hasUserTask = Boolean(focused?.userMessages.length);
+        const heuristic =
+          !hasUserTask && focused
+            ? heuristicTitle({ focusedPane: focused })
+            : null;
+        let label =
+          target.kind === "workspace"
+            ? workspaceName
+            : !options.forceModel
+              ? heuristic
+              : null;
+        let modelSuccess = false;
+        const needsModel = target.kind !== "workspace" && !label;
+
+        const claim = await transaction((state, latest) => {
+          if (
+            targetLabel(target, latest) === undefined ||
+            !sourcesStillLive(latest)
+          )
+            return "target or source changed";
+          if (records(state, target.kind)[target.id]?.manual)
+            return `manual ${target.kind} ownership`;
+          if (
+            state.evaluations[target.id] !==
+            initial.state.evaluations[target.id]
+          ) {
+            return "superseded by a newer evaluation";
+          }
+          if (needsModel && context) {
+            if (
+              !hasUserTask &&
+              !agent &&
+              !options.forceModel &&
+              !options.forceRefresh &&
+              !observeStableContext(state, target.id, context)
+            )
+              return "waiting for stable command context";
+            const gate = shouldCallModel(state, target.id, context);
+            if (!gate.allowed && !options.forceModel && !options.forceRefresh)
+              return "unchanged or rate-limited context";
+            markModelAttempt(state, target.id);
+          }
+          ticket = randomUUID();
+          state.evaluations[target.id] = ticket;
+          return null;
+        });
+        if (claim) {
+          outcome.reason = claim;
+          continue;
+        }
+
+        if (needsModel && context) {
+          const key = fingerprint(context);
+          let pending = suggestions.get(key);
+          if (!pending) {
+            const stop =
+              target.kind === "tab"
+                ? await this.#modelActivity?.(tab)
+                : undefined;
+            pending = (async () => {
+              try {
+                return await this.#namer.suggest(context);
+              } finally {
+                await stop?.();
+              }
+            })();
+            suggestions.set(key, pending);
+            result.usedModel = true;
+          }
+          const suggestion = await pending;
+          label = suggestion.tab;
+          outcome.reason = suggestion.reason;
+          modelSuccess = true;
+        } else {
+          outcome.reason =
+            target.kind === "workspace"
+              ? "workspace identity"
+              : "process heuristic";
+        }
+
+        await transaction(async (state, latest, persist) => {
+          result.ownership = {
+            workspaceManual:
+              state.workspaces[workspace.workspace_id]?.manual ?? false,
+            tabManual: state.tabs[tabId]?.manual ?? false,
+          };
+          const current = targetLabel(target, latest);
+          if (current === undefined || !sourcesStillLive(latest)) {
+            outcome.reason = "target or source changed";
+            return;
+          }
+          const collection = records(state, target.kind);
+          if (collection[target.id]?.manual) {
+            outcome.reason = `manual ${target.kind} ownership`;
+            return;
+          }
+          if (state.evaluations[target.id] !== ticket) {
+            outcome.reason = "superseded by a newer evaluation";
+            return;
+          }
+          if (target.kind === "workspace") result.candidate.workspace = label;
+          else if (target.kind === "tab") result.candidate.tab = label;
+          else result.candidate.panes![target.id] = label;
+          if (label && label !== current) {
+            const change: RenameChange = {
+              ...target,
+              from: current,
+              to: label,
+            };
+            if (!this.#dryRun) {
+              const previous = collection[target.id];
+              collection[target.id] = prepareRename(previous, label);
+              await persist();
+              try {
+                await this.#dependencies.rename(
+                  target.kind,
+                  target.id,
+                  label,
+                  this.#env,
+                );
+              } catch (error) {
+                if (previous) collection[target.id] = previous;
+                else delete collection[target.id];
+                await persist();
+                throw error;
+              }
+            }
+            result.changes.push(change);
+            outcome.status = "renamed";
+          } else if (label) {
+            outcome.status = "unchanged";
+            outcome.reason = `Already named ${label}`;
+          }
+          if (modelSuccess && context)
+            markModelSuccess(state, target.id, context);
+        });
+      } catch (error) {
+        outcome.status = "failed";
+        outcome.reason = sanitizeText(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+    const primary =
+      result.outcomes.find((o) => o.kind === (options.resetKind ?? "tab")) ??
+      result.outcomes[0];
+    result.reason = primary?.reason ?? result.reason;
+    return result;
   }
 }
 

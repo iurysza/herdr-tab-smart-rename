@@ -31,6 +31,7 @@ const StateSchema: z.ZodType<SmartRenameState> = z.looseObject({
   modelAttempts: z.record(z.string(), z.number()),
   fingerprints: z.record(z.string(), z.string()),
   pendingFingerprints: z.record(z.string(), z.string()),
+  evaluations: z.record(z.string(), z.string()),
 });
 
 const UnknownRecordSchema = z.record(z.string(), z.unknown());

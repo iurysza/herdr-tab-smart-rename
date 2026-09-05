@@ -56,6 +56,7 @@ export async function runWorker(
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let sweepTimer: ReturnType<typeof setInterval> | undefined;
   let work = Promise.resolve();
+  let events = Promise.resolve();
   let sweepQueued = false;
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const progressBases = new Map<string, string>();
@@ -78,6 +79,13 @@ export async function runWorker(
     );
     if (result?.changes.length) {
       await log(`renamed ${JSON.stringify(result.changes)}`);
+    }
+    for (const outcome of result?.outcomes ?? []) {
+      if (outcome.status === "failed") {
+        await log(
+          `rename failed ${outcome.kind} ${outcome.id}: ${outcome.reason}`,
+        );
+      }
     }
   };
 
@@ -111,27 +119,40 @@ export async function runWorker(
   };
 
   const handleEvent = async (event: HerdrEvent): Promise<void> => {
-    if (event.type === "workspace_renamed" && event.workspace_id && event.label) {
+    if (stopped) return;
+    if (
+      event.type === "workspace_renamed" &&
+      event.workspace_id &&
+      event.label
+    ) {
       await service.acknowledge("workspace", event.workspace_id, event.label);
       return;
     }
     if (event.type === "tab_renamed" && event.tab_id && event.label) {
-      if (shouldIgnoreProgressRename(progressBases, event.tab_id, event.label)) {
+      if (
+        shouldIgnoreProgressRename(progressBases, event.tab_id, event.label)
+      ) {
         return;
       }
       await service.acknowledge("tab", event.tab_id, event.label);
       return;
     }
-    if (event.type === "tab_closed") {
+    if (
+      ["tab_closed", "pane_closed", "workspace_closed"].includes(event.type)
+    ) {
       if (event.tab_id) progressBases.delete(event.tab_id);
+      await service.initialize();
+      queueSweep();
       return;
     }
     const paneUpdate = paneLabelUpdate(event);
     if (paneUpdate) {
       await service.acknowledge("pane", paneUpdate.paneId, paneUpdate.label);
+      // Full pane updates also carry agent/session changes. Schedule evaluation
+      // even when the label itself is unchanged.
+      schedule(event.pane?.tab_id);
       return;
     }
-    if (event.type === "workspace_closed") return;
 
     const current = await snapshot(env);
     const pane = event.pane_id
@@ -168,10 +189,15 @@ export async function runWorker(
       return;
     }
     const connection = subscribe(socketPath, (event) => {
-      enqueue(() => handleEvent(event));
+      events = events
+        .then(() => handleEvent(event))
+        .catch((error: unknown) => log(`event failed: ${errorMessage(error)}`));
     });
     socket = connection;
-    connection.on("error", (error) => void log(`socket error: ${error.message}`));
+    connection.on(
+      "error",
+      (error) => void log(`socket error: ${error.message}`),
+    );
     connection.on("close", () => {
       if (socket !== connection) return;
       socket = null;
@@ -186,6 +212,7 @@ export async function runWorker(
     if (sweepTimer) clearInterval(sweepTimer);
     for (const timer of timers.values()) clearTimeout(timer);
     socket?.destroy();
+    await events.catch(() => {});
     await work.catch(() => {});
     await removeOwnedWorkerPid(paths.pid, process.pid);
     await log(`stopped by ${signal}`);

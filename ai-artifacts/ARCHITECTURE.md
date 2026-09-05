@@ -38,7 +38,7 @@ flowchart LR
 | `storage.ts` | Manage state paths, private permissions, atomic files, locks, worker identity, and stale recovery |
 | `text.ts` | Sanitize and bound text before prompts, state messages, and notifications |
 
-`herdr-plugin.toml` registers `tab-smart-rename` with 10 actions and two overlay panes. It also installs production dependencies with Bun.
+`herdr-plugin.toml` registers `tab-smart-rename` with 11 actions and two overlay panes. It also installs production dependencies with Bun.
 
 ## Integration Points (APIs, queues, external services)
 
@@ -66,7 +66,7 @@ flowchart LR
 - config directory: private `provider.env` and optional `naming-prompt.md`
 - editor process: provider and prompt configuration panes
 
-There is no external queue. The worker uses an in-memory promise chain to serialize tasks and a file lock to serialize state across the worker and CLI actions.
+There is no external queue. Separate promise chains handle events and evaluations, so model calls do not delay ownership or closure events. Short file-lock transactions serialize state across the worker and CLI. Context reads and model calls run outside that lock.
 
 ## Runtime Flow (request path, async jobs, background workers)
 
@@ -90,27 +90,28 @@ There is no external queue. The worker uses an in-memory promise chain to serial
 
 ```mermaid
 flowchart TD
-    A[Load fresh snapshot under state lock] --> B{Manual workspace and tab?}
-    B -- yes --> Z[Stop without inspection]
-    B -- no --> C[Select dominant pane]
+    A[Load fresh snapshot under state lock] --> B{Target label is manual?}
+    B -- yes --> Z[Skip this target]
+    B -- no --> C[Select source pane for this target]
     C --> D[Build workspace candidate]
     C --> E[Collect bounded pane context]
     E --> F{Recognized process?}
     F -- yes --> G[Use deterministic label]
     F -- no --> H{Stable and outside cooldown?}
     H -- no --> Z
-    H -- yes --> I[Reload provider and prompt, then call namer]
+    H -- yes --> I[Record decision ID and release lock before model call]
     I --> J{Valid task label?}
     J -- no --> Z
-    J -- yes --> K[Persist expected write]
-    G --> K
+    J -- yes --> V[Recheck target, source identity, ownership and decision ID]
+    G --> V
+    V --> K[Persist expected write]
     K --> L[Run Herdr rename]
     L --> M[Confirm ownership from rename event]
 ```
 
 ### Explicit action
 
-`rename-now` and `rename-all` reset automatic ownership for their target tabs and bypass stability and cooldown gates. During a model-backed `rename-now`, the service prefixes the current label with a guarded `◇ ◈ ◆ ◈` pulse. It stops if the label changes externally and restores only its own last write. `rename-all` and background naming remain quiet. Every explicit action reports renamed, unchanged, abstained, or failed through Herdr notifications.
+`rename-now` and `rename-all` reclaim only their target tabs and bypass stability and cooldown gates. `reset-pane` and `reset-workspace` affect only their own target kind. Background evaluation independently names automatic targets. During a model-backed `rename-now`, the service prefixes the current label with a guarded `◇ ◈ ◆ ◈` pulse. It stops if the label changes externally and restores only its own last write. `rename-all` and background naming remain quiet. Every explicit action reports renamed, unchanged, abstained, or failed through Herdr notifications.
 
 ### Shutdown and recovery
 
@@ -123,7 +124,7 @@ flowchart TD
 
 - Direct Bun execution removes a JavaScript build step but requires Bun 1.1.34 or newer on every host.
 - Zod schemas add boundary code but prevent external JSON from becoming trusted TypeScript data by assertion.
-- A coarse state lock simplifies cross-process correctness. It also serializes model-backed evaluations.
+- Short state locks protect reconciliation, request gates, and rename writes. Model calls run unlocked. A persisted decision ID rejects older results, including context reads that finish after a newer explicit request.
 - The progress pulse uses temporary Herdr renames because plugins cannot render tab chrome. An invisible marker and exact-label guard prevent those writes from stealing ownership.
 - Deterministic labels avoid model latency and cost. Broad AI naming remains available for ambiguous tasks.
 - The 4,500-character context cap limits exposure and cost but can omit older evidence.
@@ -132,6 +133,8 @@ flowchart TD
 - Provider configuration is portable across OpenAI-compatible endpoints, but reasoning support varies by provider.
 - Pi is a context source, not an inference dependency. Smart Rename never reads Pi credentials or starts Pi.
 - One worker serves the local Herdr socket. Named or remote socket discovery is not automatic.
-- Closed ownership records and worker logs are not pruned or rotated.
+- Fresh snapshots prune closed-item naming records. Worker logs are not rotated.
+- Herdr exposes no compare-and-set rename command. A user edit between the final snapshot and CLI write remains a narrow race.
+- Pane closure discards stale results but does not cancel an already-sent model request.
 
-Updated-at: 7e32aa2d5e70910bedbadb0e06dcdfde50767317
+Updated: 2026-09-05, rename reliability repair

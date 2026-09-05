@@ -17,6 +17,8 @@ export interface SmartRenameState {
   modelAttempts: Record<string, number>;
   fingerprints: Record<string, string>;
   pendingFingerprints: Record<string, string>;
+  // Latest decision per target, retained after completion to reject older reads.
+  evaluations: Record<string, string>;
   [key: string]: unknown;
 }
 
@@ -72,6 +74,13 @@ export interface RenameChange {
   to: string;
 }
 
+export interface RenameOutcome {
+  kind: RenameChange["kind"];
+  id: string;
+  status: "renamed" | "unchanged" | "skipped" | "failed";
+  reason: string;
+}
+
 export interface RenameResult {
   dryRun: boolean;
   workspace: string;
@@ -85,6 +94,7 @@ export interface RenameResult {
   usedModel: boolean;
   ownership: { workspaceManual: boolean; tabManual: boolean };
   changes: RenameChange[];
+  outcomes?: RenameOutcome[];
 }
 
 export const MAX_TAB_LENGTH = 30;
@@ -100,6 +110,7 @@ export function emptyState(): SmartRenameState {
     modelAttempts: {},
     fingerprints: {},
     pendingFingerprints: {},
+    evaluations: {},
   };
 }
 
@@ -143,8 +154,17 @@ export function acknowledgeRename(
   record: OwnershipRecord | undefined,
   label: string,
 ): OwnershipRecord {
+  if (!record) return reconcileItem(undefined, label, isDefaultLabel(label));
+  // pane.updated contains the label even when only status or metadata changed.
+  // An older unchanged event must not consume a pending automatic write.
+  if (record.observedLabel === label && record.expectedLabel !== label) {
+    return { ...record };
+  }
   const next = { ...record };
-  if (next.expectedLabel === label || next.autoLabel === label) {
+  if (
+    next.expectedLabel === label ||
+    (!next.manual && next.autoLabel === label)
+  ) {
     next.autoLabel = label;
     delete next.expectedLabel;
     next.manual = false;
@@ -192,7 +212,17 @@ export function validateTabLabel(label: unknown): label is string {
   if (!value || value.length > MAX_TAB_LENGTH) return false;
   const words = value.split(/\s+/);
   if (words.length < 2 || words.length > 4) return false;
-  const connectors = new Set(["a", "an", "and", "for", "in", "of", "on", "to", "with"]);
+  const connectors = new Set([
+    "a",
+    "an",
+    "and",
+    "for",
+    "in",
+    "of",
+    "on",
+    "to",
+    "with",
+  ]);
   return words.every(
     (word, index) =>
       /^[A-Z0-9][A-Za-z0-9+.#/'-]*$/.test(word) ||
@@ -234,12 +264,39 @@ export function heuristicTitle(context: {
     recentOutput?: string;
   };
 }): string | null {
-  const process = `${context.focusedPane?.process?.name ?? ""} ${context.focusedPane?.process?.command ?? ""}`.toLowerCase();
-  const output = String(context.focusedPane?.recentOutput ?? "").toLowerCase();
-  if (/\b(vitest|jest|pytest|rspec|cargo test|go test|node --test|bun test)\b/.test(process)) return "Run Tests";
-  if (/\b(next|vite|webpack|astro|rails server|npm run dev|pnpm dev|yarn dev)\b/.test(process)) return "Dev Server";
-  if (/\b(tail|journalctl|docker logs)\b/.test(process) || /following logs/.test(output)) return "View Logs";
-  if (/\b(ssh|mosh)\b/.test(process)) return "Remote Shell";
+  const process = context.focusedPane?.process;
+  const command = (process?.command || process?.name || "").trim();
+  const words = command.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+  const executable = path.posix
+    .basename(
+      (words[0] ?? "").replace(/^['"]|['"]$/g, "").replaceAll("\\", "/"),
+    )
+    .replace(/\.exe$/i, "")
+    .toLowerCase();
+  const args = words.slice(1);
+  if (
+    ["vitest", "jest", "pytest", "rspec"].includes(executable) ||
+    (["cargo", "go", "bun"].includes(executable) && args[0] === "test") ||
+    (executable === "node" && args[0] === "--test")
+  )
+    return "Run Tests";
+  if (
+    (["next", "astro"].includes(executable) &&
+      ["dev", "start"].includes(args[0] ?? "")) ||
+    (executable === "vite" &&
+      (!args[0] || args[0].startsWith("-") || args[0] === "dev")) ||
+    (executable === "webpack" && args[0] === "serve") ||
+    (executable === "rails" && args[0] === "server") ||
+    (["npm", "pnpm", "yarn"].includes(executable) &&
+      (args[0] === "dev" || (args[0] === "run" && args[1] === "dev")))
+  )
+    return "Dev Server";
+  if (
+    ["tail", "journalctl"].includes(executable) ||
+    (executable === "docker" && args[0] === "logs")
+  )
+    return "View Logs";
+  if (["ssh", "mosh"].includes(executable)) return "Remote Shell";
   return null;
 }
 
@@ -277,9 +334,15 @@ export function buildModelContext({
       ? {
           project: boundedText(workspaceName, 80),
           sessionTimeline: {
-            origin: timeline.origin.map((text) => boundedText(text, 700)).filter(Boolean),
-            middle: timeline.middle.map((text) => boundedText(text, 700)).filter(Boolean),
-            recent: timeline.recent.map((text) => boundedText(text, 700)).filter(Boolean),
+            origin: timeline.origin
+              .map((text) => boundedText(text, 700))
+              .filter(Boolean),
+            middle: timeline.middle
+              .map((text) => boundedText(text, 700))
+              .filter(Boolean),
+            recent: timeline.recent
+              .map((text) => boundedText(text, 700))
+              .filter(Boolean),
           },
         }
       : { project: boundedText(workspaceName, 80), userRequests: requests }
@@ -304,14 +367,22 @@ export function buildModelContext({
         ? {
             project: boundedText(workspaceName, 80),
             sessionTimeline: {
-              origin: timeline.origin.slice(0, 1).map((text) => boundedText(text, 300)),
-              middle: timeline.middle.slice(0, 1).map((text) => boundedText(text, 300)),
-              recent: timeline.recent.slice(-3).map((text) => boundedText(text, 350)),
+              origin: timeline.origin
+                .slice(0, 1)
+                .map((text) => boundedText(text, 300)),
+              middle: timeline.middle
+                .slice(0, 1)
+                .map((text) => boundedText(text, 300)),
+              recent: timeline.recent
+                .slice(-3)
+                .map((text) => boundedText(text, 350)),
             },
           }
         : {
             project: boundedText(workspaceName, 80),
-            userRequests: requests.slice(-3).map((text) => boundedText(text, 350)),
+            userRequests: requests
+              .slice(-3)
+              .map((text) => boundedText(text, 350)),
           }
       : {
           project: boundedText(workspaceName, 80),

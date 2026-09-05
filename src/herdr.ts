@@ -201,6 +201,8 @@ export async function beginTabProgress(
   tab: HerdrTab,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<() => Promise<void>> {
+  // Another request may already own a pulse. Never nest or restore its label.
+  if (tabProgressBase(tab.label) !== null) return async () => {};
   const base = tab.label;
   let expected = base;
   let frame = 0;
