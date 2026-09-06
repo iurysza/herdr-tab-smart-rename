@@ -13,7 +13,10 @@ An agent reviewing authentication can show `Review Auth Changes`. A test run can
 
 ## Demo
 
-https://github.com/user-attachments/assets/c1b49f7f-d4a1-4d03-b0cd-e2e98752f7f9
+
+
+https://github.com/user-attachments/assets/0c9d1ff9-58c5-4b87-a505-74fcb62e29b1
+
 
 ## Install on macOS or Linux
 
