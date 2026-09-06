@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.3.0...v0.4.0) (2026-09-06)
+
+
+### Features
+
+* **context:** sample Claude Code transcripts for naming ([ceba774](https://github.com/iurysza/herdr-tab-smart-rename/commit/ceba77434937f5d8b9b13f57681df3917a95d4bb))
+* sample Claude Code transcripts for naming ([70ccb69](https://github.com/iurysza/herdr-tab-smart-rename/commit/70ccb692c0a0c22d35d92b1d259b95cda7387553))
+
 ## [0.3.0](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.2.0...v0.3.0) (2026-09-05)
 
 
