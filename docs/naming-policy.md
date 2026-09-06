@@ -62,7 +62,7 @@ The model does not simulate or decide the rules below.
 - **Pane choice:** focused agent, working or blocked agent, focused command, then first pane. Agent panes are also named individually from their own session and process context; non-agent panes are left unchanged.
 - **Pane ownership:** manual pane labels stay protected until `reset-pane`. A manually named pane can still supply evidence for its automatic tab. Pane naming uses the target pane alone.
 - **Deterministic names:** test runner → `Run Tests`; development server → `Dev Server`; log follower → `View Logs`; SSH or Mosh → `Remote Shell`.
-- **Context:** agent sessions contribute origin, midpoint, and up to four recent user requests; focused commands contribute bounded process data and output; siblings contribute process summaries only.
+- **Context:** Pi and Claude Code sessions contribute origin, midpoint, and up to four recent user requests; focused commands contribute bounded process data and output; siblings contribute process summaries only.
 - **Safety:** context is sanitized and capped at 4,500 serialized characters; environment values are excluded; common credential shapes are redacted best-effort.
 - **Churn control:** events are debounced; a 60-second sweep catches silent task changes; unchanged successes are skipped; background model attempts wait 10 minutes per target; explicit actions bypass those gates.
 - **Validation:** invalid JSON, unchanged labels, and labels outside the word, length, or format rules are rejected.

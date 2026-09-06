@@ -1,0 +1,72 @@
+[
+  {
+    "id": "fact-1",
+    "text": "A recognised Claude Code pane contributes the same bounded origin, midpoint, and recent user-request excerpts that Pi panes already contribute.",
+    "comment": "",
+    "recommendedAutomatedVerification": true,
+    "automatedVerification": true
+  },
+  {
+    "id": "fact-2",
+    "text": "When Herdr reports a Claude session path, Smart Rename reads that file if it is a regular file under the allowed Claude roots.",
+    "comment": "",
+    "recommendedAutomatedVerification": true,
+    "automatedVerification": true
+  },
+  {
+    "id": "fact-3",
+    "text": "When Herdr reports a Claude session id and no usable path, Smart Rename looks up a unique `<id>.jsonl` under the Claude config directory's transcripts or projects trees.",
+    "comment": "",
+    "recommendedAutomatedVerification": true,
+    "automatedVerification": true
+  },
+  {
+    "id": "fact-4",
+    "text": "Allowed Claude roots are `$CLAUDE_CONFIG_DIR` when set, otherwise `~/.claude`, limited to `transcripts` and `projects`. Session ids cannot contain path separators, and lookup does not use cwd slugs.",
+    "comment": "",
+    "recommendedAutomatedVerification": true,
+    "automatedVerification": true
+  },
+  {
+    "id": "fact-5",
+    "text": "If no unique allowed transcript is found, or it yields no user request, naming continues with process and output evidence only.",
+    "comment": "",
+    "recommendedAutomatedVerification": true,
+    "automatedVerification": true
+  },
+  {
+    "id": "fact-6",
+    "text": "Extraction accepts both `{type:\"user\", content}` records and `{type:\"user\"|\"message\", message:{role:\"user\", content}}` records.",
+    "comment": "",
+    "recommendedAutomatedVerification": true,
+    "automatedVerification": true
+  },
+  {
+    "id": "fact-7",
+    "text": "Meta, sidechain, tool-result, slash-command wrapper, and interrupt or no-response records are dropped before sampling.",
+    "comment": "",
+    "recommendedAutomatedVerification": true,
+    "automatedVerification": true
+  },
+  {
+    "id": "fact-8",
+    "text": "Existing Pi sampling, sandbox, byte windows, sanitisation, ownership, and sibling-pane rules stay unchanged.",
+    "comment": "",
+    "recommendedAutomatedVerification": true,
+    "automatedVerification": true
+  },
+  {
+    "id": "fact-9",
+    "text": "Automated tests cover path reads, id lookup, sandbox rejection, both JSONL shapes, noise filtering, and the empty fallback, using fixtures rather than the real Claude directory.",
+    "comment": "",
+    "recommendedAutomatedVerification": true,
+    "automatedVerification": true
+  },
+  {
+    "id": "fact-10",
+    "text": "Docs state that Claude Code panes can contribute short user-request excerpts.",
+    "comment": "",
+    "recommendedAutomatedVerification": false,
+    "automatedVerification": false
+  }
+]

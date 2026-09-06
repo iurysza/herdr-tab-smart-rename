@@ -105,7 +105,7 @@ herdr plugin config-dir tab-smart-rename
 
 `provider.env`, `model-selection.json`, and the optional `naming-prompt.md` live there, separate from the installed code. Ownership state and worker logs live in the plugin state directory.
 
-Tab naming uses the dominant pane's task context, with sibling process summaries as supporting evidence. Agent-pane naming uses that pane alone. Pi panes can contribute short user-request excerpts.
+Tab naming uses the dominant pane's task context, with sibling process summaries as supporting evidence. Agent-pane naming uses that pane alone. Pi and Claude Code panes can contribute short user-request excerpts.
 
 A manual name protects the label, not its pane content from use as tab context. Smart Rename removes terminal formatting, common secret patterns, and the local home path before sending bounded context. Redaction is best-effort, not a guarantee that all sensitive text is detected.
 
