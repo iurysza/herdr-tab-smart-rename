@@ -78,7 +78,7 @@ Smart Rename uses the focused agent's task to name a shared tab, or another acti
 
 Background naming preserves manual labels. Weak evidence leaves a name unchanged, and results from closed panes or changed agent sessions are discarded.
 
-Model-backed naming sends bounded terminal context to your selected provider. Pi panes can also contribute short user-request excerpts. Secret redaction is best-effort, and a manual name does not exclude its pane's content. Read [privacy and context](./docs/configuration.md#private-files-and-context) before using it with sensitive work.
+Model-backed naming sends bounded terminal context to your selected provider. Pi and Claude Code panes can also contribute short user-request excerpts. Secret redaction is best-effort, and a manual name does not exclude its pane's content. Read [privacy and context](./docs/configuration.md#private-files-and-context) before using it with sensitive work.
 
 ## Documentation
 

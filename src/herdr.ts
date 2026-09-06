@@ -1,7 +1,7 @@
 import net, { type Socket } from "node:net";
 import { z } from "zod";
 import { type PaneContext } from "./domain.ts";
-import { sampledUserMessages } from "./pi-context.ts";
+import { paneSessionMessages } from "./pi-context.ts";
 import { boundedText } from "./text.ts";
 
 const WorkspaceSchema = z.looseObject({
@@ -310,14 +310,10 @@ export async function focusedPaneContext(
   pane: HerdrPane,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<PaneContext> {
-  const sessionPath =
-    pane.agent === "pi" && pane.agent_session?.kind === "path"
-      ? pane.agent_session.value
-      : null;
   const [process, recentOutput, sessionMessages] = await Promise.all([
     paneProcess(pane.pane_id, env),
     paneRecent(pane.pane_id, env),
-    sampledUserMessages(sessionPath, env),
+    paneSessionMessages(pane, env),
   ]);
   return {
     focused: true,
