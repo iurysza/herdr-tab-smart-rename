@@ -13,7 +13,7 @@ An agent reviewing authentication can show `Review Auth Changes`. A test run can
 
 ## Demo
 
-https://github.com/user-attachments/assets/c9d12c33-e458-4a29-986c-c403d64aff02
+https://github.com/user-attachments/assets/c1b49f7f-d4a1-4d03-b0cd-e2e98752f7f9
 
 ## Install on macOS or Linux
 
@@ -31,19 +31,15 @@ For Windows, use the [Herdr installation commands](./docs/install.md#windows). F
 
 ## Choose a model
 
+Using the install wizzard:
+
+![Install Wizzard](https://github.com/user-attachments/assets/9b5a1bf4-48d8-4544-a65e-9fc01f65daca)
+
 Setup offers three sources:
 
 - Direct uses an OpenAI-compatible endpoint, model ID, and API key. Neither Pi nor OpenCode needs to be installed.
 - Pi reuses a provider you have connected in Pi, with its models and supported thinking levels.
 - OpenCode reuses a provider you have connected in an installed OpenCode, with its models and variants.
-
-If you already have valid settings, setup offers to keep them. To switch sources, choose **No** at **Keep existing AI setup?**
-
-![Setup switching from Direct to Pi, with model selection and optional shortcut instructions](https://github.com/user-attachments/assets/9b5a1bf4-48d8-4544-a65e-9fc01f65daca)
-
-Choose whether to see shortcut instructions, review your settings, and confirm **Apply this setup?** Setup saves your choice and starts background naming. It never edits your Herdr keybindings.
-
-Cancel before applying to leave your settings unchanged. Existing Direct keys and custom naming instructions still work. Pi and OpenCode keep their own credentials.
 
 To change the model later, reopen setup:
 
