@@ -210,23 +210,31 @@ export function validateTabLabel(label: unknown): label is string {
   if (/[\r\n]/.test(String(label ?? ""))) return false;
   const value = sanitizeText(label);
   if (!value || value.length > MAX_TAB_LENGTH) return false;
+
+  if (/\p{Script=Han}/u.test(value)) {
+    if (value.length < 2) return false;
+    return /^[\p{Script=Han}A-Za-z0-9][\p{Script=Han}A-Za-z0-9\s+.#/'-_&·]*[\p{Script=Han}A-Za-z0-9+]$/u.test(
+      value,
+    );
+  }
+
   const words = value.split(/\s+/);
   if (words.length < 2 || words.length > 4) return false;
-  const connectors = new Set([
-    "a",
-    "an",
-    "and",
-    "for",
-    "in",
-    "of",
-    "on",
-    "to",
-    "with",
-  ]);
+  const connectors: Record<string, true> = {
+    a: true,
+    an: true,
+    and: true,
+    for: true,
+    in: true,
+    of: true,
+    on: true,
+    to: true,
+    with: true,
+  };
   return words.every(
     (word, index) =>
       /^[A-Z0-9][A-Za-z0-9+.#/'-]*$/.test(word) ||
-      (index > 0 && connectors.has(word)),
+      (index > 0 && connectors[word]),
   );
 }
 
