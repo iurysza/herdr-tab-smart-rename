@@ -99,6 +99,28 @@ test("provider config preserves defaults and process-over-file precedence", asyn
   }
 });
 
+test("DeepSeek profile supplies defaults and its standard key alias", async () => {
+  const fixture = await tempConfig();
+  try {
+    assert.deepEqual(
+      await loadProviderConfig({
+        ...fixture.env,
+        SMART_RENAME_PROVIDER: "deepseek",
+        DEEPSEEK_API_KEY: "deepseek-key",
+      }),
+      {
+        provider: "deepseek",
+        baseURL: "https://api.deepseek.com",
+        model: "deepseek-v4-flash",
+        timeoutMs: 45_000,
+        apiKey: "deepseek-key",
+      },
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("private provider and prompt config enforce templates, permissions, and bounds", async () => {
   const fixture = await tempConfig();
   await rm(fixture.root, { recursive: true, force: true });

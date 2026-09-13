@@ -85,6 +85,11 @@ The private file starts from [`provider.env.example`](../provider.env.example). 
 
 Known Direct providers are defined in a registry that can supply endpoint, model, reasoning, and key-variable defaults. OpenAI is the default profile. Providers not in the registry remain supported when their OpenAI-compatible endpoint, model, and key are configured explicitly.
 
+| Profile | Default endpoint | Default model | Key variable |
+| --- | --- | --- | --- |
+| `openai` (default) | `https://api.openai.com/v1` | `gpt-5.6-luna` | `OPENAI_API_KEY` |
+| `deepseek` | `https://api.deepseek.com` | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` |
+
 | Setting | Purpose |
 | --- | --- |
 | `SMART_RENAME_PROVIDER` | Provider name |
@@ -95,7 +100,7 @@ Known Direct providers are defined in a registry that can supply endpoint, model
 | `SMART_RENAME_TIMEOUT_MS` | Request timeout in milliseconds |
 | `SMART_RENAME_PROMPT_PATH` | Custom naming prompt |
 
-`OPENAI_API_KEY` and `KIMI_API_KEY` are also accepted for their respective providers. Keep keys out of the installed checkout and Git.
+`OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, and `KIMI_API_KEY` are also accepted for their respective providers. Keep keys out of the installed checkout and Git.
 
 ## Private files and context
 

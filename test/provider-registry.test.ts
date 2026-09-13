@@ -28,3 +28,13 @@ test("direct provider profiles centralize key aliases and optional defaults", ()
   });
   assert.equal(directProviderProfile("custom-provider"), undefined);
 });
+
+test("DeepSeek is a registered OpenAI-compatible provider profile", () => {
+  assert.deepEqual(directProviderProfile("deepseek"), {
+    id: "deepseek",
+    label: "DeepSeek",
+    defaultBaseURL: "https://api.deepseek.com",
+    defaultModel: "deepseek-v4-flash",
+    apiKeyEnvNames: ["DEEPSEEK_API_KEY"],
+  });
+});

@@ -25,6 +25,13 @@ const DIRECT_PROVIDER_PROFILES: readonly DirectProviderProfile[] = [
     label: "Kimi Code",
     apiKeyEnvNames: ["KIMI_API_KEY"],
   },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    defaultBaseURL: "https://api.deepseek.com",
+    defaultModel: "deepseek-v4-flash",
+    apiKeyEnvNames: ["DEEPSEEK_API_KEY"],
+  },
 ] as const;
 
 export function directProviderProfiles(): readonly DirectProviderProfile[] {
