@@ -58,6 +58,14 @@ test("provider config preserves defaults and process-over-file precedence", asyn
       }),
       /AI key missing/,
     );
+    await assert.rejects(
+      loadProviderConfig({
+        ...fixture.env,
+        SMART_RENAME_PROVIDER: "custom-provider",
+        SMART_RENAME_API_KEY: "custom-key",
+      }),
+      /SMART_RENAME_BASE_URL/,
+    );
 
     await writeFile(
       fixture.file,
@@ -86,6 +94,28 @@ test("provider config preserves defaults and process-over-file precedence", asyn
       promptPath: path.join(fixture.root, "prompts/custom.md"),
       apiKey: "process-key",
     });
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("DeepSeek profile supplies defaults and its standard key alias", async () => {
+  const fixture = await tempConfig();
+  try {
+    assert.deepEqual(
+      await loadProviderConfig({
+        ...fixture.env,
+        SMART_RENAME_PROVIDER: "deepseek",
+        DEEPSEEK_API_KEY: "deepseek-key",
+      }),
+      {
+        provider: "deepseek",
+        baseURL: "https://api.deepseek.com",
+        model: "deepseek-v4-flash",
+        timeoutMs: 45_000,
+        apiKey: "deepseek-key",
+      },
+    );
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

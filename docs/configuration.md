@@ -81,7 +81,14 @@ Selection reloads before each model-backed rename. If the selected source fails,
 
 Direct keeps working without `model-selection.json`. Existing `provider.env` settings are read before every request.
 
-Defaults come from [`provider.env.example`](../provider.env.example). Process settings override the private file, which overrides the defaults.
+The private file starts from [`provider.env.example`](../provider.env.example). Process settings override the private file, which overrides registered provider defaults.
+
+Known Direct providers are defined in a registry that can supply endpoint, model, reasoning, and key-variable defaults. OpenAI is the default profile. Providers not in the registry remain supported when their OpenAI-compatible endpoint, model, and key are configured explicitly.
+
+| Profile | Default endpoint | Default model | Key variable |
+| --- | --- | --- | --- |
+| `openai` (default) | `https://api.openai.com/v1` | `gpt-5.6-luna` | `OPENAI_API_KEY` |
+| `deepseek` | `https://api.deepseek.com` | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` |
 
 | Setting | Purpose |
 | --- | --- |
@@ -93,7 +100,7 @@ Defaults come from [`provider.env.example`](../provider.env.example). Process se
 | `SMART_RENAME_TIMEOUT_MS` | Request timeout in milliseconds |
 | `SMART_RENAME_PROMPT_PATH` | Custom naming prompt |
 
-`OPENAI_API_KEY` and `KIMI_API_KEY` are also accepted for their respective providers. Keep keys out of the installed checkout and Git.
+`OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, and `KIMI_API_KEY` are also accepted for their respective providers. Keep keys out of the installed checkout and Git.
 
 ## Private files and context
 

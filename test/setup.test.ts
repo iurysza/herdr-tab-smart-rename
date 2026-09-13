@@ -261,6 +261,29 @@ test("Direct wizard masks the API key and persists private connection mapping", 
     },
   );
   assert.equal(ui.calls.filter((call) => call.kind === "password").length, 1);
+  const textCalls = ui.calls.filter((call) => call.kind === "text");
+  assert.equal(
+    (textCalls[0]?.options as { defaultValue?: string }).defaultValue,
+    "openai",
+  );
+  assert.equal(
+    (textCalls[1]?.options as { defaultValue?: string }).defaultValue,
+    "https://api.openai.com/v1",
+  );
+  assert.equal(
+    (textCalls[2]?.options as { defaultValue?: string }).defaultValue,
+    "gpt-5.6-luna",
+  );
+  assert.equal(
+    (
+      ui.calls.find(
+        (call) =>
+          call.kind === "select" &&
+          (call.options as { message?: string }).message === "Reasoning level",
+      )?.options as { initialValue?: string }
+    ).initialValue,
+    "medium",
+  );
   assert.deepEqual(writes, [
     {
       kind: "direct",
@@ -286,4 +309,48 @@ test("Direct wizard masks the API key and persists private connection mapping", 
   ]);
   assert.ok(ui.summaries.every((summary) => !summary.includes(key)));
   assert.equal(result.saved, true);
+});
+
+test("Direct wizard derives DeepSeek suggestions from its provider profile", async () => {
+  const ui = scriptedPrompts([
+    "direct",
+    "deepseek",
+    "https://api.deepseek.com",
+    "deepseek-v4-flash",
+    "deepseek-secret",
+    "none",
+    "45000",
+    false,
+    false,
+    true,
+  ]);
+  await runSetup(
+    {},
+    {
+      ...isolatedSetup,
+      prompts: ui.prompts,
+      resolveConfigDirectory: async () => "/config",
+      saveDirect: async () => {},
+      saveSelection: async () => {},
+    },
+  );
+  const textCalls = ui.calls.filter((call) => call.kind === "text");
+  assert.equal(
+    (textCalls[1]?.options as { defaultValue?: string }).defaultValue,
+    "https://api.deepseek.com",
+  );
+  assert.equal(
+    (textCalls[2]?.options as { defaultValue?: string }).defaultValue,
+    "deepseek-v4-flash",
+  );
+  assert.equal(
+    (
+      ui.calls.find(
+        (call) =>
+          call.kind === "select" &&
+          (call.options as { message?: string }).message === "Reasoning level",
+      )?.options as { initialValue?: string }
+    ).initialValue,
+    "none",
+  );
 });
