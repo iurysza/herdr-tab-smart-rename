@@ -261,6 +261,29 @@ test("Direct wizard masks the API key and persists private connection mapping", 
     },
   );
   assert.equal(ui.calls.filter((call) => call.kind === "password").length, 1);
+  const textCalls = ui.calls.filter((call) => call.kind === "text");
+  assert.equal(
+    (textCalls[0]?.options as { defaultValue?: string }).defaultValue,
+    "openai",
+  );
+  assert.equal(
+    (textCalls[1]?.options as { defaultValue?: string }).defaultValue,
+    "https://api.openai.com/v1",
+  );
+  assert.equal(
+    (textCalls[2]?.options as { defaultValue?: string }).defaultValue,
+    "gpt-5.6-luna",
+  );
+  assert.equal(
+    (
+      ui.calls.find(
+        (call) =>
+          call.kind === "select" &&
+          (call.options as { message?: string }).message === "Reasoning level",
+      )?.options as { initialValue?: string }
+    ).initialValue,
+    "medium",
+  );
   assert.deepEqual(writes, [
     {
       kind: "direct",
