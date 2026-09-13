@@ -8,6 +8,10 @@ import {
 import { checkAi } from "./cli.ts";
 import { loadProviderConfig } from "./provider.ts";
 import {
+  defaultDirectProviderProfile,
+  directProviderProfile,
+} from "./provider-registry.ts";
+import {
   loadModelSelection,
   resolvePluginConfigDirectory,
   saveModelSelection,
@@ -257,15 +261,17 @@ async function collectChoice(
 }
 
 async function collectDirectConfig(prompts: SetupPrompts): Promise<DirectSetupConfig | undefined> {
-  const provider = await answer<string>(prompts, prompts.text({ message: "Provider", defaultValue: "openai" }));
+  const defaultProvider = defaultDirectProviderProfile();
+  const provider = await answer<string>(prompts, prompts.text({ message: "Provider", defaultValue: defaultProvider.id }));
   if (provider === undefined) return undefined;
-  const baseURL = await answer<string>(prompts, prompts.text({ message: "Base URL", defaultValue: "https://api.openai.com/v1" }));
+  const profile = directProviderProfile(provider);
+  const baseURL = await answer<string>(prompts, prompts.text({ message: "Base URL", ...(profile?.defaultBaseURL ? { defaultValue: profile.defaultBaseURL } : {}) }));
   if (baseURL === undefined) return undefined;
-  const model = await answer<string>(prompts, prompts.text({ message: "Model", defaultValue: "gpt-5.6-luna" }));
+  const model = await answer<string>(prompts, prompts.text({ message: "Model", ...(profile?.defaultModel ? { defaultValue: profile.defaultModel } : {}) }));
   if (model === undefined) return undefined;
   const apiKey = await answer<string>(prompts, prompts.password({ message: "API key" }));
   if (apiKey === undefined) return undefined;
-  const reasoning = await answer<string>(prompts, prompts.select({ message: "Reasoning level", initialValue: "medium", options: [{ value: "none", label: "None" }, { value: "low", label: "Low" }, { value: "medium", label: "Medium" }, { value: "high", label: "High" }] }));
+  const reasoning = await answer<string>(prompts, prompts.select({ message: "Reasoning level", initialValue: profile?.defaultReasoningEffort ?? "none", options: [{ value: "none", label: "None" }, { value: "low", label: "Low" }, { value: "medium", label: "Medium" }, { value: "high", label: "High" }] }));
   if (reasoning === undefined) return undefined;
   const timeout = await answer<string>(prompts, prompts.text({ message: "Timeout (ms)", defaultValue: "45000" }));
   if (!provider || !baseURL || !model || !apiKey || !reasoning || !timeout) return undefined;

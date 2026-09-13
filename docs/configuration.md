@@ -81,7 +81,9 @@ Selection reloads before each model-backed rename. If the selected source fails,
 
 Direct keeps working without `model-selection.json`. Existing `provider.env` settings are read before every request.
 
-Defaults come from [`provider.env.example`](../provider.env.example). Process settings override the private file, which overrides the defaults.
+The private file starts from [`provider.env.example`](../provider.env.example). Process settings override the private file, which overrides registered provider defaults.
+
+Known Direct providers are defined in a registry that can supply endpoint, model, reasoning, and key-variable defaults. OpenAI is the default profile. Providers not in the registry remain supported when their OpenAI-compatible endpoint, model, and key are configured explicitly.
 
 | Setting | Purpose |
 | --- | --- |

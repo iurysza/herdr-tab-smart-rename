@@ -58,6 +58,14 @@ test("provider config preserves defaults and process-over-file precedence", asyn
       }),
       /AI key missing/,
     );
+    await assert.rejects(
+      loadProviderConfig({
+        ...fixture.env,
+        SMART_RENAME_PROVIDER: "custom-provider",
+        SMART_RENAME_API_KEY: "custom-key",
+      }),
+      /SMART_RENAME_BASE_URL/,
+    );
 
     await writeFile(
       fixture.file,
