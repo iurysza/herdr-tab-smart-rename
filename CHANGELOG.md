@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.4.0...v0.5.0) (2026-09-14)
+
+
+### Features
+
+* **domain:** support CJK and Chinese tab labels ([#18](https://github.com/iurysza/herdr-tab-smart-rename/issues/18)) ([ad3fbc9](https://github.com/iurysza/herdr-tab-smart-rename/commit/ad3fbc94d72aef008821e4ab168e69523c3e3974))
+* **provider:** add DeepSeek profile ([#20](https://github.com/iurysza/herdr-tab-smart-rename/issues/20)) ([763e9bd](https://github.com/iurysza/herdr-tab-smart-rename/commit/763e9bd2c9ebdf2863edae5d25c473f7b7fa4534))
+
 ## [0.4.0](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.3.0...v0.4.0) (2026-09-06)
 
 
