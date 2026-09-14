@@ -49,6 +49,14 @@ test("label, workspace, and process policy stays deterministic", () => {
     ["One", false],
     ["This Label Has Far Too Many Words", false],
     ["Fix\nSocket", false],
+    ["修复认证问题", true],
+    ["同步主分支", true],
+    ["清理系统进程", true],
+    ["修复 MCP 故障", true],
+    ["构建 C++ 模块", true],
+    ["测试", true],
+    ["测", false],
+    ["这是一串超级超级长长长长长长长长长长长长长长长长长长长长长的标题", false],
   ] as const) {
     assert.equal(validateTabLabel(label), valid, label);
   }

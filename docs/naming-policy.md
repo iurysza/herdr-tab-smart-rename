@@ -23,18 +23,18 @@ If no clear task exists:
 Keep `reason` short. Never expose hidden reasoning or quote sensitive context. If any label rule cannot be satisfied, abstain.
 
 ## Label rules
-
 A label must:
 
 - describe the task, not its actor or incidental tool;
-- use 2–4 words and at most 30 characters;
-- use readable Title Case and preserve acronyms;
+- match the primary language of the user requests: use concise Chinese (2–12 characters) if requests are in Chinese, or 2–4 Title Case English words if in English;
+- stay under 30 characters;
 - omit project, app, agent, model, and provider prefixes;
 - prefer concrete verbs and nouns without invented specificity.
 
 Include a project or tool name only when it is the task object and omission would change the meaning.
 
-Good: `Review Auth Changes`, `Repair Tab Ownership`, `Run Tests`, `View API Logs`.
+Good (Chinese): `修复认证问题`, `修复 MCP 故障`, `同步代码分支`, `清理系统进程`.
+Good (English): `Review Auth Changes`, `Repair Tab Ownership`, `Run Tests`, `View API Logs`.
 
 Bad: `Kimi Auth Review`, `Pi Coding Agent`, a project name alone, a one-word label, or specificity unsupported by evidence.
 
