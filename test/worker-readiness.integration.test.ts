@@ -1,5 +1,7 @@
 import { test as bunTest } from "bun:test";
+
 const test = process.platform === "win32" ? bunTest.skip : bunTest;
+
 import assert from "node:assert/strict";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
@@ -16,11 +18,13 @@ async function run(
     stdout: "pipe",
     stderr: "pipe",
   });
+
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
     child.exited,
   ]);
+
   return { exitCode, stdout, stderr };
 }
 
@@ -31,10 +35,12 @@ test("start does not return before the isolated worker connects to its target so
   const herdr = path.join(root, "herdr");
   const pluginRoot = path.resolve(import.meta.dir, "..");
   let connected = false;
+
   const server = net.createServer((connection) => {
     connected = true;
     connection.resume();
   });
+
   try {
     await writeFile(herdr, `#!/bin/sh
 set -eu
@@ -54,6 +60,7 @@ esac
       server.once("error", reject);
       server.listen(socket, resolve);
     });
+
     const env = {
       ...process.env,
       PATH: `${root}${path.delimiter}${process.env.PATH}`,
@@ -62,6 +69,7 @@ esac
       HERDR_SOCKET_PATH: socket,
       HERDR_BIN_PATH: herdr,
     };
+
     const started = await run(["src/cli.ts", "start"], env);
     assert.equal(started.exitCode, 0, started.stderr + await readFile(path.join(state, "worker.log"), "utf8").catch(() => ""));
     assert.equal(connected, true, started.stdout);

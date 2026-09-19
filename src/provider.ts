@@ -3,12 +3,10 @@ import { fileURLToPath } from "node:url";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { generateText } from "ai";
 import { parse as parseEnv } from "dotenv";
+import { Cause, Duration, Effect, Exit } from "effect";
 import { z } from "zod";
-import {
-  type NameSuggestion,
-  type NamingContext,
-  validateTabLabel,
-} from "./domain.ts";
+import { type NameSuggestion, type NamingContext } from "./domain.ts";
+import { decodeSuggestion } from "./effect/model-output.ts";
 import {
   DEFAULT_DIRECT_PROVIDER_ID,
   directProviderProfile,
@@ -16,12 +14,17 @@ import {
 import { sanitizeText } from "./text.ts";
 
 const PROVIDER_ENV_BYTES = 16 * 1024;
+
 const NAMING_PROMPT_BYTES = 32 * 1024;
+
 const PROVIDER_EXAMPLE_URL = new URL("../provider.env.example", import.meta.url);
+
 const BUNDLED_NAMING_PROMPT = fileURLToPath(
   new URL("../docs/naming-policy.md", import.meta.url),
 );
+
 export const PROVIDER_ENV_NAME = "provider.env";
+
 export const NAMING_PROMPT_NAME = "naming-prompt.md";
 
 const ProviderConfigSchema = z.object({
@@ -31,6 +34,7 @@ const ProviderConfigSchema = z.object({
     .refine((value) => {
       try {
         const url = new URL(value);
+
         return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
       } catch {
         return false;
@@ -42,11 +46,6 @@ const ProviderConfigSchema = z.object({
   reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
   promptPath: z.string().min(1).optional(),
   apiKey: z.string().min(1),
-});
-
-const ModelOutputSchema = z.object({
-  tab: z.string().nullable(),
-  reason: z.string(),
 });
 
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
@@ -69,13 +68,17 @@ async function readBoundedText(
   required = false,
 ): Promise<string | null> {
   const file = Bun.file(source);
+
   if (!(await file.exists())) {
     if (required) throw new Error(`${label} is missing`);
+
     return null;
   }
+
   if (file.size > maxBytes) {
     throw new Error(`${label} exceeds ${maxBytes / 1024} KiB`);
   }
+
   return file.text();
 }
 
@@ -84,12 +87,14 @@ async function readProviderEnv(
   required = false,
 ): Promise<Record<string, string>> {
   if (!filePath) return {};
+
   const text = await readBoundedText(
     filePath,
     filePath === PROVIDER_EXAMPLE_URL ? "provider.env.example" : PROVIDER_ENV_NAME,
     PROVIDER_ENV_BYTES,
     required,
   );
+
   return text === null ? {} : parseEnv(text);
 }
 
@@ -119,6 +124,7 @@ function pick(
 
 function resolvePromptPath(value: string, env: NodeJS.ProcessEnv): string {
   if (path.isAbsolute(value)) return value;
+
   return path.resolve(env.HERDR_PLUGIN_CONFIG_DIR || process.cwd(), value);
 }
 
@@ -128,6 +134,7 @@ function providerApiKey(
   fileEnv: Record<string, string>,
 ): string {
   const providerKeys = directProviderProfile(provider)?.apiKeyEnvNames ?? [];
+
   return (
     processEnv.SMART_RENAME_API_KEY ||
     fileEnv.SMART_RENAME_API_KEY ||
@@ -143,7 +150,9 @@ export async function configuredNamingPromptPath(
 ): Promise<string> {
   const fileEnv = await readProviderEnv(providerEnvPath(env));
   const configured = env.SMART_RENAME_PROMPT_PATH || fileEnv.SMART_RENAME_PROMPT_PATH;
+
   if (configured) return resolvePromptPath(configured, env);
+
   return env.HERDR_PLUGIN_CONFIG_DIR
     ? path.join(env.HERDR_PLUGIN_CONFIG_DIR, NAMING_PROMPT_NAME)
     : BUNDLED_NAMING_PROMPT;
@@ -156,13 +165,17 @@ async function readNamingPrompt(filePath: string, required = false): Promise<str
     NAMING_PROMPT_BYTES,
     required,
   );
+
   const prompt = text?.trim();
+
   if (!prompt) throw new Error(`${path.basename(filePath)} is empty`);
+
   return prompt;
 }
 
 function configError(error: z.ZodError): Error {
   const field = error.issues[0]?.path[0];
+
   const messages: Record<PropertyKey, string> = {
     provider: "SMART_RENAME_PROVIDER is invalid",
     baseURL: "SMART_RENAME_BASE_URL must be an HTTP(S) URL without credentials",
@@ -172,6 +185,7 @@ function configError(error: z.ZodError): Error {
     promptPath: "SMART_RENAME_PROMPT_PATH is invalid",
     apiKey: `AI key missing. Run setup or set a provider key in ${PROVIDER_ENV_NAME}`,
   };
+
   return new Error(messages[field ?? ""] ?? "AI provider configuration is invalid");
 }
 
@@ -182,19 +196,25 @@ export async function loadProviderConfig(
     readProviderEnv(PROVIDER_EXAMPLE_URL, true),
     readProviderEnv(providerEnvPath(env)),
   ]);
+
   const provider =
     env.SMART_RENAME_PROVIDER ||
     fileEnv.SMART_RENAME_PROVIDER ||
     DEFAULT_DIRECT_PROVIDER_ID;
+
   const profile = directProviderProfile(provider);
+
   const configuredReasoning =
     env.SMART_RENAME_REASONING_EFFORT ?? fileEnv.SMART_RENAME_REASONING_EFFORT;
+
   const reasoningEffort =
     configuredReasoning ??
     profile?.defaultReasoningEffort ??
     "";
+
   const configuredPrompt =
     env.SMART_RENAME_PROMPT_PATH || fileEnv.SMART_RENAME_PROMPT_PATH;
+
   const input = {
     provider,
     baseURL:
@@ -214,8 +234,11 @@ export async function loadProviderConfig(
       : {}),
     apiKey: providerApiKey(provider, env, fileEnv),
   };
+
   const parsed = ProviderConfigSchema.safeParse(input);
+
   if (!parsed.success) throw configError(parsed.error);
+
   return parsed.data;
 }
 
@@ -227,25 +250,33 @@ export async function loadNamingPrompt(
 ): Promise<string> {
   const isConfig = typeof configOrEnv.baseURL === "string";
   const env = isConfig ? suppliedEnv ?? process.env : configOrEnv as NodeJS.ProcessEnv;
+
   const promptPath = isConfig
     ? (configOrEnv as ProviderConfig).promptPath
     : await configuredNamingPromptPath(env);
+
   if (isConfig && promptPath) return readNamingPrompt(promptPath, true);
+
   if (!isConfig && promptPath) {
     const privateDefault = env.HERDR_PLUGIN_CONFIG_DIR && path.join(env.HERDR_PLUGIN_CONFIG_DIR, NAMING_PROMPT_NAME);
+
     if (promptPath !== privateDefault) return readNamingPrompt(promptPath, true);
   }
 
   if (env.HERDR_PLUGIN_CONFIG_DIR) {
     const privatePrompt = path.join(env.HERDR_PLUGIN_CONFIG_DIR, NAMING_PROMPT_NAME);
+
     const text = await readBoundedText(
       privatePrompt,
       NAMING_PROMPT_NAME,
       NAMING_PROMPT_BYTES,
     );
+
     if (text !== null) {
       const prompt = text.trim();
+
       if (!prompt) throw new Error(`${NAMING_PROMPT_NAME} is empty`);
+
       return prompt;
     }
   }
@@ -254,21 +285,18 @@ export async function loadNamingPrompt(
 }
 
 export function parseSuggestion(text: string): NameSuggestion {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const cleaned = (fenced?.[1] ?? text).trim();
-  const output = ModelOutputSchema.parse(JSON.parse(cleaned));
-  if (output.tab === null) {
-    return { tab: null, reason: sanitizeText(output.reason) };
-  }
-  if (!validateTabLabel(output.tab)) {
-    throw new Error(`invalid model tab label: ${JSON.stringify(output.tab)}`);
-  }
-  return { tab: sanitizeText(output.tab), reason: sanitizeText(output.reason) };
+  return Exit.match(Effect.runSyncExit(decodeSuggestion(text)), {
+    onFailure: (cause) => {
+      throw Cause.squash(cause);
+    },
+    onSuccess: (suggestion) => suggestion,
+  });
 }
 
 function safeProviderError(error: unknown, config: ProviderConfig): string {
   let message = error instanceof Error ? error.message : String(error || "provider request failed");
   message = message.replaceAll(config.apiKey, "[redacted]");
+
   return sanitizeText(message).slice(0, 400) || "provider request failed";
 }
 
@@ -287,6 +315,7 @@ export function transformOpenAiRequestBody(
   body: Record<string, unknown>,
 ): Record<string, unknown> {
   const { max_tokens, ...rest } = body;
+
   return max_tokens == null
     ? rest
     : { ...rest, max_completion_tokens: max_tokens };
@@ -303,6 +332,7 @@ export async function completeWithAiSdk(request: CompletionRequest): Promise<str
         }
       : {}),
   });
+
   const result = await generateText({
     model: provider(request.config.model),
     system: request.system,
@@ -320,6 +350,7 @@ export async function completeWithAiSdk(request: CompletionRequest): Promise<str
     maxRetries: request.maxRetries,
     abortSignal: request.abortSignal,
   });
+
   return result.text;
 }
 
@@ -338,20 +369,28 @@ export class AiSdkNamer implements Namer {
   async suggest(context: NamingContext): Promise<NameSuggestion> {
     const config = await loadProviderConfig(this.#env);
     const system = await loadNamingPrompt(config, this.#env);
-    try {
-      const text = await this.#complete({
-        config,
-        context,
-        system,
-        maxOutputTokens: 32_768,
-        maxRetries: 1,
-        abortSignal: AbortSignal.timeout(config.timeoutMs),
-      });
-      return parseSuggestion(text);
-    } catch (error) {
-      throw new Error(
-        `AI request failed (${config.provider}/${config.model}): ${safeProviderError(error, config)}`,
-      );
-    }
+    const complete = this.#complete;
+
+    const program = Effect.tryPromise({
+      try: (signal) =>
+        complete({
+          config,
+          context,
+          system,
+          maxOutputTokens: 32_768,
+          maxRetries: 1,
+          abortSignal: signal,
+        }),
+      catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+    }).pipe(Effect.timeout(Duration.millis(config.timeoutMs)), Effect.flatMap(decodeSuggestion));
+
+    return Exit.match(await Effect.runPromiseExit(program), {
+      onFailure: (cause) => {
+        throw new Error(
+          `AI request failed (${config.provider}/${config.model}): ${safeProviderError(Cause.squash(cause), config)}`,
+        );
+      },
+      onSuccess: (suggestion) => suggestion,
+    });
   }
 }

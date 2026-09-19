@@ -96,6 +96,7 @@ test("working agents outrank focused supporting commands", () => {
 test("state transactions serialize concurrent writers", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-state-"));
   const paths = statePaths(dir);
+
   try {
     await Promise.all(
       Array.from({ length: 20 }, () =>
@@ -118,6 +119,7 @@ test("all-tab dry run visits tabs sequentially without writing state", async () 
   snap.panes.push({ pane_id: "p2", tab_id: "t2", workspace_id: "w1" });
   snap.layouts.push({ tab_id: "t2", focused_pane_id: "p2" });
   const visits: string[] = [];
+
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
@@ -126,6 +128,7 @@ test("all-tab dry run visits tabs sequentially without writing state", async () 
     dependencies: dependencies(() => snap, {
       focusedPaneContext: async (pane) => {
         visits.push(pane.pane_id);
+
         return contextFor(pane);
       },
       rename: async () => {
@@ -133,6 +136,7 @@ test("all-tab dry run visits tabs sequentially without writing state", async () 
       },
     }),
   });
+
   try {
     const results = await service.evaluateAll(snap);
     assert.deepEqual(visits, ["p1", "p2"]);
@@ -150,12 +154,14 @@ test("manual ownership short-circuits tab context and model work but still names
   const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-manual-"));
   const paths = statePaths(dir);
   const snap = liveSnapshot("Manual Task");
+
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
     namer: { suggest: async () => unexpectedModel() },
     dependencies: dependencies(() => snap),
   });
+
   try {
     await service.initialize(snap);
     const result = await service.evaluate("t1", { snapshot: snap });
@@ -181,17 +187,20 @@ test("explicit tab refresh reclaims only the tab; background work still names pa
   const snap = liveSnapshot("Manual Task");
   let calls = 0;
   const activity: string[] = [];
+
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
     namer: {
       suggest: async () => {
         calls += 1;
+
         return { tab: "Fresh Task Name", reason: "current task" };
       },
     },
     modelActivity: async (tab) => {
       activity.push(`start:${tab.label}`);
+
       return async () => {
         activity.push("stop");
       };
@@ -201,16 +210,20 @@ test("explicit tab refresh reclaims only the tab; background work still names pa
         contextFor(pane, { userMessages: ["Give this tab a fresh name"] }),
       rename: async (kind, id, label) => {
         if (kind === "tab" && id === "t1") snap.tabs[0]!.label = label;
+
         if (kind === "pane" && id === "p1") snap.panes[0]!.label = label;
       },
     }),
   });
+
   try {
     await service.initialize(snap);
+
     const first = await service.evaluate("t1", {
       resetKind: "tab",
       forceRefresh: true,
     });
+
     assert.ok(first);
     await service.acknowledge("tab", "t1", "Fresh Task Name");
     const gated = await service.evaluate("t1");
@@ -246,6 +259,7 @@ test("concurrent evaluations keep expected writes durable and avoid stale races"
   let label = "1";
   const current = () => liveSnapshot(label);
   let sawExpected = false;
+
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
@@ -259,6 +273,7 @@ test("concurrent evaluations keep expected writes durable and avoid stale races"
       },
     }),
   });
+
   try {
     await service.initialize(current());
     await Promise.all([service.evaluate("t1"), service.evaluate("t1")]);
@@ -276,9 +291,11 @@ test("failed model calls persist attempt backoff without success fingerprint", a
   const dir = await mkdtemp(
     path.join(os.tmpdir(), "tab-smart-rename-failure-"),
   );
+
   const paths = statePaths(dir);
   const snap = liveSnapshot();
   let stopped = false;
+
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
@@ -295,6 +312,7 @@ test("failed model calls persist attempt backoff without success fingerprint", a
         contextFor(pane, { userMessages: ["Build automatic tab naming"] }),
     }),
   });
+
   try {
     await service.initialize(snap);
     const result = await service.evaluate("t1");
@@ -317,6 +335,7 @@ test("pane model failure preserves successful independent tab and pane writes", 
   const dir = await mkdtemp(
     path.join(os.tmpdir(), "tab-smart-rename-partial-failure-"),
   );
+
   const paths = statePaths(dir);
   const snap = liveSnapshot();
   snap.panes.push({
@@ -328,15 +347,18 @@ test("pane model failure preserves successful independent tab and pane writes", 
   });
   let paneFails = true;
   const renames: string[] = [];
+
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
     namer: {
       suggest: async (context) => {
         const requests = "userRequests" in context ? context.userRequests : [];
+
         if (requests[0]?.includes("review") && paneFails) {
           throw new Error("pane provider failure");
         }
+
         return requests[0]?.includes("review")
           ? { tab: "Review API Changes", reason: "review task" }
           : { tab: "Debug Auth Flow", reason: "debug task" };
@@ -349,12 +371,15 @@ test("pane model failure preserves successful independent tab and pane writes", 
           : contextFor(pane, { userMessages: ["review the api changes"] }),
       rename: async (kind, id, label) => {
         renames.push(`${kind}:${id}`);
+
         if (kind === "tab" && id === "t1") snap.tabs[0]!.label = label;
         const pane = snap.panes.find((item) => item.pane_id === id);
+
         if (kind === "pane" && pane) pane.label = label;
       },
     }),
   });
+
   try {
     await service.initialize(snap);
     const partial = await service.evaluate("t1");
@@ -392,6 +417,7 @@ test("two agent panes in one tab get independent pane labels while tab keeps one
   const dir = await mkdtemp(
     path.join(os.tmpdir(), "tab-smart-rename-pane-labels-"),
   );
+
   const paths = statePaths(dir);
   const snap = liveSnapshot();
   snap.layouts[0]!.focused_pane_id = "p1";
@@ -407,6 +433,7 @@ test("two agent panes in one tab get independent pane labels while tab keeps one
   let modelCalls = 0;
   const fullReads: string[] = [];
   const siblingReads: string[] = [];
+
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
@@ -415,31 +442,38 @@ test("two agent panes in one tab get independent pane labels while tab keeps one
         modelCalls += 1;
         const requests = "userRequests" in context ? context.userRequests : [];
         const first = requests[0] ?? "";
+
         if (first.includes("debug"))
           return { tab: "Debug Auth Flow", reason: "debug task" };
+
         if (first.includes("review"))
           return { tab: "Review API Changes", reason: "review task" };
+
         return { tab: "Shared Work", reason: "fallback" };
       },
     },
     dependencies: dependencies(() => snap, {
       focusedPaneContext: async (pane) => {
         fullReads.push(pane.pane_id);
+
         return pane.pane_id === "p1"
           ? contextFor(pane, { userMessages: ["debug the auth flow"] })
           : contextFor(pane, { userMessages: ["review the api changes"] });
       },
       siblingPaneContext: async (pane) => {
         siblingReads.push(pane.pane_id);
+
         return { ...contextFor(pane), focused: false, userMessages: [] };
       },
       rename: async (kind, id, label) => {
         if (kind === "tab" && id === "t1") snap.tabs[0]!.label = label;
         const pane = snap.panes.find((item) => item.pane_id === id);
+
         if (kind === "pane" && pane) pane.label = label;
       },
     }),
   });
+
   try {
     await service.initialize(snap);
     const result = await service.evaluate("t1", { forceRefresh: true });
@@ -447,9 +481,11 @@ test("two agent panes in one tab get independent pane labels while tab keeps one
     assert.equal(result.candidate.tab, "Debug Auth Flow");
     assert.equal(result.candidate.panes?.p1, "Debug Auth Flow");
     assert.equal(result.candidate.panes?.p2, "Review API Changes");
+
     const paneChanges = result.changes.filter(
       (change) => change.kind === "pane",
     );
+
     assert.equal(paneChanges.length, 2);
     assert.deepEqual(
       new Set(paneChanges.map((change) => change.to)),
@@ -467,8 +503,10 @@ test("manual pane ownership blocks automatic pane rename until reset", async () 
   const dir = await mkdtemp(
     path.join(os.tmpdir(), "tab-smart-rename-pane-manual-"),
   );
+
   const paths = statePaths(dir);
   const snap = liveSnapshot();
+
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
@@ -478,14 +516,17 @@ test("manual pane ownership blocks automatic pane rename until reset", async () 
         contextFor(pane, { userMessages: ["rename this pane automatically"] }),
     }),
   });
+
   try {
     await service.initialize(snap);
     await withStateTransaction(paths.state, paths.stateLock, (state) => {
       state.panes.p1 = { manual: true, observedLabel: "My Pane" };
     });
+
     const protectedRename = await service.evaluate("t1", {
       forceRefresh: true,
     });
+
     assert.ok(protectedRename);
     assert.equal(
       protectedRename.changes.find((change) => change.kind === "pane"),
@@ -497,6 +538,7 @@ test("manual pane ownership blocks automatic pane rename until reset", async () 
       targetPaneId: "p1",
       forceRefresh: true,
     });
+
     assert.ok(reset);
     assert.equal(
       reset.changes.find((change) => change.kind === "pane")?.to,
@@ -511,6 +553,7 @@ test("reset-pane preserves manual sibling panes and skips their context", async 
   const dir = await mkdtemp(
     path.join(os.tmpdir(), "tab-smart-rename-pane-target-"),
   );
+
   const paths = statePaths(dir);
   const snap = liveSnapshot("Manual Tab");
   snap.panes[0]!.label = "Protected One";
@@ -523,6 +566,7 @@ test("reset-pane preserves manual sibling panes and skips their context", async 
     cwd: "/tmp/agents",
   });
   const contextReads: string[] = [];
+
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
@@ -532,18 +576,22 @@ test("reset-pane preserves manual sibling panes and skips their context", async 
     dependencies: dependencies(() => snap, {
       focusedPaneContext: async (pane) => {
         contextReads.push(`full:${pane.pane_id}`);
+
         return contextFor(pane, { userMessages: ["rename this pane"] });
       },
       siblingPaneContext: async (pane) => {
         contextReads.push(`sibling:${pane.pane_id}`);
+
         return { ...contextFor(pane), focused: false, userMessages: [] };
       },
       rename: async (kind, id, label) => {
         const pane = snap.panes.find((item) => item.pane_id === id);
+
         if (kind === "pane" && pane) pane.label = label;
       },
     }),
   });
+
   try {
     await service.initialize(snap);
     await assert.rejects(
@@ -556,6 +604,7 @@ test("reset-pane preserves manual sibling panes and skips their context", async 
       targetPaneId: "p1",
       forceRefresh: true,
     });
+
     assert.ok(result);
     assert.deepEqual(
       result.changes.filter((change) => change.kind === "pane"),
@@ -582,14 +631,17 @@ test("pane updated event marks manual ownership and is reconciled", async () => 
   const dir = await mkdtemp(
     path.join(os.tmpdir(), "tab-smart-rename-pane-update-"),
   );
+
   const paths = statePaths(dir);
   const snap = liveSnapshot();
+
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
     namer: { suggest: async () => ({ tab: "Auto Pane Name", reason: "task" }) },
     dependencies: dependencies(() => snap),
   });
+
   try {
     await service.initialize(snap);
     snap.panes[0]!.label = "User Pane Name";
@@ -610,6 +662,7 @@ test("non-agent panes are not renamed", async () => {
   const dir = await mkdtemp(
     path.join(os.tmpdir(), "tab-smart-rename-pane-non-agent-"),
   );
+
   const paths = statePaths(dir);
   const snap = liveSnapshot();
   snap.panes.push({
@@ -618,6 +671,7 @@ test("non-agent panes are not renamed", async () => {
     workspace_id: "w1",
     cwd: "/tmp/agents",
   });
+
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
@@ -626,6 +680,7 @@ test("non-agent panes are not renamed", async () => {
     },
     dependencies: dependencies(() => snap),
   });
+
   try {
     await service.initialize(snap);
     const result = await service.evaluate("t1", { forceRefresh: true });

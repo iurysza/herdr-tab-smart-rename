@@ -44,6 +44,7 @@ test("Herdr events normalize while subscriptions avoid output spam", () => {
     },
   );
   assert.equal(normalizeHerdrEvent({ id: "response" }), null);
+
   const paneUpdated = normalizeHerdrEvent({
     event: "pane.updated",
     data: {
@@ -59,6 +60,7 @@ test("Herdr events normalize while subscriptions avoid output spam", () => {
       },
     },
   });
+
   assert.ok(paneUpdated);
   assert.deepEqual(paneLabelUpdate(paneUpdated), {
     paneId: "p1",
@@ -91,6 +93,7 @@ test("Pi session sampling weights origin, midpoint, and recent requests", async 
       "",
     ].join("\n"),
   );
+
   try {
     assert.deepEqual(
       await sampledUserMessages(session, {
@@ -123,6 +126,7 @@ test("Pi session reads stay bounded to regular files under the sessions root", a
   await mkdir(sessions, { recursive: true });
   await writeFile(session, `${"x".repeat(600_000)}\n${user("Fix socket reconnect")}\n`);
   await writeFile(outside, `${user("Do not read this")}\n`);
+
   try {
     const env = { ...process.env, HOME: root, PI_CODING_AGENT_DIR: agentDir };
     assert.deepEqual(await recentUserMessages(session, 6, env), [
@@ -142,6 +146,7 @@ async function claudeHome() {
   const projects = path.join(claudeDir, "projects", "repo");
   await mkdir(transcripts, { recursive: true });
   await mkdir(projects, { recursive: true });
+
   return {
     root,
     claudeDir,
@@ -161,6 +166,7 @@ test("Claude path reads stay inside transcripts or projects", async () => {
   const outside = path.join(fixture.root, "outside.jsonl");
   await writeFile(allowed, `${claudeUser("Fix theme config")}\n`);
   await writeFile(outside, `${claudeUser("Do not read this")}\n`);
+
   try {
     assert.deepEqual(
       await sampledUserMessages(allowed, fixture.env, [
@@ -203,6 +209,7 @@ test("Claude session ids resolve uniquely without cwd slugs", async () => {
     path.join(fixture.projects, "uuid-session.jsonl"),
     `${claudeNested("Rename from project file")}\n`,
   );
+
   try {
     assert.deepEqual(
       await paneSessionMessages(
@@ -262,6 +269,7 @@ test("duplicate Claude project matches are skipped", async () => {
     path.join(other, "dup.jsonl"),
     `${claudeUser("Second copy")}\n`,
   );
+
   try {
     assert.deepEqual(
       await paneSessionMessages(
@@ -305,6 +313,7 @@ test("Claude extraction keeps user text and drops wrappers", async () => {
       "",
     ].join("\n"),
   );
+
   try {
     assert.deepEqual(
       await paneSessionMessages(

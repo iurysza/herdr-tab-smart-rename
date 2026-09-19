@@ -15,6 +15,7 @@ async function fixture(content: string) {
   const root = await mkdtemp(path.join(os.tmpdir(), "smart-rename-keys-"));
   const config = path.join(root, "config.toml");
   await writeFile(config, content);
+
   return { root, config };
 }
 
@@ -22,6 +23,7 @@ function validRunner(checks: string[]) {
   return async (_command: string, _args: readonly string[], env: NodeJS.ProcessEnv) => {
     const file = env.HERDR_CONFIG_PATH!;
     checks.push(file);
+
     return { exitCode: 0, stdout: "valid\n", stderr: "" };
   };
 }
@@ -35,6 +37,7 @@ command = "tab-smart-rename.rename-now"
 type = "plugin_action"
 command = "tab-smart-rename.rename-all"
 `);
+
   try {
     const checks: string[] = [];
     const inspected = await inspectKeybindings(requested, { HERDR_CONFIG_PATH: config }, { run: validRunner(checks) });
@@ -50,7 +53,9 @@ test("validates each missing action independently and leaves source config byte-
 type = "plugin_action"
 command = "tab-smart-rename.rename-now"
 `;
+
   const { root, config } = await fixture(content);
+
   try {
     const checks: string[] = [];
     const inspected = await inspectKeybindings(requested, { HERDR_CONFIG_PATH: config }, { run: validRunner(checks) });
@@ -66,18 +71,23 @@ command = "tab-smart-rename.rename-now"
 
 test("names collisions and never selects another key", async () => {
   const { root, config } = await fixture("[theme]\nname = \"plain\"\n");
+
   try {
     const seen: string[] = [];
+
     const inspected = await inspectKeybindings(requested, { HERDR_CONFIG_PATH: config }, {
       run: async (_command, _args, env) => {
         const candidate = await readFile(env.HERDR_CONFIG_PATH!, "utf8");
         seen.push(candidate);
+
         if (env.HERDR_CONFIG_PATH === config) return { exitCode: 0, stdout: "valid", stderr: "" };
+
         return candidate.includes("prefix+alt+t")
           ? { exitCode: 1, stdout: "", stderr: "key is already bound" }
           : { exitCode: 0, stdout: "valid", stderr: "" };
       },
     });
+
     assert.deepEqual(inspected.results.map((item) => item.status), ["available", "colliding"]);
     assert.match(inspected.results[1]?.diagnostic || "", /key is already bound/);
     assert.ok(seen.some((value) => value.includes("prefix+t")));
@@ -94,6 +104,7 @@ test("returns uncertainty for missing, invalid, and unreadable ownership boundar
   assert.match(missing.remoteAttachNote, /attaching client/);
 
   const { root, config } = await fixture("value = [\n");
+
   try {
     const invalid = await inspectKeybindings(requested, { HERDR_CONFIG_PATH: config }, { run: validRunner([]) });
     assert.deepEqual(invalid.results.map((item) => item.status), ["uncertain", "uncertain"]);

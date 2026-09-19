@@ -1,11 +1,14 @@
 import { test as bunTest } from "bun:test";
+
 const test = process.platform === "win32" ? bunTest.skip : bunTest;
+
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 const tag = "v0.2.0";
+
 const commit = "0123456789abcdef";
 
 interface Fixture {
@@ -43,6 +46,7 @@ async function fixture(): Promise<Fixture> {
     '}));',
     'process.exit(Number(process.env.SMART_RENAME_TEST_SETUP_EXIT || "0"));',
   ].join("\n"));
+
   const plugin = {
     result: {
       plugins: [{
@@ -58,6 +62,7 @@ async function fixture(): Promise<Fixture> {
       }],
     },
   };
+
   await writeFile(expectedPlugin, JSON.stringify(plugin));
   await writeFile(herdr, `#!/bin/sh
 set -eu
@@ -84,6 +89,7 @@ esac
     source.replaceAll("__RELEASE_TAG__", tag).replaceAll("__RELEASE_COMMIT__", commit),
     { mode: 0o700 },
   );
+
   return { root, installer, herdr, pluginFile, expectedPlugin, setupLog, commandLog, temporaryRoot };
 }
 
@@ -108,11 +114,13 @@ async function run(
   env: NodeJS.ProcessEnv,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const child = Bun.spawn([...command], { env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
     child.exited,
   ]);
+
   return { exitCode, stdout, stderr };
 }
 
@@ -136,6 +144,7 @@ async function runPipedPty(
     "os.write(1, b''.join(chunks))",
     "raise SystemExit(os.waitstatus_to_exitcode(status))",
   ].join("\n");
+
   return run(["python3", "-c", python], {
     ...env,
     SMART_RENAME_TEST_INSTALLER: installer,
@@ -144,6 +153,7 @@ async function runPipedPty(
 
 test("shell installer checks syntax and needs a caller terminal before changing state", async () => {
   const value = await fixture();
+
   try {
     const syntax = await run(["sh", "-n", value.installer], environment(value));
     assert.equal(syntax.exitCode, 0, syntax.stderr);
@@ -158,6 +168,7 @@ test("shell installer checks syntax and needs a caller terminal before changing 
 
 test("shell installer supports explicit non-interactive install-only without setup", async () => {
   const value = await fixture();
+
   try {
     const result = await run(["/bin/sh", value.installer, "--install-only", "--yes"], environment(value));
     assert.equal(result.exitCode, 0, result.stderr);
@@ -173,10 +184,12 @@ test("shell installer supports explicit non-interactive install-only without set
 test("shell installer rejects declined and wrong managed releases before setup", async () => {
   for (const outcome of ["declined", "wrong"] as const) {
     const value = await fixture();
+
     try {
       const result = await runPipedPty(value.installer, environment(value, {
         SMART_RENAME_TEST_INSTALL_OUTCOME: outcome,
       }));
+
       assert.notEqual(result.exitCode, 0, `${outcome} installer unexpectedly succeeded`);
       await assert.rejects(readFile(value.setupLog));
     } finally {
@@ -187,6 +200,7 @@ test("shell installer rejects declined and wrong managed releases before setup",
 
 test("piped default installation uses the caller terminal and propagates setup state", async () => {
   const value = await fixture();
+
   try {
     const result = await runPipedPty(value.installer, environment(value));
     assert.equal(result.exitCode, 0, `${result.stdout}\n${result.stderr}`);
@@ -209,10 +223,12 @@ test("piped default installation uses the caller terminal and propagates setup s
 
 test("shell installer returns the managed setup exit code", async () => {
   const value = await fixture();
+
   try {
     const result = await runPipedPty(value.installer, environment(value, {
       SMART_RENAME_TEST_SETUP_EXIT: "23",
     }));
+
     assert.equal(result.exitCode, 23, `${result.stdout}\n${result.stderr}`);
   } finally {
     await rm(value.root, { recursive: true, force: true });

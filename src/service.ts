@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Match } from "effect";
 import {
   acknowledgeRename,
   buildModelContext,
@@ -88,11 +89,11 @@ interface RenameTarget {
 }
 
 function records(state: SmartRenameState, kind: RenameTarget["kind"]) {
-  return kind === "pane"
-    ? state.panes
-    : kind === "tab"
-      ? state.tabs
-      : state.workspaces;
+  return Match.value(kind).pipe(
+    Match.when("pane", () => state.panes),
+    Match.when("tab", () => state.tabs),
+    Match.orElse(() => state.workspaces),
+  );
 }
 
 function targetLabel(
@@ -101,11 +102,15 @@ function targetLabel(
 ): string | undefined {
   if (target.kind === "workspace")
     return snap.workspaces.find((w) => w.workspace_id === target.id)?.label;
+
   if (target.kind === "tab") {
     const label = snap.tabs.find((t) => t.tab_id === target.id)?.label;
+
     return label === undefined ? undefined : (tabProgressBase(label) ?? label);
   }
+
   const pane = snap.panes.find((p) => p.pane_id === target.id && p.agent);
+
   return pane ? (pane.label ?? "") : undefined;
 }
 
@@ -136,9 +141,11 @@ export function focusedPaneFor(
   const panes = candidates
     ? [...candidates]
     : snap.panes.filter((pane) => pane.tab_id === tab.tab_id);
+
   const layout = snap.layouts.find((item) => item.tab_id === tab.tab_id);
   const id = layout?.focused_pane_id ?? snap.focused_pane_id;
   const focused = panes.find((pane) => pane.pane_id === id);
+
   return (
     (focused?.agent ? focused : undefined) ??
     panes.find(
@@ -161,6 +168,7 @@ export function reconcileSnapshot(
       isDefaultLabel(workspace.label, workspace.number),
     );
   }
+
   for (const tab of snap.tabs) {
     const label = tabProgressBase(tab.label) ?? tab.label;
     state.tabs[tab.tab_id] = reconcileItem(
@@ -169,6 +177,7 @@ export function reconcileSnapshot(
       isDefaultLabel(label, tab.number),
     );
   }
+
   for (const pane of snap.panes) {
     state.panes[pane.pane_id] = reconcileItem(
       state.panes[pane.pane_id],
@@ -176,11 +185,13 @@ export function reconcileSnapshot(
       isDefaultLabel(pane.label),
     );
   }
+
   const liveIds = new Set([
     ...snap.workspaces.map((w) => w.workspace_id),
     ...snap.tabs.map((t) => t.tab_id),
     ...snap.panes.map((p) => p.pane_id),
   ]);
+
   for (const collection of [
     state.workspaces,
     state.tabs,
@@ -194,6 +205,7 @@ export function reconcileSnapshot(
       if (!liveIds.has(id)) delete collection[id];
     }
   }
+
   return state;
 }
 
@@ -228,12 +240,14 @@ export class AutoNameService {
     if (this.#dryRun || !this.#stateFile || !this.#stateLock) {
       return initial ?? this.#dependencies.snapshot(this.#env);
     }
+
     return withStateTransaction(
       this.#stateFile,
       this.#stateLock,
       async (state) => {
         const current = await this.#dependencies.snapshot(this.#env);
         reconcileSnapshot(state, current);
+
         return current;
       },
     );
@@ -255,6 +269,7 @@ export class AutoNameService {
       async (state) => {
         const current = await this.#dependencies.snapshot(this.#env);
         reconcileSnapshot(state, current);
+
         // Events can wait behind earlier writes. Never replay an obsolete label.
         if (targetLabel({ kind, id }, current) !== label) return;
         const collection = records(state, kind);
@@ -268,9 +283,11 @@ export class AutoNameService {
     cache: PaneContextCache,
   ): Promise<PaneContext> {
     const cached = cache.full.get(pane.pane_id);
+
     if (cached) return cached;
     const current = this.#dependencies.focusedPaneContext(pane, this.#env);
     cache.full.set(pane.pane_id, current);
+
     return current;
   }
 
@@ -279,11 +296,14 @@ export class AutoNameService {
     cache: PaneContextCache,
   ): Promise<PaneContext> {
     const full = cache.full.get(pane.pane_id);
+
     if (full) return full;
     const cached = cache.sibling.get(pane.pane_id);
+
     if (cached) return cached;
     const current = this.#dependencies.siblingPaneContext(pane, this.#env);
     cache.sibling.set(pane.pane_id, current);
+
     return current;
   }
 
@@ -300,13 +320,17 @@ export class AutoNameService {
   }> {
     const focusedPane = focusedPaneFor(tab, snap, panes);
     const paneContexts: PaneContext[] = [];
+
     for (const pane of panes) {
       const focused = pane.pane_id === focusedPane?.pane_id;
+
       const context = focused
         ? await this.fullPaneContext(pane, cache)
         : await this.siblingPaneContext(pane, cache);
+
       paneContexts.push({ ...context, focused });
     }
+
     return {
       focusedPane,
       paneContexts,
@@ -324,13 +348,17 @@ export class AutoNameService {
     context: ReturnType<typeof buildModelContext>;
   }> {
     const paneContexts: PaneContext[] = [];
+
     for (const pane of panes) {
       const focused = pane.pane_id === targetPane.pane_id;
+
       const context = focused
         ? await this.fullPaneContext(pane, cache)
         : await this.siblingPaneContext(pane, cache);
+
       paneContexts.push({ ...context, focused });
     }
+
     return {
       paneContexts,
       context: buildModelContext({ workspaceName, paneContexts }),
@@ -344,14 +372,17 @@ export class AutoNameService {
     const stablePane = snap.panes.find(
       (pane) => pane.workspace_id === workspace.workspace_id,
     );
+
     const needsFallback =
       !workspace.worktree?.repo_name &&
       isDefaultLabel(workspace.label, workspace.number);
+
     const root = needsFallback
       ? await this.#dependencies.gitRoot(
           stablePane?.foreground_cwd ?? stablePane?.cwd,
         )
       : null;
+
     return {
       stablePane,
       workspaceName: workspaceCandidate(workspace, stablePane, root),
@@ -364,10 +395,13 @@ export class AutoNameService {
   ): Promise<RenameResult[]> {
     const snap = initial ?? (await this.#dependencies.snapshot(this.#env));
     const results: RenameResult[] = [];
+
     for (const tab of snap.tabs) {
       const result = await this.evaluate(tab.tab_id, options);
+
       if (result) results.push(result);
     }
+
     return results;
   }
 
@@ -378,6 +412,7 @@ export class AutoNameService {
     // Only short state/Herdr operations run under the shared lock. Context
     // collection and model latency must not block unrelated tabs or ownership.
     const localState = await loadState(this.#dryRun ? this.#stateFile : null);
+
     const transaction = async <T>(
       operation: (
         state: SmartRenameState,
@@ -393,9 +428,12 @@ export class AutoNameService {
           this.#dryRun && options.snapshot
             ? options.snapshot
             : await this.#dependencies.snapshot(this.#env);
+
         reconcileSnapshot(state, snap);
+
         return operation(state, snap, persist);
       };
+
       return !this.#dryRun && this.#stateFile && this.#stateLock
         ? withStateTransaction(this.#stateFile, this.#stateLock, run)
         : run(localState, async () => {});
@@ -403,19 +441,25 @@ export class AutoNameService {
 
     const initial = await transaction((state, snap) => {
       const tab = snap.tabs.find((t) => t.tab_id === tabId);
+
       const workspace = snap.workspaces.find(
         (w) => w.workspace_id === tab?.workspace_id,
       );
+
       if (!tab || !workspace) return null;
       const targets: RenameTarget[] = [];
       const scope = options.resetKind;
+
       if (!scope || scope === "workspace")
         targets.push({ kind: "workspace", id: workspace.workspace_id });
+
       if (!scope || scope === "tab") targets.push({ kind: "tab", id: tabId });
+
       if (scope === "pane") {
         const pane = snap.panes.find(
           (p) => p.pane_id === options.targetPaneId && p.tab_id === tabId,
         );
+
         if (!pane)
           throw new Error("reset-pane requires a pane in the target tab");
         targets.push({ kind: "pane", id: pane.pane_id });
@@ -426,6 +470,7 @@ export class AutoNameService {
             .map((p): RenameTarget => ({ kind: "pane", id: p.pane_id })),
         );
       }
+
       if (scope) {
         for (const target of targets) {
           const collection = records(state, target.kind);
@@ -433,10 +478,13 @@ export class AutoNameService {
           state.evaluations[target.id] = randomUUID();
         }
       }
+
       return { tab, workspace, targets, snap, state: structuredClone(state) };
     });
+
     if (!initial) return null;
     const { tab, workspace, targets, snap } = initial;
+
     const result: RenameResult & { outcomes: RenameOutcome[] } = {
       dryRun: this.#dryRun,
       workspace: workspace.workspace_id,
@@ -452,6 +500,7 @@ export class AutoNameService {
       changes: [],
       outcomes: [],
     };
+
     const cache: PaneContextCache = { full: new Map(), sibling: new Map() };
     const suggestions = new Map<string, Promise<NameSuggestion>>();
     // Label ownership controls writes, not whether a pane supplies tab evidence.
@@ -464,23 +513,28 @@ export class AutoNameService {
         status: "skipped",
         reason: "no meaningful task",
       };
+
       result.outcomes.push(outcome);
       let ticket: string | undefined;
+
       try {
         if (records(initial.state, target.kind)[target.id]?.manual) {
           outcome.reason = `manual ${target.kind} ownership`;
           continue;
         }
+
         if (targetLabel(target, snap) === undefined) {
           outcome.reason = "target closed or no longer an agent";
           continue;
         }
+
         workspaceName ??= (await this.workspaceDetails(workspace, snap))
           .workspaceName;
         let context: NamingContext | undefined;
         let focused: PaneContext | undefined;
         let sourcePanes: HerdrPane[] = [];
         let agent = false;
+
         if (target.kind === "tab") {
           const details = await this.contextFor(
             tab,
@@ -489,12 +543,14 @@ export class AutoNameService {
             panes,
             cache,
           );
+
           context = details.context;
           focused = details.paneContexts.find((p) => p.focused);
           agent = Boolean(details.focusedPane?.agent);
           sourcePanes = details.focusedPane ? [details.focusedPane] : [];
         } else if (target.kind === "pane") {
           const pane = panes.find((p) => p.pane_id === target.id)!;
+
           // A pane's task does not depend on naming or inspecting its siblings.
           const details = await this.paneContextFor(
             pane,
@@ -502,13 +558,16 @@ export class AutoNameService {
             workspaceName,
             cache,
           );
+
           context = details.context;
           focused = details.paneContexts[0];
           agent = true;
           sourcePanes = [pane];
         }
+
         if (context && "focusedPane" in context && target.kind === "tab")
           sourcePanes = panes;
+
         const sourcesStillLive = (latest: HerdrSnapshot) =>
           sourcePanes.every((p) =>
             latest.panes.some(
@@ -517,17 +576,21 @@ export class AutoNameService {
                 paneIdentity(next) === paneIdentity(p),
             ),
           );
+
         const hasUserTask = Boolean(focused?.userMessages.length);
+
         const heuristic =
           !hasUserTask && focused
             ? heuristicTitle({ focusedPane: focused })
             : null;
+
         let label =
           target.kind === "workspace"
             ? workspaceName
             : !options.forceModel
               ? heuristic
               : null;
+
         let modelSuccess = false;
         const needsModel = target.kind !== "workspace" && !label;
 
@@ -537,14 +600,17 @@ export class AutoNameService {
             !sourcesStillLive(latest)
           )
             return "target or source changed";
+
           if (records(state, target.kind)[target.id]?.manual)
             return `manual ${target.kind} ownership`;
+
           if (
             state.evaluations[target.id] !==
             initial.state.evaluations[target.id]
           ) {
             return "superseded by a newer evaluation";
           }
+
           if (needsModel && context) {
             if (
               !hasUserTask &&
@@ -555,14 +621,18 @@ export class AutoNameService {
             )
               return "waiting for stable command context";
             const gate = shouldCallModel(state, target.id, context);
+
             if (!gate.allowed && !options.forceModel && !options.forceRefresh)
               return "unchanged or rate-limited context";
             markModelAttempt(state, target.id);
           }
+
           ticket = randomUUID();
           state.evaluations[target.id] = ticket;
+
           return null;
         });
+
         if (claim) {
           outcome.reason = claim;
           continue;
@@ -571,11 +641,13 @@ export class AutoNameService {
         if (needsModel && context) {
           const key = fingerprint(context);
           let pending = suggestions.get(key);
+
           if (!pending) {
             const stop =
               target.kind === "tab"
                 ? await this.#modelActivity?.(tab)
                 : undefined;
+
             pending = (async () => {
               try {
                 return await this.#namer.suggest(context);
@@ -586,6 +658,7 @@ export class AutoNameService {
             suggestions.set(key, pending);
             result.usedModel = true;
           }
+
           const suggestion = await pending;
           label = suggestion.tab;
           outcome.reason = suggestion.reason;
@@ -604,32 +677,43 @@ export class AutoNameService {
             tabManual: state.tabs[tabId]?.manual ?? false,
           };
           const current = targetLabel(target, latest);
+
           if (current === undefined || !sourcesStillLive(latest)) {
             outcome.reason = "target or source changed";
+
             return;
           }
+
           const collection = records(state, target.kind);
+
           if (collection[target.id]?.manual) {
             outcome.reason = `manual ${target.kind} ownership`;
+
             return;
           }
+
           if (state.evaluations[target.id] !== ticket) {
             outcome.reason = "superseded by a newer evaluation";
+
             return;
           }
+
           if (target.kind === "workspace") result.candidate.workspace = label;
           else if (target.kind === "tab") result.candidate.tab = label;
           else result.candidate.panes![target.id] = label;
+
           if (label && label !== current) {
             const change: RenameChange = {
               ...target,
               from: current,
               to: label,
             };
+
             if (!this.#dryRun) {
               const previous = collection[target.id];
               collection[target.id] = prepareRename(previous, label);
               await persist();
+
               try {
                 await this.#dependencies.rename(
                   target.kind,
@@ -644,12 +728,14 @@ export class AutoNameService {
                 throw error;
               }
             }
+
             result.changes.push(change);
             outcome.status = "renamed";
           } else if (label) {
             outcome.status = "unchanged";
             outcome.reason = `Already named ${label}`;
           }
+
           if (modelSuccess && context)
             markModelSuccess(state, target.id, context);
         });
@@ -660,10 +746,13 @@ export class AutoNameService {
         );
       }
     }
+
     const primary =
       result.outcomes.find((o) => o.kind === (options.resetKind ?? "tab")) ??
       result.outcomes[0];
+
     result.reason = primary?.reason ?? result.reason;
+
     return result;
   }
 }
@@ -686,6 +775,7 @@ export function createService({
   dependencies = {},
 }: CompositionOptions = {}): AutoNameService {
   const paths = stateDir ? statePaths(stateDir) : null;
+
   return new AutoNameService({
     stateFile: paths?.state ?? null,
     stateLock: paths?.stateLock ?? null,

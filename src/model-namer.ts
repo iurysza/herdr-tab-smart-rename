@@ -20,12 +20,16 @@ export class ModelSourceNamer implements Namer {
 
   async suggest(context: NamingContext): Promise<NameSuggestion> {
     const selection = await loadModelSelection(this.env.HERDR_PLUGIN_CONFIG_DIR, this.env);
+
     if (selection.source === "direct") {
       await this.close();
+
       return this.#direct.suggest(context);
     }
+
     const source = await this.sourceFor(selection);
     const system = await loadNamingPrompt(this.env);
+
     try {
       return parseSuggestion(await source.complete({
         selection,
@@ -51,10 +55,12 @@ export class ModelSourceNamer implements Namer {
 
   private async sourceFor(selection: ModelSelection): Promise<ModelSource> {
     const key = JSON.stringify(selection);
+
     if (this.#active?.key === key) return this.#active.source;
     await this.close();
     const source = await this.sourceFactory(selection, this.env);
     this.#active = { key, source };
+
     return source;
   }
 }

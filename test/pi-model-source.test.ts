@@ -50,16 +50,19 @@ test("Pi exposes only authenticated providers and their staged model profiles", 
 
 test("Pi completion uses Pi-owned model and thinking configuration", async () => {
   const calls: Array<{ model: string; context: unknown; options: unknown }> = [];
+
   const adapter = source({
     ...runtimeWithModel(),
     completeSimple: async (selected, context, options) => {
       calls.push({ model: selected.id, context, options });
+
       return {
         content: [{ type: "text", text: '{"tab":"Repair Socket Reconnect","reason":"task"}' }],
         stopReason: "stop",
       };
     },
   });
+
   const text = await adapter.complete({
     selection: {
       version: 1,
@@ -75,6 +78,7 @@ test("Pi completion uses Pi-owned model and thinking configuration", async () =>
     maxRetries: 1,
     abortSignal: AbortSignal.timeout(1_000),
   });
+
   assert.match(text, /Repair Socket Reconnect/);
   assert.deepEqual(calls[0]?.options, {
     reasoning: "high",
@@ -102,6 +106,7 @@ test("Pi failures are fail-closed and secret-free", async () => {
       throw new Error("Bearer private-token");
     },
   });
+
   await assert.rejects(
     adapter.complete({
       selection: {
@@ -121,6 +126,7 @@ test("Pi failures are fail-closed and secret-free", async () => {
       assert.ok(error instanceof ModelSourceError);
       assert.match(error.message, /not connected/);
       assert.doesNotMatch(error.message, /private-token/);
+
       return true;
     },
   );

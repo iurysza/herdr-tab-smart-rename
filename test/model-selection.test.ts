@@ -25,6 +25,7 @@ async function tempDirectory(): Promise<string> {
 
 test("model selection rejects invalid files and process values override saved data", async () => {
   const directory = await tempDirectory();
+
   try {
     await writeFile(modelSelectionPath(directory), '{"version":1,"source":"bad"}');
     await assert.rejects(loadModelSelection(directory), /model-selection\.json is invalid/);
@@ -53,6 +54,7 @@ test("model selection rejects invalid files and process values override saved da
 test("missing selection upgrades to Direct and private writes are atomic", async () => {
   const root = await tempDirectory();
   const directory = path.join(root, "config");
+
   try {
     assert.deepEqual(await loadModelSelection(directory), {
       version: 1,
@@ -63,10 +65,12 @@ test("missing selection upgrades to Direct and private writes are atomic", async
 
     await saveModelSelection(directory, selection);
     const file = modelSelectionPath(directory);
+
     if (process.platform !== "win32") {
       assert.equal((await stat(directory)).mode & 0o777, 0o700);
       assert.equal((await stat(file)).mode & 0o777, 0o600);
     }
+
     assert.deepEqual(JSON.parse(await readFile(file, "utf8")), selection);
 
     await assert.rejects(
@@ -93,11 +97,13 @@ test("missing selection upgrades to Direct and private writes are atomic", async
 
 test("direct setup resolves the Herdr-owned config directory when needed", async () => {
   const directory = await tempDirectory();
+
   try {
     assert.equal(
       await resolvePluginConfigDirectory({}, async (command, args) => {
         assert.equal(command, "herdr");
         assert.deepEqual(args, ["plugin", "config-dir", "tab-smart-rename"]);
+
         return { stdout: `${directory}\n`, exitCode: 0 };
       }),
       directory,

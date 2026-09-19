@@ -6,17 +6,20 @@ import path from "node:path";
 
 async function command(args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const child = Bun.spawn([process.execPath, ...args], { stdout: "pipe", stderr: "pipe" });
+
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
     child.exited,
   ]);
+
   return { exitCode, stdout, stderr };
 }
 
 test("release renders a tag-bound shell installer and validates version agreement", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "smart-rename-release-assets-"));
   const destination = path.join(root, "install.sh");
+
   try {
     const commit = "5e6026c880e7a37dc580d269fdd8327d8007f77b";
     const rendered = await command(["scripts/render-installer.ts", "v0.2.0", commit, destination]);

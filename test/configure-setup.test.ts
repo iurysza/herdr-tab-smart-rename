@@ -10,6 +10,7 @@ for (const apiKey of ["fixture-key", "fixture#fragment", "fixture with spaces", 
   test(`Direct setup preserves an opaque key ${JSON.stringify(apiKey)}`, async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "smart-rename-config-"));
     const env = { HERDR_PLUGIN_CONFIG_DIR: root };
+
     try {
       await saveDirectProviderConfig({ provider: "openai", baseURL: "https://api.openai.com/v1", model: "gpt-5.6-luna", apiKey, timeoutMs: 45000 }, env);
       const config = await loadProviderConfig(env);

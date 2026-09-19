@@ -9,9 +9,11 @@ function fixture(
   const calls: Array<{ type: string; value?: unknown; options?: unknown }> = [];
   let closed = 0;
   let signalPromptStarted: (() => void) | undefined;
+
   const promptStarted = new Promise<void>((resolve) => {
     signalPromptStarted = resolve;
   });
+
   async function pause(stage: typeof hangStage, signal?: AbortSignal): Promise<void> {
     if (!hangStage || stage !== hangStage) return;
     signalPromptStarted?.();
@@ -21,6 +23,7 @@ function fixture(
       signal.addEventListener("abort", () => reject(signal.reason), { once: true });
     });
   }
+
   const source = new OpenCodeModelSource(
     async () => ({
       server: {
@@ -32,6 +35,7 @@ function fixture(
         provider: {
           list: async (_input, options) => {
             await pause("catalog", options?.signal);
+
             return { data: {
               connected: ["openai"],
               all: [
@@ -64,6 +68,7 @@ function fixture(
           ids: async (value, options) => {
             await pause("tools", options?.signal);
             calls.push({ type: "tool-ids", value });
+
             return { data: ["bash", "read", "mcp_lookup"] };
           },
         },
@@ -71,17 +76,21 @@ function fixture(
           create: async (value, options) => {
             await pause("create", options?.signal);
             calls.push({ type: "create", value });
+
             return { data: { id: "temporary" } };
           },
           prompt: async (value, options) => {
             calls.push({ type: "prompt", value, options });
+
             if (failPrompt) throw new Error("network failed");
+
             if (hangPrompt) {
               signalPromptStarted?.();
               await new Promise<void>((_resolve, reject) => {
                 options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true });
               });
             }
+
             return {
               data: {
                 parts: [
@@ -100,6 +109,7 @@ function fixture(
     }),
     "/project",
   );
+
   return { source, calls, closed: () => closed, promptStarted };
 }
 
@@ -126,6 +136,7 @@ test("OpenCode v2 exposes only connected providers and supported variants", asyn
 test("OpenCode disables enumerated tools, denies execution, and deletes its session", async () => {
   const { source, calls, closed } = fixture();
   const abort = AbortSignal.timeout(1_000);
+
   const text = await source.complete({
     selection,
     context: { project: "Plugin", userRequests: ["Fix reconnect"] },
@@ -135,6 +146,7 @@ test("OpenCode disables enumerated tools, denies execution, and deletes its sess
     maxRetries: 1,
     abortSignal: abort,
   });
+
   assert.match(text, /Repair Socket Reconnect/);
   assert.deepEqual(calls, [
     {
@@ -173,6 +185,7 @@ test("OpenCode disables enumerated tools, denies execution, and deletes its sess
 test("OpenCode sends the caller abort signal to the SDK and deletes a hung temporary session", async () => {
   const { source, calls, promptStarted } = fixture({ hangPrompt: true });
   const abort = new AbortController();
+
   const completion = source.complete({
     selection,
     context: { project: "Plugin", userRequests: ["Fix reconnect"] },
@@ -182,6 +195,7 @@ test("OpenCode sends the caller abort signal to the SDK and deletes a hung tempo
     maxRetries: 1,
     abortSignal: abort.signal,
   });
+
   await promptStarted;
   abort.abort(new Error("test cancellation"));
   await assert.rejects(completion, ModelSourceError);
@@ -206,6 +220,7 @@ test("OpenCode deletes temporary sessions when a request fails", async () => {
     (error: unknown) => {
       assert.ok(error instanceof ModelSourceError);
       assert.match(error.message, /OpenCode request failed/);
+
       return true;
     },
   );

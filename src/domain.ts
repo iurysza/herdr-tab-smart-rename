@@ -98,7 +98,9 @@ export interface RenameResult {
 }
 
 export const MAX_TAB_LENGTH = 30;
+
 export const MAX_CONTEXT_CHARS = 4_500;
+
 export const MODEL_RATE_MS = 10 * 60 * 1_000;
 
 export function emptyState(): SmartRenameState {
@@ -116,6 +118,7 @@ export function emptyState(): SmartRenameState {
 
 export function isDefaultLabel(label: unknown, number?: unknown): boolean {
   const value = String(label ?? "").trim();
+
   return !value || /^\d+$/.test(value) || value === String(number ?? "");
 }
 
@@ -126,6 +129,7 @@ export function reconcileItem(
 ): OwnershipRecord {
   const next = { ...record };
   const previousObserved = next.observedLabel;
+
   if (next.expectedLabel) {
     if (currentLabel === next.expectedLabel) {
       next.autoLabel = currentLabel;
@@ -146,7 +150,9 @@ export function reconcileItem(
   } else if (!record) {
     next.manual = !eligible;
   }
+
   next.observedLabel = currentLabel;
+
   return next;
 }
 
@@ -155,12 +161,15 @@ export function acknowledgeRename(
   label: string,
 ): OwnershipRecord {
   if (!record) return reconcileItem(undefined, label, isDefaultLabel(label));
+
   // pane.updated contains the label even when only status or metadata changed.
   // An older unchanged event must not consume a pending automatic write.
   if (record.observedLabel === label && record.expectedLabel !== label) {
     return { ...record };
   }
+
   const next = { ...record };
+
   if (
     next.expectedLabel === label ||
     (!next.manual && next.autoLabel === label)
@@ -172,7 +181,9 @@ export function acknowledgeRename(
     delete next.expectedLabel;
     next.manual = true;
   }
+
   next.observedLabel = label;
+
   return next;
 }
 
@@ -189,11 +200,13 @@ export function resetOwnership(
   const next = { ...record, manual: false };
   delete next.autoLabel;
   delete next.expectedLabel;
+
   return next;
 }
 
 export function titleCase(input: unknown): string {
   const acronyms = new Set(["api", "cli", "ui", "pr", "var", "rpc", "mvp"]);
+
   return String(input ?? "")
     .replace(/[-_]+/g, " ")
     .split(/\s+/)
@@ -209,17 +222,21 @@ export function titleCase(input: unknown): string {
 export function validateTabLabel(label: unknown): label is string {
   if (/[\r\n]/.test(String(label ?? ""))) return false;
   const value = sanitizeText(label);
+
   if (!value || value.length > MAX_TAB_LENGTH) return false;
 
   if (/\p{Script=Han}/u.test(value)) {
     if (value.length < 2) return false;
+
     return /^[\p{Script=Han}A-Za-z0-9][\p{Script=Han}A-Za-z0-9\s+.#/'-_&·]*[\p{Script=Han}A-Za-z0-9+]$/u.test(
       value,
     );
   }
 
   const words = value.split(/\s+/);
+
   if (words.length < 2 || words.length > 4) return false;
+
   const connectors: Record<string, true> = {
     a: true,
     an: true,
@@ -231,6 +248,7 @@ export function validateTabLabel(label: unknown): label is string {
     to: true,
     with: true,
   };
+
   return words.every(
     (word, index) =>
       /^[A-Z0-9][A-Za-z0-9+.#/'-]*$/.test(word) ||
@@ -255,14 +273,17 @@ export function workspaceCandidate(
   gitRoot?: string | null,
 ): string {
   const current = String(workspace.label ?? "").trim();
+
   const stableCurrent =
     current && !isDefaultLabel(current, workspace.number) ? current : null;
+
   const identity =
     workspace.worktree?.repo_name ||
     stableCurrent ||
     (gitRoot && path.basename(gitRoot)) ||
     path.basename(stablePane?.foreground_cwd || stablePane?.cwd || "") ||
     current;
+
   return titleCase(identity);
 }
 
@@ -275,19 +296,23 @@ export function heuristicTitle(context: {
   const process = context.focusedPane?.process;
   const command = (process?.command || process?.name || "").trim();
   const words = command.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+
   const executable = path.posix
     .basename(
       (words[0] ?? "").replace(/^['"]|['"]$/g, "").replaceAll("\\", "/"),
     )
     .replace(/\.exe$/i, "")
     .toLowerCase();
+
   const args = words.slice(1);
+
   if (
     ["vitest", "jest", "pytest", "rspec"].includes(executable) ||
     (["cargo", "go", "bun"].includes(executable) && args[0] === "test") ||
     (executable === "node" && args[0] === "--test")
   )
     return "Run Tests";
+
   if (
     (["next", "astro"].includes(executable) &&
       ["dev", "start"].includes(args[0] ?? "")) ||
@@ -299,12 +324,15 @@ export function heuristicTitle(context: {
       (args[0] === "dev" || (args[0] === "run" && args[1] === "dev")))
   )
     return "Dev Server";
+
   if (
     ["tail", "journalctl"].includes(executable) ||
     (executable === "docker" && args[0] === "logs")
   )
     return "View Logs";
+
   if (["ssh", "mosh"].includes(executable)) return "Remote Shell";
+
   return null;
 }
 
@@ -313,6 +341,7 @@ function boundedProcess(
   commandLimit = 400,
 ): ProcessInfo | null {
   if (!process) return null;
+
   return {
     name: boundedText(process.name, 80),
     command: boundedText(process.command, commandLimit),
@@ -328,11 +357,14 @@ export function buildModelContext({
   paneContexts: PaneContext[];
 }): NamingContext {
   const focused = paneContexts.find((pane) => pane.focused) ?? paneContexts[0];
+
   const requests = (focused?.userMessages ?? [])
     .map((text) => boundedText(text, 700))
     .filter(Boolean)
     .slice(-6);
+
   const timeline = focused?.sessionMessages;
+
   const hasTimeline = ["origin", "middle", "recent"].some(
     (section) => timeline?.[section as keyof SessionTimeline]?.length,
   );
@@ -404,6 +436,7 @@ export function buildModelContext({
   if (JSON.stringify(context).length > MAX_CONTEXT_CHARS) {
     throw new Error("model context exceeded hard limit");
   }
+
   return context;
 }
 
@@ -417,8 +450,10 @@ export function observeStableContext(
   context: NamingContext,
 ): boolean {
   const mark = fingerprint(context);
+
   if (state.pendingFingerprints[tabId] === mark) return true;
   state.pendingFingerprints[tabId] = mark;
+
   return false;
 }
 
@@ -429,6 +464,7 @@ export function shouldCallModel(
   now = Date.now(),
 ): { allowed: boolean; fingerprint: string } {
   const mark = fingerprint(context);
+
   return {
     allowed:
       state.fingerprints[tabId] !== mark &&

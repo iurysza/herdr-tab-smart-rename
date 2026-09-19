@@ -1,6 +1,7 @@
 import type { NamingContext } from "./domain.ts";
 
 export const MODEL_SOURCE_IDS = ["direct", "pi", "opencode"] as const;
+
 export type ModelSourceId = (typeof MODEL_SOURCE_IDS)[number];
 
 export interface ProviderChoice {

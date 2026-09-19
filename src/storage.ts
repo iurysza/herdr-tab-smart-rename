@@ -59,6 +59,7 @@ export function workerOwnership(
   targetSocket: string | undefined,
 ): WorkerOwnership {
   if (!info.socket || !targetSocket) return "legacy-unknown";
+
   return info.socket === targetSocket ? "same-target" : "other-target";
 }
 
@@ -76,8 +77,10 @@ export async function markWorkerReady(
 ): Promise<boolean> {
   try {
     const current = WorkerInfoSchema.parse(JSON.parse(await readFile(pidFile, "utf8")));
+
     if (current.pid !== pid || current.socket !== socket) return false;
     const temporary = `${pidFile}.${process.pid}.${randomUUID()}.ready.tmp`;
+
     try {
       await writeFile(
         temporary,
@@ -87,6 +90,7 @@ export async function markWorkerReady(
       await chmod(temporary, 0o600);
       await rename(temporary, pidFile);
       await chmod(pidFile, 0o600);
+
       return true;
     } catch (error) {
       await rm(temporary, { force: true }).catch(() => {});
@@ -125,8 +129,10 @@ export async function loadState(
   file: string | null | undefined,
 ): Promise<SmartRenameState> {
   if (!file) return emptyState();
+
   try {
     const value: unknown = JSON.parse(await readFile(file, "utf8"));
+
     return StateSchema.parse({ ...emptyState(), ...asRecord(value) });
   } catch (error) {
     if (errorCode(error) === "ENOENT") return emptyState();
@@ -157,11 +163,13 @@ export async function withStateTransaction<T>(
   ) => Promise<T> | T,
 ): Promise<T> {
   const release = await acquireLock(lockFile);
+
   try {
     const state = await loadState(stateFile);
     const persist = () => saveState(stateFile, state);
     const result = await operation(state, persist);
     await persist();
+
     return result;
   } finally {
     await release();
@@ -170,6 +178,7 @@ export async function withStateTransaction<T>(
 
 function asRecord(value: unknown): Record<string, unknown> {
   const parsed = UnknownRecordSchema.safeParse(value);
+
   return parsed.success ? parsed.data : {};
 }
 
@@ -184,8 +193,10 @@ export function pidAlive(
   signal: typeof process.kill = process.kill,
 ): boolean {
   if (!Number.isInteger(pid) || pid <= 1) return false;
+
   try {
     signal(pid, 0);
+
     return true;
   } catch {
     return false;
@@ -204,22 +215,29 @@ async function commandForPid(pid: number): Promise<string> {
       ],
       { stdout: "pipe", stderr: "ignore", windowsHide: true },
     );
+
     const [command, exitCode] = await Promise.all([
       new Response(child.stdout).text(),
       child.exited,
     ]);
+
     if (exitCode !== 0) throw new Error(`PowerShell exited ${exitCode}`);
+
     return command.trim();
   }
+
   const psProcess = Bun.spawn(["ps", "-p", String(pid), "-o", "command="], {
     stdout: "pipe",
     stderr: "ignore",
   });
+
   const [command, exitCode] = await Promise.all([
     new Response(psProcess.stdout).text(),
     psProcess.exited,
   ]);
+
   if (exitCode !== 0) throw new Error(`ps exited ${exitCode}`);
+
   return command.trim();
 }
 
@@ -234,6 +252,7 @@ export async function removeOwnedWorkerPid(
 ): Promise<void> {
   try {
     const info = WorkerInfoSchema.parse(JSON.parse(await readFile(pidFile, "utf8")));
+
     if (info.pid === pid) await rm(pidFile, { force: true });
   } catch {
     // The owner may already have removed a stale PID file.
@@ -246,6 +265,7 @@ export async function workerInfo(
   dependencies: WorkerDependencies = {},
 ): Promise<WorkerInfo | null> {
   let info: WorkerInfo;
+
   try {
     info = WorkerInfoSchema.parse(JSON.parse(await readFile(pidFile, "utf8")));
   } catch {
@@ -254,33 +274,43 @@ export async function workerInfo(
 
   const isAlive = dependencies.isAlive ?? pidAlive;
   const getCommand = dependencies.commandForPid ?? commandForPid;
+
   if (!isAlive(info.pid) || info.script !== expectedScript) {
     await rm(pidFile, { force: true });
+
     return null;
   }
+
   try {
     const command = await getCommand(info.pid);
+
     if (!command.includes(expectedScript)) {
       await rm(pidFile, { force: true });
+
       return null;
     }
   } catch {
     await rm(pidFile, { force: true });
+
     return null;
   }
+
   return info;
 }
 
 async function staleLock(lockFile: string, staleMs: number): Promise<boolean> {
   let age = Infinity;
+
   try {
     age = Date.now() - (await stat(lockFile)).mtimeMs;
   } catch (error) {
     if (errorCode(error) === "ENOENT") return false;
     throw error;
   }
+
   try {
     const owner = LockOwnerSchema.parse(JSON.parse(await readFile(lockFile, "utf8")));
+
     return age >= staleMs || !pidAlive(owner.pid);
   } catch {
     return age >= staleMs;
@@ -299,6 +329,7 @@ export async function acquireLock(
 ): Promise<() => Promise<void>> {
   const deadline = Date.now() + timeoutMs;
   const nonce = randomUUID();
+
   while (true) {
     try {
       const handle = await open(lockFile, "wx", 0o600);
@@ -307,11 +338,13 @@ export async function acquireLock(
       );
       await handle.close();
       await chmod(lockFile, 0o600);
+
       return async () => {
         try {
           const owner = LockOwnerSchema.parse(
             JSON.parse(await readFile(lockFile, "utf8")),
           );
+
           if (owner.nonce === nonce) await rm(lockFile, { force: true });
         } catch {
           // A stale or replaced lock is not ours to remove.
@@ -319,13 +352,16 @@ export async function acquireLock(
       };
     } catch (error) {
       if (errorCode(error) !== "EEXIST") throw error;
+
       if (await staleLock(lockFile, staleMs)) {
         await rm(lockFile, { force: true });
         continue;
       }
+
       if (Date.now() >= deadline) {
         throw new Error(`timed out waiting for lock: ${lockFile}`);
       }
+
       await Bun.sleep(retryMs);
     }
   }

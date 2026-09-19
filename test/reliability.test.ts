@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Match } from "effect";
 import {
   acknowledgeRename,
   reconcileItem,
@@ -14,9 +15,11 @@ import { loadState, statePaths } from "../src/storage.ts";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
+
   const promise = new Promise<T>((done) => {
     resolve = done;
   });
+
   return { promise, resolve };
 }
 
@@ -24,7 +27,9 @@ async function fixture() {
   const dir = await mkdtemp(
     path.join(os.tmpdir(), "smart-rename-reliability-"),
   );
+
   const paths = statePaths(dir);
+
   const snap: HerdrSnapshot = {
     focused_tab_id: "t1",
     focused_pane_id: "p1",
@@ -36,12 +41,15 @@ async function fixture() {
     ],
     layouts: [{ tab_id: "t1", focused_pane_id: "p1" }],
   };
+
   const writes: string[] = [];
   let beforeContext = async () => {};
+
   let suggest = async (_task: string): Promise<NameSuggestion> => ({
     tab: "Repair Task Naming",
     reason: "current task",
   });
+
   const service = new AutoNameService({
     stateFile: paths.state,
     stateLock: paths.stateLock,
@@ -55,6 +63,7 @@ async function fixture() {
       snapshot: async () => structuredClone(snap),
       focusedPaneContext: async (pane) => {
         await beforeContext();
+
         return {
           focused: true,
           label: pane.label ?? "",
@@ -72,17 +81,19 @@ async function fixture() {
       }),
       rename: async (kind, id, label) => {
         writes.push(`${kind}:${id}`);
-        const item =
-          kind === "tab"
-            ? snap.tabs.find((t) => t.tab_id === id)
-            : kind === "pane"
-              ? snap.panes.find((p) => p.pane_id === id)
-              : snap.workspaces.find((w) => w.workspace_id === id);
+
+        const item = Match.value(kind).pipe(
+          Match.when("tab", () => snap.tabs.find((t) => t.tab_id === id)),
+          Match.when("pane", () => snap.panes.find((p) => p.pane_id === id)),
+          Match.orElse(() => snap.workspaces.find((w) => w.workspace_id === id)),
+        );
+
         if (!item) throw new Error("target closed");
         item.label = label;
       },
     },
   });
+
   return {
     snap,
     paths,
@@ -108,14 +119,17 @@ test("unchanged pane updates do not acquire manual ownership or consume an expec
 
 test("explicit tab rename uses manual pane context without renaming any pane", async () => {
   const f = await fixture();
+
   try {
     f.snap.panes[0]!.label = "My Pane";
     f.snap.panes.splice(1);
     await f.service.initialize();
+
     const result = await f.service.evaluate("t1", {
       resetKind: "tab",
       forceRefresh: true,
     });
+
     assert.deepEqual(f.writes, ["tab:t1"]);
     assert.equal(result?.usedModel, true);
     assert.equal(f.snap.panes[0]!.label, "My Pane");
@@ -127,6 +141,7 @@ test("explicit tab rename uses manual pane context without renaming any pane", a
 
 test("reset-pane changes only the target even when siblings and tab are automatic", async () => {
   const f = await fixture();
+
   try {
     await f.service.initialize();
     await f.service.evaluate("t1", {
@@ -142,9 +157,11 @@ test("reset-pane changes only the target even when siblings and tab are automati
 
 test("one failed pane cannot block a valid tab or another pane", async () => {
   const f = await fixture();
+
   try {
     f.setSuggest(async (task) => {
       if (task === "p2") throw new Error("provider unavailable");
+
       return { tab: "Repair Task Naming", reason: "task" };
     });
     await f.service.initialize();
@@ -160,10 +177,12 @@ test("one failed pane cannot block a valid tab or another pane", async () => {
 
 test("closing a source pane during inference discards its tab and pane suggestions", async () => {
   const f = await fixture();
+
   try {
     f.setSuggest(async (task) => {
       if (task === "p1")
         f.snap.panes = f.snap.panes.filter((p) => p.pane_id !== "p1");
+
       return { tab: "Repair Task Naming", reason: "task" };
     });
     await f.service.initialize();
@@ -178,10 +197,12 @@ test("closing a source pane during inference discards its tab and pane suggestio
 
 test("a replacement agent session cannot receive its predecessor's label", async () => {
   const f = await fixture();
+
   try {
     f.snap.panes[0]!.agent_session = { kind: "path", value: "old.jsonl" };
     f.setSuggest(async () => {
       f.snap.panes[0]!.agent_session = { kind: "path", value: "new.jsonl" };
+
       return { tab: "Old Session Task", reason: "task" };
     });
     await f.service.initialize();
@@ -196,16 +217,20 @@ test("model latency does not hold the state lock and manual renames still win", 
   const f = await fixture();
   const started = deferred<void>();
   const completion = deferred<NameSuggestion>();
+
   try {
     f.setSuggest(async () => {
       started.resolve();
+
       return completion.promise;
     });
     await f.service.initialize();
+
     const pending = f.service.evaluate("t1", {
       resetKind: "tab",
       forceRefresh: true,
     });
+
     await started.promise;
     // Acquiring the same state lock while the model is pending must complete.
     f.snap.tabs[0]!.label = "My Manual Tab";
@@ -224,20 +249,25 @@ test("new explicit request supersedes an older pending request", async () => {
   const f = await fixture();
   const started = deferred<void>();
   const first = deferred<NameSuggestion>();
+
   try {
     let calls = 0;
     f.setSuggest(async () => {
       if (++calls === 1) {
         started.resolve();
+
         return first.promise;
       }
+
       return { tab: "New Requested Name", reason: "new task" };
     });
     await f.service.initialize();
+
     const old = f.service.evaluate("t1", {
       resetKind: "tab",
       forceRefresh: true,
     });
+
     await started.promise;
     await f.service.evaluate("t1", { resetKind: "tab", forceRefresh: true });
     first.resolve({ tab: "Old Requested Name", reason: "old task" });
@@ -254,6 +284,7 @@ test("new explicit requests also supersede old context reads, not just model cal
   const f = await fixture();
   const started = deferred<void>();
   const contextReady = deferred<void>();
+
   try {
     let reads = 0;
     f.setBeforeContext(async () => {
@@ -263,10 +294,12 @@ test("new explicit requests also supersede old context reads, not just model cal
       }
     });
     await f.service.initialize();
+
     const old = f.service.evaluate("t1", {
       resetKind: "tab",
       forceRefresh: true,
     });
+
     await started.promise;
     await f.service.evaluate("t1", { resetKind: "tab", forceRefresh: true });
     contextReady.resolve();
@@ -281,17 +314,20 @@ test("new explicit requests also supersede old context reads, not just model cal
 
 test("closing the whole tab discards in-flight results and prunes its naming records", async () => {
   const f = await fixture();
+
   try {
     f.setSuggest(async () => {
       f.snap.tabs = [];
       f.snap.panes = [];
       f.snap.layouts = [];
+
       return { tab: "Closed Tab Name", reason: "old task" };
     });
     await f.service.initialize();
     await f.service.evaluate("t1", { resetKind: "tab", forceRefresh: true });
     assert.deepEqual(f.writes, []);
     const state = await loadState(f.paths.state);
+
     for (const map of [
       state.tabs,
       state.panes,
@@ -308,6 +344,7 @@ test("closing the whole tab discards in-flight results and prunes its naming rec
 
 test("delayed old label events cannot lock a newer automatic name", async () => {
   const f = await fixture();
+
   try {
     await f.service.initialize();
     await f.service.evaluate("t1", { resetKind: "tab", forceRefresh: true });
@@ -322,6 +359,7 @@ test("delayed old label events cannot lock a newer automatic name", async () => 
 
 test("resetting a non-agent pane does not rename it or its tab", async () => {
   const f = await fixture();
+
   try {
     delete f.snap.panes[0]!.agent;
     await f.service.initialize();

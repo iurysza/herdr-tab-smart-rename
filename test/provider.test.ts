@@ -29,6 +29,7 @@ const context: NamingContext = {
 
 async function tempConfig() {
   const root = await mkdtemp(path.join(os.tmpdir(), "smart-rename-provider-"));
+
   return {
     root,
     file: path.join(root, "provider.env"),
@@ -38,11 +39,13 @@ async function tempConfig() {
 
 test("provider config preserves defaults and process-over-file precedence", async () => {
   const fixture = await tempConfig();
+
   try {
     const defaults = await loadProviderConfig({
       ...fixture.env,
       OPENAI_API_KEY: "standalone-key",
     });
+
     assert.deepEqual(defaults, {
       provider: "openai",
       baseURL: "https://api.openai.com/v1",
@@ -78,6 +81,7 @@ test("provider config preserves defaults and process-over-file precedence", asyn
         "SMART_RENAME_API_KEY=file-key",
       ].join("\n"),
     );
+
     const config = await loadProviderConfig({
       ...fixture.env,
       SMART_RENAME_PROVIDER: "process-provider",
@@ -86,6 +90,7 @@ test("provider config preserves defaults and process-over-file precedence", asyn
       SMART_RENAME_TIMEOUT_MS: "30000",
       SMART_RENAME_API_KEY: "process-key",
     });
+
     assert.deepEqual(config, {
       provider: "process-provider",
       baseURL: "https://process.example/v1",
@@ -101,6 +106,7 @@ test("provider config preserves defaults and process-over-file precedence", asyn
 
 test("DeepSeek profile supplies defaults and its standard key alias", async () => {
   const fixture = await tempConfig();
+
   try {
     assert.deepEqual(
       await loadProviderConfig({
@@ -124,14 +130,17 @@ test("DeepSeek profile supplies defaults and its standard key alias", async () =
 test("private provider and prompt config enforce templates, permissions, and bounds", async () => {
   const fixture = await tempConfig();
   await rm(fixture.root, { recursive: true, force: true });
+
   try {
     const file = await ensureProviderFile(fixture.env);
     const prompt = await ensureNamingPromptFile(fixture.env);
+
     if (process.platform !== "win32") {
       assert.equal((await stat(fixture.root)).mode & 0o777, 0o700);
       assert.equal((await stat(file)).mode & 0o777, 0o600);
       assert.equal((await stat(prompt)).mode & 0o777, 0o600);
     }
+
     assert.match(
       await readFile(file, "utf8"),
       /SMART_RENAME_MODEL=gpt-5\.6-luna/,
@@ -150,13 +159,16 @@ test("private provider and prompt config enforce templates, permissions, and bou
 
 test("namer sends one bounded completion and validates model output", async () => {
   const requests: CompletionRequest[] = [];
+
   const namer = new AiSdkNamer(
     { SMART_RENAME_API_KEY: "standalone-key" },
     async (request) => {
       requests.push(request);
+
       return '```json\n{"tab":"Repair Socket Reconnect","reason":"current task"}\n```';
     },
   );
+
   assert.deepEqual(await namer.suggest(context), {
     tab: "Repair Socket Reconnect",
     reason: "current task",
@@ -173,25 +185,31 @@ test("namer sends one bounded completion and validates model output", async () =
     { SMART_RENAME_API_KEY: "standalone-key" },
     async () => '{"tab":null,"reason":"no meaningful task"}',
   );
+
   assert.deepEqual(await abstain.suggest(context), {
     tab: null,
     reason: "no meaningful task",
   });
+
   const invalid = new AiSdkNamer(
     { SMART_RENAME_API_KEY: "standalone-key" },
     async () => '{"tab":"bad","reason":"bad"}',
   );
+
   await assert.rejects(invalid.suggest(context), /invalid model tab label/);
 });
 
 test("provider transport uses the provider-compatible output-token parameter", async () => {
   let requestBody: Record<string, unknown> | undefined;
+
   const responseText =
     '{"tab":"Bound Provider Output","reason":"transport contract"}';
+
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
       requestBody = (await request.json()) as Record<string, unknown>;
+
       if (requestBody.stream === true) {
         const chunk = {
           id: "chatcmpl-test",
@@ -206,11 +224,13 @@ test("provider transport uses the provider-compatible output-token parameter", a
             },
           ],
         };
+
         return new Response(
           `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,
           { headers: { "content-type": "text/event-stream" } },
         );
       }
+
       return Response.json({
         id: "chatcmpl-test",
         object: "chat.completion",
@@ -227,6 +247,7 @@ test("provider transport uses the provider-compatible output-token parameter", a
       });
     },
   });
+
   try {
     const namer = new AiSdkNamer({
       SMART_RENAME_PROVIDER: "test-provider",
@@ -235,6 +256,7 @@ test("provider transport uses the provider-compatible output-token parameter", a
       SMART_RENAME_API_KEY: "test-key",
       SMART_RENAME_TIMEOUT_MS: "5000",
     });
+
     assert.deepEqual(await namer.suggest(context), {
       tab: "Bound Provider Output",
       reason: "transport contract",
@@ -248,6 +270,7 @@ test("provider transport uses the provider-compatible output-token parameter", a
       SMART_RENAME_API_KEY: "test-key",
       SMART_RENAME_TIMEOUT_MS: "5000",
     });
+
     await openaiNamer.suggest(context);
     assert.equal(requestBody?.max_completion_tokens, 32_768);
     assert.equal(requestBody?.max_tokens, undefined);
@@ -282,17 +305,21 @@ test("namer reloads provider.env and naming-prompt.md, then redacts failures", a
   const promptFile = path.join(fixture.root, "naming-prompt.md");
   const models: string[] = [];
   const systems: string[] = [];
+
   try {
     await writeFile(
       fixture.file,
       "SMART_RENAME_API_KEY=first-key\nSMART_RENAME_MODEL=first-model\n",
     );
     await writeFile(promptFile, "First naming prompt");
+
     const namer = new AiSdkNamer(fixture.env, async (request) => {
       models.push(request.config.model);
       systems.push(request.system);
+
       return '{"tab":"First Task Name","reason":"task"}';
     });
+
     await namer.suggest(context);
     await writeFile(
       fixture.file,
@@ -304,14 +331,17 @@ test("namer reloads provider.env and naming-prompt.md, then redacts failures", a
     assert.deepEqual(systems, ["First naming prompt", "Second naming prompt"]);
 
     const key = "standalone-secret-value";
+
     const failing = new AiSdkNamer({ SMART_RENAME_API_KEY: key }, async () => {
       throw new Error(`401 Authorization: Bearer ${key}`);
     });
+
     await assert.rejects(failing.suggest(context), (error: unknown) => {
       assert.ok(error instanceof Error);
       assert.match(error.message, /AI request failed/);
       assert.doesNotMatch(error.message, new RegExp(key));
       assert.match(error.message, /redacted/);
+
       return true;
     });
   } finally {
@@ -324,6 +354,7 @@ test("manifest uses portable Bun runtime without Pi model coupling", async () =>
     readFile(new URL("../herdr-plugin.toml", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
+
   const packageJson = JSON.parse(packageSource) as { version: string };
   const manifestVersion = manifest.match(/^version = "([^"]+)"$/m)?.[1];
 
@@ -339,6 +370,7 @@ test("manifest uses portable Bun runtime without Pi model coupling", async () =>
   assert.match(manifest, /id = "prompt-config"[\s\S]*placement = "overlay"/);
 
   const src = new URL("../src/", import.meta.url);
+
   const source = (
     await Promise.all(
       (await readdir(src))
@@ -346,6 +378,7 @@ test("manifest uses portable Bun runtime without Pi model coupling", async () =>
         .map((file) => readFile(new URL(file, src), "utf8")),
     )
   ).join("\n");
+
   for (const forbidden of [
     "PiRpc",
     'spawn("pi")',
@@ -375,6 +408,7 @@ test("fenced JSON permits surrounding prose but still rejects invalid names and 
       { SMART_RENAME_API_KEY: "test-key" },
       async () => response,
     );
+
     if (valid) await namer.suggest(context);
     else await assert.rejects(namer.suggest(context));
   }

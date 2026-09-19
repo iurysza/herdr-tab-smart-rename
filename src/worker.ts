@@ -25,12 +25,16 @@ export function shouldIgnoreProgressRename(
   label: string,
 ): boolean {
   const progressBase = tabProgressBase(label);
+
   if (progressBase !== null) {
     progressBases.set(tabId, progressBase);
+
     return true;
   }
+
   const restoring = progressBases.get(tabId);
   progressBases.delete(tabId);
+
   return restoring === label;
 }
 
@@ -38,6 +42,7 @@ export async function runWorker(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   const stateDir = env.HERDR_PLUGIN_STATE_DIR;
+
   if (!stateDir) throw new Error("HERDR_PLUGIN_STATE_DIR is required");
   await ensurePrivateDir(stateDir);
   const paths = statePaths(stateDir);
@@ -66,6 +71,7 @@ export async function runWorker(
     work = work
       .then(task, task)
       .catch((error: unknown) => log(`task failed: ${errorMessage(error)}`));
+
     return work;
   };
 
@@ -74,13 +80,16 @@ export async function runWorker(
     current?: HerdrSnapshot,
   ): Promise<void> => {
     if (!tabId || stopped) return;
+
     const result = await service.evaluate(
       tabId,
       current ? { snapshot: current } : {},
     );
+
     if (result?.changes.length) {
       await log(`renamed ${JSON.stringify(result.changes)}`);
     }
+
     for (const outcome of result?.outcomes ?? []) {
       if (outcome.status === "failed") {
         await log(
@@ -93,17 +102,21 @@ export async function runWorker(
   const schedule = (tabId: string | undefined, delay = 400): void => {
     if (!tabId || stopped) return;
     const previous = timers.get(tabId);
+
     if (previous) clearTimeout(previous);
+
     const timer = setTimeout(() => {
       timers.delete(tabId);
       enqueue(() => evaluate(tabId));
     }, delay);
+
     timers.set(tabId, timer);
   };
 
   const sweep = async (): Promise<void> => {
     if (stopped) return;
     const current = await snapshot(env);
+
     for (const tab of current.tabs) await evaluate(tab.tab_id);
   };
 
@@ -121,55 +134,70 @@ export async function runWorker(
 
   const handleEvent = async (event: HerdrEvent): Promise<void> => {
     if (stopped) return;
+
     if (
       event.type === "workspace_renamed" &&
       event.workspace_id &&
       event.label
     ) {
       await service.acknowledge("workspace", event.workspace_id, event.label);
+
       return;
     }
+
     if (event.type === "tab_renamed" && event.tab_id && event.label) {
       if (
         shouldIgnoreProgressRename(progressBases, event.tab_id, event.label)
       ) {
         return;
       }
+
       await service.acknowledge("tab", event.tab_id, event.label);
+
       return;
     }
+
     if (
       ["tab_closed", "pane_closed", "workspace_closed"].includes(event.type)
     ) {
       if (event.tab_id) progressBases.delete(event.tab_id);
       await service.initialize();
       queueSweep();
+
       return;
     }
+
     const paneUpdate = paneLabelUpdate(event);
+
     if (paneUpdate) {
       await service.acknowledge("pane", paneUpdate.paneId, paneUpdate.label);
       // Full pane updates also carry agent/session changes. Schedule evaluation
       // even when the label itself is unchanged.
       schedule(event.pane?.tab_id);
+
       return;
     }
 
     const current = await snapshot(env);
+
     const pane = event.pane_id
       ? current.panes.find((item) => item.pane_id === event.pane_id)
       : undefined;
+
     const workspaceId =
       event.workspace_id || event.workspace?.workspace_id || pane?.workspace_id;
+
     const workspace = workspaceId
       ? current.workspaces.find((item) => item.workspace_id === workspaceId)
       : undefined;
+
     const tabId =
       event.tab_id ||
       event.tab?.tab_id ||
       event.pane?.tab_id ||
       pane?.tab_id ||
       workspace?.active_tab_id;
+
     schedule(tabId);
   };
 
@@ -184,16 +212,20 @@ export async function runWorker(
   const connect = (): void => {
     if (stopped) return;
     const socketPath = env.HERDR_SOCKET_PATH;
+
     if (!socketPath) {
       void log("HERDR_SOCKET_PATH is required; retrying");
       scheduleReconnect(5_000);
+
       return;
     }
+
     const connection = subscribe(socketPath, (event) => {
       events = events
         .then(() => handleEvent(event))
         .catch((error: unknown) => log(`event failed: ${errorMessage(error)}`));
     });
+
     socket = connection;
     connection.once("connect", () => {
       void markWorkerReady(paths.pid, process.pid, socketPath)
@@ -214,8 +246,11 @@ export async function runWorker(
   const shutdown = async (signal: string): Promise<void> => {
     if (stopped) return;
     stopped = true;
+
     if (reconnectTimer) clearTimeout(reconnectTimer);
+
     if (sweepTimer) clearInterval(sweepTimer);
+
     for (const timer of timers.values()) clearTimeout(timer);
     socket?.destroy();
     await events.catch(() => {});

@@ -46,6 +46,8 @@ export function directProviderProfile(
 
 export function defaultDirectProviderProfile(): DirectProviderProfile {
   const profile = directProviderProfile(DEFAULT_DIRECT_PROVIDER_ID);
+
   if (!profile) throw new Error("Default direct provider is not registered");
+
   return profile;
 }
