@@ -188,6 +188,14 @@ function errorCode(error: unknown): string | undefined {
     : undefined;
 }
 
+function lockContended(error: unknown): boolean {
+  const code = errorCode(error);
+  if (code === "EEXIST") return true;
+  // Windows exclusive-create races (`open(..., "wx")`) can throw EPERM or
+  // EACCES instead of EEXIST. Treat those as contention; other errors fail closed.
+  return process.platform === "win32" && (code === "EPERM" || code === "EACCES");
+}
+
 export function pidAlive(
   pid: number,
   signal: typeof process.kill = process.kill,
@@ -351,7 +359,7 @@ export async function acquireLock(
         }
       };
     } catch (error) {
-      if (errorCode(error) !== "EEXIST") throw error;
+      if (!lockContended(error)) throw error;
 
       if (await staleLock(lockFile, staleMs)) {
         await rm(lockFile, { force: true });
