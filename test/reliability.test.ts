@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Match } from "effect";
 import {
   acknowledgeRename,
   reconcileItem,
@@ -81,12 +82,11 @@ async function fixture() {
       rename: async (kind, id, label) => {
         writes.push(`${kind}:${id}`);
 
-        const item =
-          kind === "tab"
-            ? snap.tabs.find((t) => t.tab_id === id)
-            : kind === "pane"
-              ? snap.panes.find((p) => p.pane_id === id)
-              : snap.workspaces.find((w) => w.workspace_id === id);
+        const item = Match.value(kind).pipe(
+          Match.when("tab", () => snap.tabs.find((t) => t.tab_id === id)),
+          Match.when("pane", () => snap.panes.find((p) => p.pane_id === id)),
+          Match.orElse(() => snap.workspaces.find((w) => w.workspace_id === id)),
+        );
 
         if (!item) throw new Error("target closed");
         item.label = label;

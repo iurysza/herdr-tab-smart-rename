@@ -3,12 +3,10 @@ import { fileURLToPath } from "node:url";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { generateText } from "ai";
 import { parse as parseEnv } from "dotenv";
+import { Cause, Duration, Effect, Exit } from "effect";
 import { z } from "zod";
-import {
-  type NameSuggestion,
-  type NamingContext,
-  validateTabLabel,
-} from "./domain.ts";
+import { type NameSuggestion, type NamingContext } from "./domain.ts";
+import { decodeSuggestion } from "./effect/model-output.ts";
 import {
   DEFAULT_DIRECT_PROVIDER_ID,
   directProviderProfile,
@@ -48,11 +46,6 @@ const ProviderConfigSchema = z.object({
   reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
   promptPath: z.string().min(1).optional(),
   apiKey: z.string().min(1),
-});
-
-const ModelOutputSchema = z.object({
-  tab: z.string().nullable(),
-  reason: z.string(),
 });
 
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
@@ -292,19 +285,12 @@ export async function loadNamingPrompt(
 }
 
 export function parseSuggestion(text: string): NameSuggestion {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const cleaned = (fenced?.[1] ?? text).trim();
-  const output = ModelOutputSchema.parse(JSON.parse(cleaned));
-
-  if (output.tab === null) {
-    return { tab: null, reason: sanitizeText(output.reason) };
-  }
-
-  if (!validateTabLabel(output.tab)) {
-    throw new Error(`invalid model tab label: ${JSON.stringify(output.tab)}`);
-  }
-
-  return { tab: sanitizeText(output.tab), reason: sanitizeText(output.reason) };
+  return Exit.match(Effect.runSyncExit(decodeSuggestion(text)), {
+    onFailure: (cause) => {
+      throw Cause.squash(cause);
+    },
+    onSuccess: (suggestion) => suggestion,
+  });
 }
 
 function safeProviderError(error: unknown, config: ProviderConfig): string {
@@ -383,22 +369,28 @@ export class AiSdkNamer implements Namer {
   async suggest(context: NamingContext): Promise<NameSuggestion> {
     const config = await loadProviderConfig(this.#env);
     const system = await loadNamingPrompt(config, this.#env);
+    const complete = this.#complete;
 
-    try {
-      const text = await this.#complete({
-        config,
-        context,
-        system,
-        maxOutputTokens: 32_768,
-        maxRetries: 1,
-        abortSignal: AbortSignal.timeout(config.timeoutMs),
-      });
+    const program = Effect.tryPromise({
+      try: (signal) =>
+        complete({
+          config,
+          context,
+          system,
+          maxOutputTokens: 32_768,
+          maxRetries: 1,
+          abortSignal: signal,
+        }),
+      catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+    }).pipe(Effect.timeout(Duration.millis(config.timeoutMs)), Effect.flatMap(decodeSuggestion));
 
-      return parseSuggestion(text);
-    } catch (error) {
-      throw new Error(
-        `AI request failed (${config.provider}/${config.model}): ${safeProviderError(error, config)}`,
-      );
-    }
+    return Exit.match(await Effect.runPromiseExit(program), {
+      onFailure: (cause) => {
+        throw new Error(
+          `AI request failed (${config.provider}/${config.model}): ${safeProviderError(Cause.squash(cause), config)}`,
+        );
+      },
+      onSuccess: (suggestion) => suggestion,
+    });
   }
 }

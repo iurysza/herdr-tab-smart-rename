@@ -21,9 +21,18 @@ export default defineConfig({
   ],
   jsPlugins: [
     { name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" },
+    {
+      name: "anti-slop-effect",
+      specifier: "./tools/oxlint/anti-slop/effect/index.ts",
+    },
   ],
   rules: {
     "oxc/no-accumulating-spread": "error",
+    "anti-slop-effect/no-manual-effect-error-tag": "error",
+    "anti-slop-effect/no-manual-tag-comparison": "error",
+    "anti-slop-effect/no-manual-tagged-construction": "error",
+    "anti-slop-effect/no-service-constructor-imports": "error",
+    "anti-slop-effect/prefer-effect-match": "error",
     "anti-slop/no-array-filter-map": "error",
     "anti-slop/no-reduce-accumulator-copy": "error",
     "anti-slop/no-chained-type-assertions": "error",

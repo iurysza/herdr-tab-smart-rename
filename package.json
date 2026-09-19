@@ -17,15 +17,16 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.9",
-    "ai": "7.0.26",
-    "dotenv": "17.4.2",
-    "secret-sniff": "0.2.1",
-    "strip-ansi": "7.2.0",
-    "zod": "4.4.3",
     "@clack/prompts": "1.7.0",
     "@earendil-works/pi-ai": "0.83.0",
     "@earendil-works/pi-coding-agent": "0.83.0",
-    "@opencode-ai/sdk": "1.18.13"
+    "@opencode-ai/sdk": "1.18.13",
+    "ai": "7.0.26",
+    "dotenv": "17.4.2",
+    "effect": "^3.22.2",
+    "secret-sniff": "0.2.1",
+    "strip-ansi": "7.2.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.83.0",

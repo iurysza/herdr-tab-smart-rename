@@ -2,6 +2,7 @@
 import { chmod, closeSync, openSync } from "node:fs";
 import { chmod as chmodAsync, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { Match } from "effect";
 import { type RenameResult } from "./domain.ts";
 import { beginTabProgress, run, snapshot } from "./herdr.ts";
 import { loadModelSelection } from "./model-selection.ts";
@@ -303,11 +304,11 @@ async function status(): Promise<void> {
 
   const ownership = workerOwnership(info, process.env.HERDR_SOCKET_PATH);
 
-  const target = ownership === "same-target"
-    ? "serving this Herdr session"
-    : ownership === "other-target"
-      ? "serving another Herdr session"
-      : "with legacy-unknown Herdr socket ownership";
+  const target = Match.value(ownership).pipe(
+    Match.when("same-target", () => "serving this Herdr session"),
+    Match.when("other-target", () => "serving another Herdr session"),
+    Match.orElse(() => "with legacy-unknown Herdr socket ownership"),
+  );
 
   console.log(`Smart Rename running (pid ${info.pid}, since ${info.startedAt}; ${target})`);
 }

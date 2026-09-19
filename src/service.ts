@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Match } from "effect";
 import {
   acknowledgeRename,
   buildModelContext,
@@ -88,11 +89,11 @@ interface RenameTarget {
 }
 
 function records(state: SmartRenameState, kind: RenameTarget["kind"]) {
-  return kind === "pane"
-    ? state.panes
-    : kind === "tab"
-      ? state.tabs
-      : state.workspaces;
+  return Match.value(kind).pipe(
+    Match.when("pane", () => state.panes),
+    Match.when("tab", () => state.tabs),
+    Match.orElse(() => state.workspaces),
+  );
 }
 
 function targetLabel(
