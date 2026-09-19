@@ -61,6 +61,7 @@ export class PiModelSource implements ModelSource {
 
   async listProviders(): Promise<readonly ProviderChoice[]> {
     const models = await (await this.resources()).runtime.getAvailable();
+
     return [...new Map(models.map((model) => [model.provider, model])).entries()]
       .map(([id, model]) => ({ id, label: id || model.provider }))
       .sort((left, right) => left.label.localeCompare(right.label));
@@ -68,12 +69,14 @@ export class PiModelSource implements ModelSource {
 
   async listModels(providerId: string): Promise<readonly ModelChoice[]> {
     const models = await (await this.resources()).runtime.getAvailable(providerId);
+
     if (!models.length) {
       throw new ModelSourceError(
         "authentication",
         "Pi provider is not connected. Sign in to Pi, then run setup.",
       );
     }
+
     return models.map((model) => ({ id: model.id, label: model.name || model.id }));
   }
 
@@ -82,6 +85,7 @@ export class PiModelSource implements ModelSource {
     modelId: string,
   ): Promise<readonly ModelProfile[]> {
     const model = await this.availableModel(providerId, modelId);
+
     return this.profileIds(model).map((id) => ({ id, label: id }));
   }
 
@@ -89,6 +93,7 @@ export class PiModelSource implements ModelSource {
     if (selection.source !== "pi") {
       throw new ModelSourceError("source", "Pi AI is not selected. Run setup.");
     }
+
     const model = await this.availableModel(selection.provider, selection.model);
     this.assertProfile(model, selection.profile);
   }
@@ -96,10 +101,12 @@ export class PiModelSource implements ModelSource {
   async complete(request: ModelCompletionRequest): Promise<string> {
     await this.validate(request.selection);
     const resources = await this.resources();
+
     const model = await this.availableModel(
       request.selection.provider,
       request.selection.model,
     );
+
     try {
       const response = await resources.runtime.completeSimple(
         model,
@@ -122,15 +129,19 @@ export class PiModelSource implements ModelSource {
           signal: request.abortSignal,
         },
       );
+
       if (response.stopReason === "error" || response.stopReason === "aborted") {
         throw new Error(response.errorMessage || "Pi completion failed");
       }
+
       const text = response.content
         .filter((part) => part.type === "text")
         .map((part) => part.text || "")
         .join("")
         .trim();
+
       if (!text) throw new Error("Pi returned no text");
+
       return text;
     } catch {
       throw new ModelSourceError(
@@ -142,6 +153,7 @@ export class PiModelSource implements ModelSource {
 
   private async resources(): Promise<PiRuntimeResources> {
     this.#resources ??= await this.#runtimeFactory();
+
     return this.#resources;
   }
 
@@ -149,15 +161,18 @@ export class PiModelSource implements ModelSource {
     const resources = await this.resources();
     const available = await resources.runtime.getAvailable(providerId);
     const model = resources.runtime.getModel(providerId, modelId);
+
     if (!model) {
       throw new ModelSourceError("model", "Pi model is unavailable. Run setup to choose another model.");
     }
+
     if (!available.some((item) => item.id === model.id && item.provider === model.provider)) {
       throw new ModelSourceError(
         "authentication",
         "Pi provider is not connected. Sign in to Pi, then run setup.",
       );
     }
+
     return model;
   }
 
@@ -167,6 +182,7 @@ export class PiModelSource implements ModelSource {
 
   private assertProfile(model: PiModel, profile: string | undefined): void {
     if (!profile) return;
+
     if (!this.profileIds(model).includes(profile)) {
       throw new ModelSourceError("profile", "Pi thinking level is unavailable. Run setup.");
     }
@@ -178,7 +194,9 @@ async function createPiRuntime(): Promise<PiRuntimeResources> {
     import("@earendil-works/pi-coding-agent"),
     import("@earendil-works/pi-ai"),
   ]);
+
   const runtime = await ModelRuntime.create({ allowModelNetwork: false });
+
   return {
     runtime: {
       getAvailable: (providerId) => runtime.getAvailable(providerId),

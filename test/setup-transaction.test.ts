@@ -10,6 +10,7 @@ import { beginSetupTransaction } from "../src/setup-transaction.ts";
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "smart-rename-transaction-"));
   const config = path.join(root, "config");
+
   return { root, config };
 }
 
@@ -17,6 +18,7 @@ test("restores exact prior bytes and modes for Direct setup files", async () => 
   const { root, config } = await fixture();
   const selection = modelSelectionPath(config);
   const provider = providerEnvPath({ HERDR_PLUGIN_CONFIG_DIR: config })!;
+
   try {
     await mkdir(config, { recursive: true });
     await Bun.write(selection, "old selection\n");
@@ -35,6 +37,7 @@ test("restores exact prior bytes and modes for Direct setup files", async () => 
 
     assert.equal(await readFile(selection, "utf8"), "old selection\n");
     assert.equal(await readFile(provider, "utf8"), "SMART_RENAME_API_KEY=old-secret\n");
+
     if (process.platform !== "win32") {
       assert.equal((await stat(config)).mode & 0o777, 0o750);
       assert.equal((await stat(selection)).mode & 0o777, 0o640);
@@ -48,6 +51,7 @@ test("restores exact prior bytes and modes for Direct setup files", async () => 
 test("removes files and an absent config directory created by a failed setup", async () => {
   const { root, config } = await fixture();
   const selection = modelSelectionPath(config);
+
   try {
     const transaction = await beginSetupTransaction(config);
     await mkdir(config, { recursive: true });
@@ -63,6 +67,7 @@ test("removes files and an absent config directory created by a failed setup", a
 test("committed validated configuration is not rolled back after worker start failure", async () => {
   const { root, config } = await fixture();
   const selection = modelSelectionPath(config);
+
   try {
     const transaction = await beginSetupTransaction(config);
     await mkdir(config, { recursive: true });

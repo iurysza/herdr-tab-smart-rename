@@ -40,11 +40,14 @@ export async function beginSetupTransaction(
     modelSelectionPath(configDirectory),
     ...(includesDirect ? [providerEnvPath({ HERDR_PLUGIN_CONFIG_DIR: configDirectory })] : []),
   ].filter((value): value is string => Boolean(value));
+
   const [directory, files] = await Promise.all([
     snapshotDirectory(configDirectory),
     Promise.all(paths.map(snapshotFile)),
   ]);
+
   let committed = false;
+
   return {
     configDirectory,
     commit: () => {
@@ -53,6 +56,7 @@ export async function beginSetupTransaction(
     rollback: async () => {
       if (committed) return;
       const failures: string[] = [];
+
       for (const file of files) {
         try {
           await restoreFile(file);
@@ -60,11 +64,13 @@ export async function beginSetupTransaction(
           failures.push(file.path);
         }
       }
+
       try {
         await restoreDirectory(directory);
       } catch {
         failures.push(directory.path);
       }
+
       if (failures.length) {
         throw new Error(`Could not roll back Smart Rename setup files: ${failures.join(", ")}`);
       }
@@ -75,6 +81,7 @@ export async function beginSetupTransaction(
 async function snapshotFile(file: string): Promise<FileSnapshot> {
   try {
     const [bytes, details] = await Promise.all([readFile(file), stat(file)]);
+
     return { path: file, exists: true, bytes, mode: details.mode & 0o777 };
   } catch (error) {
     if (errorCode(error) === "ENOENT") return { path: file, exists: false };
@@ -85,6 +92,7 @@ async function snapshotFile(file: string): Promise<FileSnapshot> {
 async function snapshotDirectory(directory: string): Promise<DirectorySnapshot> {
   try {
     const details = await stat(directory);
+
     return { path: directory, exists: true, mode: details.mode & 0o777 };
   } catch (error) {
     if (errorCode(error) === "ENOENT") return { path: directory, exists: false };
@@ -95,10 +103,13 @@ async function snapshotDirectory(directory: string): Promise<DirectorySnapshot> 
 async function restoreFile(snapshot: FileSnapshot): Promise<void> {
   if (!snapshot.exists) {
     await rm(snapshot.path, { force: true });
+
     return;
   }
+
   await mkdir(path.dirname(snapshot.path), { recursive: true, mode: 0o700 });
   const temporary = `${snapshot.path}.${process.pid}.${randomUUID()}.rollback.tmp`;
+
   try {
     await writeFile(temporary, snapshot.bytes!, { mode: snapshot.mode! });
     await chmod(temporary, snapshot.mode!);
@@ -114,8 +125,10 @@ async function restoreDirectory(snapshot: DirectorySnapshot): Promise<void> {
   if (snapshot.exists) {
     await mkdir(snapshot.path, { recursive: true, mode: snapshot.mode! });
     await chmod(snapshot.path, snapshot.mode!);
+
     return;
   }
+
   await rmdir(snapshot.path).catch((error: unknown) => {
     if (errorCode(error) !== "ENOENT") throw error;
   });

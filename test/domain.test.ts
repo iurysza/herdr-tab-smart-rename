@@ -60,6 +60,7 @@ test("label, workspace, and process policy stays deterministic", () => {
   ] as const) {
     assert.equal(validateTabLabel(label), valid, label);
   }
+
   assert.equal(
     workspaceCandidate(
       { label: "var", number: 1 },
@@ -68,6 +69,7 @@ test("label, workspace, and process policy stays deterministic", () => {
     ),
     "VAR",
   );
+
   for (const [command, title] of [
     ["npm run dev", "Dev Server"],
     ["pytest -q", "Run Tests"],
@@ -85,6 +87,7 @@ test("label, workspace, and process policy stays deterministic", () => {
 
 test("model context keeps weighted session evidence under the hard cap", () => {
   const huge = "x".repeat(20_000);
+
   const context = buildModelContext({
     workspaceName: huge,
     paneContexts: [
@@ -102,6 +105,7 @@ test("model context keeps weighted session evidence under the hard cap", () => {
       },
     ],
   });
+
   assert.ok(JSON.stringify(context).length <= MAX_CONTEXT_CHARS);
   assert.ok("sessionTimeline" in context);
   assert.deepEqual(Object.keys(context.sessionTimeline), [
@@ -122,6 +126,7 @@ test("text sanitization delegates ANSI and secret removal to libraries", () => {
     "github_pat_abcdefghijklmnop",
     `sk-kimi-${"*".repeat(32)}tPJd`,
   ].join(" ");
+
   const output = sanitizeText(input, "");
   assert.doesNotMatch(
     output,
@@ -132,10 +137,12 @@ test("text sanitization delegates ANSI and secret removal to libraries", () => {
 
 test("stable fingerprints and model cooldown suppress churn", () => {
   const state = emptyState();
+
   const context: NamingContext = {
     project: "Agents",
     userRequests: ["inspect logs"],
   };
+
   assert.equal(observeStableContext(state, "t1", context), false);
   assert.equal(observeStableContext(state, "t1", context), true);
   assert.equal(shouldCallModel(state, "t1", context, 1_000_000).allowed, true);

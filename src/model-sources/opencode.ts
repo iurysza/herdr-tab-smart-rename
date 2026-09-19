@@ -85,6 +85,7 @@ export class OpenCodeModelSource implements ModelSource {
 
   async listProviders(): Promise<readonly ProviderChoice[]> {
     const catalog = await this.catalog();
+
     return catalog.providers.map((provider) => ({
       id: provider.id,
       label: provider.name || provider.id,
@@ -93,6 +94,7 @@ export class OpenCodeModelSource implements ModelSource {
 
   async listModels(providerId: string): Promise<readonly ModelChoice[]> {
     const provider = await this.connectedProvider(providerId);
+
     return Object.values(provider.models).map((model) => ({
       id: model.id,
       label: model.name || model.id,
@@ -104,6 +106,7 @@ export class OpenCodeModelSource implements ModelSource {
     modelId: string,
   ): Promise<readonly ModelProfile[]> {
     const model = await this.connectedModel(providerId, modelId);
+
     return Object.entries(model.variants ?? {})
       .filter(([, value]) => value.disabled !== true)
       .map(([id]) => ({ id, label: id }));
@@ -113,7 +116,9 @@ export class OpenCodeModelSource implements ModelSource {
     if (selection.source !== "opencode") {
       throw new ModelSourceError("source", "OpenCode AI is not selected. Run setup.");
     }
+
     const model = await this.connectedModel(selection.provider, selection.model, signal);
+
     if (selection.profile) {
       if (!model.variants?.[selection.profile] || model.variants[selection.profile]?.disabled) {
         throw new ModelSourceError(
@@ -129,12 +134,15 @@ export class OpenCodeModelSource implements ModelSource {
     signal.throwIfAborted();
     const client = (await this.resources(signal)).client;
     let sessionId: string | undefined;
+
     try {
       signal.throwIfAborted();
       await this.validate(request.selection, signal);
       const toolIds = (await client.tool.ids({ directory: this.#directory }, { signal })).data;
+
       if (!toolIds) throw new Error("OpenCode did not list available tools");
       const tools = Object.fromEntries(toolIds.map((id) => [id, false])) as Record<string, false>;
+
       const created = await client.session.create({
         directory: this.#directory,
         title: "Smart Rename",
@@ -147,8 +155,11 @@ export class OpenCodeModelSource implements ModelSource {
         },
         permission: [...denyAllPermissions],
       }, { signal });
+
       sessionId = created.data?.id;
+
       if (!sessionId) throw new Error("OpenCode did not create a session");
+
       const response = await client.session.prompt({
         sessionID: sessionId,
         directory: this.#directory,
@@ -163,12 +174,15 @@ export class OpenCodeModelSource implements ModelSource {
         tools,
         parts: [{ type: "text", text: request.prompt }],
       }, { signal: request.abortSignal });
+
       const text = response.data?.parts
         .filter((part) => part.type === "text")
         .map((part) => part.text || "")
         .join("")
         .trim();
+
       if (!text) throw new Error("OpenCode returned no text");
+
       return text;
     } catch {
       throw new ModelSourceError(
@@ -181,6 +195,7 @@ export class OpenCodeModelSource implements ModelSource {
           .delete({ sessionID: sessionId, directory: this.#directory }, { signal })
           .catch(() => {});
       }
+
       await this.close();
     }
   }
@@ -193,6 +208,7 @@ export class OpenCodeModelSource implements ModelSource {
 
   private async resources(signal?: AbortSignal): Promise<OpenCodeResources> {
     this.#resources ??= await this.#factory(signal);
+
     return this.#resources;
   }
 
@@ -203,9 +219,12 @@ export class OpenCodeModelSource implements ModelSource {
       const result = await (await this.resources(signal)).client.provider.list({
         directory: this.#directory,
       }, signal ? { signal } : undefined);
+
       const catalog = result.data;
+
       if (!catalog) throw new Error("OpenCode returned no provider catalog");
       const connected = new Set(catalog.connected);
+
       return { providers: catalog.all.filter((provider) => connected.has(provider.id)) };
     } catch {
       throw new ModelSourceError(
@@ -219,12 +238,14 @@ export class OpenCodeModelSource implements ModelSource {
     const provider = (await this.catalog(signal)).providers.find(
       (item) => item.id === providerId,
     );
+
     if (!provider) {
       throw new ModelSourceError(
         "authentication",
         "OpenCode provider is not connected. Sign in to OpenCode, then run setup.",
       );
     }
+
     return provider;
   }
 
@@ -235,12 +256,14 @@ export class OpenCodeModelSource implements ModelSource {
   ): Promise<OpenCodeModel> {
     const provider = await this.connectedProvider(providerId, signal);
     const model = Object.values(provider.models).find((item) => item.id === modelId);
+
     if (!model) {
       throw new ModelSourceError(
         "model",
         "OpenCode model is unavailable. Run setup to choose another model.",
       );
     }
+
     return model;
   }
 }
@@ -249,7 +272,9 @@ async function createOpenCodeResources(signal?: AbortSignal): Promise<OpenCodeRe
   const { createOpencodeClient, createOpencodeServer } = await import(
     "@opencode-ai/sdk/v2"
   );
+
   const server = await createOpencodeServer({ hostname: "127.0.0.1", port: 0, ...(signal ? { signal } : {}) });
+
   return {
     server,
     client: createOpencodeClient({ baseUrl: server.url, directory: process.cwd() }),

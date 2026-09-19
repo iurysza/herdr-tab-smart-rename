@@ -9,9 +9,12 @@ import { loadState, statePaths } from "../src/storage.ts";
 
 const live =
   process.env.SMART_RENAME_LIVE_TEST === "1" && process.env.HERDR_ENV === "1";
+
 const herdr = process.env.HERDR_BIN_PATH || "herdr";
+
 async function command(...args: string[]) {
   const text = await run(herdr, args);
+
   return text ? JSON.parse(text) : null;
 }
 
@@ -22,6 +25,7 @@ async function waitFor(
   expected: string,
 ) {
   const deadline = Date.now() + 10_000;
+
   while (!(await condition())) {
     if (Date.now() >= deadline)
       throw new Error(`Timed out after 10000ms waiting for ${expected}`);
@@ -41,15 +45,20 @@ test.skipIf(!live)(
     let tabId: string | undefined;
     let worker: ReturnType<typeof Bun.spawn> | undefined;
     let release!: () => void;
+
     const waiting = new Promise<void>((resolve) => {
       release = resolve;
     });
+
     let requests = 0;
+
     const server = Bun.serve({
       port: 0,
       async fetch() {
         const first = ++requests === 1;
+
         if (first) await waiting;
+
         return Response.json({
           id: "fixture",
           object: "chat.completion",
@@ -72,6 +81,7 @@ test.skipIf(!live)(
         });
       },
     });
+
     try {
       const created = await command(
         "tab",
@@ -80,8 +90,10 @@ test.skipIf(!live)(
         process.env.HERDR_WORKSPACE_ID!,
         "--no-focus",
       );
+
       tabId = created.result.tab.tab_id;
       const firstPane: string = created.result.root_pane.pane_id;
+
       const split = await command(
         "pane",
         "split",
@@ -90,7 +102,9 @@ test.skipIf(!live)(
         "right",
         "--no-focus",
       );
+
       const secondPane: string = split.result.pane.pane_id;
+
       for (const pane of [firstPane, secondPane]) {
         await command(
           "pane",
@@ -104,6 +118,7 @@ test.skipIf(!live)(
           "idle",
         );
       }
+
       const wrapper = path.join(dir, "herdr-fixture");
       await writeFile(
         wrapper,
@@ -181,11 +196,14 @@ process.exitCode = code;
       );
     } finally {
       release();
+
       if (worker) {
         worker.kill("SIGTERM");
         await worker.exited;
       }
+
       server.stop(true);
+
       if (tabId) await command("tab", "close", tabId);
       await rm(dir, { recursive: true, force: true });
     }
@@ -199,8 +217,10 @@ test.skipIf(!live)(
     const dir = await mkdtemp(
       path.join(os.tmpdir(), "smart-rename-live-scope-"),
     );
+
     const paths = statePaths(dir);
     let tabId: string | undefined;
+
     try {
       const created = await command(
         "tab",
@@ -209,9 +229,11 @@ test.skipIf(!live)(
         process.env.HERDR_WORKSPACE_ID!,
         "--no-focus",
       );
+
       tabId = created.result.tab.tab_id;
       const pane: string = created.result.root_pane.pane_id;
       await rename("pane", pane, "Protected Fixture Pane");
+
       const service = new AutoNameService({
         stateFile: paths.state,
         stateLock: paths.stateLock,
@@ -222,10 +244,12 @@ test.skipIf(!live)(
           }),
         },
       });
+
       const result = await service.evaluate(tabId!, {
         resetKind: "tab",
         forceModel: true,
       });
+
       assert.deepEqual(
         result?.changes.map((c) => c.kind),
         ["tab"],
@@ -234,20 +258,24 @@ test.skipIf(!live)(
         (await snapshot()).panes.find((p) => p.pane_id === pane)?.label,
         "Protected Fixture Pane",
       );
+
       const delayed = new AutoNameService({
         stateFile: paths.state,
         stateLock: paths.stateLock,
         namer: {
           suggest: async () => {
             await rename("tab", tabId!, "User Chosen Name");
+
             return { tab: "Outdated Fixture Name", reason: "fixture" };
           },
         },
       });
+
       const stale = await delayed.evaluate(tabId!, {
         resetKind: "tab",
         forceModel: true,
       });
+
       assert.deepEqual(stale?.changes, []);
       assert.equal(
         (await snapshot()).tabs.find((t) => t.tab_id === tabId)?.label,
@@ -273,6 +301,7 @@ test.skipIf(!live)(
   async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "smart-rename-live-cli-"));
     let tabId: string | undefined;
+
     const server = Bun.serve({
       port: 0,
       fetch() {
@@ -292,6 +321,7 @@ test.skipIf(!live)(
         });
       },
     });
+
     try {
       const created = await command(
         "tab",
@@ -300,10 +330,12 @@ test.skipIf(!live)(
         process.env.HERDR_WORKSPACE_ID!,
         "--no-focus",
       );
+
       tabId = created.result.tab.tab_id;
       const pane: string = created.result.root_pane.pane_id;
       const label: string = created.result.tab.label;
       const root = path.resolve(import.meta.dir, "..");
+
       const child = Bun.spawn(
         [process.execPath, path.join(root, "src/cli.ts"), "rename-now"],
         {
@@ -323,11 +355,13 @@ test.skipIf(!live)(
           stderr: "pipe",
         },
       );
+
       const [stdout, stderr, exit] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
         child.exited,
       ]);
+
       assert.equal(exit, 1, stderr);
       const result = JSON.parse(stdout);
       assert.equal(result.outcomes[0].status, "failed");
@@ -338,6 +372,7 @@ test.skipIf(!live)(
       );
     } finally {
       server.stop(true);
+
       if (tabId) await command("tab", "close", tabId);
       await rm(dir, { recursive: true, force: true });
     }

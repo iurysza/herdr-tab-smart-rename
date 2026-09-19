@@ -39,9 +39,11 @@ export function modelSelectionPath(configDir: string): string {
 
 export function parseModelSelection(value: unknown): ModelSelection {
   const parsed = ModelSelectionSchema.safeParse(value);
+
   if (!parsed.success) {
     throw new Error("model-selection.json is invalid; run setup");
   }
+
   return parsed.data;
 }
 
@@ -51,10 +53,13 @@ function environmentSelection(
 ): ModelSelection {
   const source =
     env.SMART_RENAME_MODEL_SOURCE ?? env.SMART_RENAME_SOURCE ?? selection.source;
+
   const profile = env.SMART_RENAME_PROFILE ?? selection.profile;
+
   if (source === "direct" && selection.provider === "direct" && selection.model === "direct") {
     return DEFAULT_DIRECT_SELECTION;
   }
+
   return parseModelSelection({
     version: 1,
     source,
@@ -69,15 +74,18 @@ export async function loadModelSelection(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ModelSelection> {
   if (!configDir) return environmentSelection(DEFAULT_DIRECT_SELECTION, env);
+
   try {
     const selection = parseModelSelection(
       JSON.parse(await readFile(modelSelectionPath(configDir), "utf8")),
     );
+
     return environmentSelection(selection, env);
   } catch (error) {
     if (errorCode(error) === "ENOENT") {
       return environmentSelection(DEFAULT_DIRECT_SELECTION, env);
     }
+
     throw error;
   }
 }
@@ -108,6 +116,7 @@ export async function saveModelSelection(
   await dependencies.chmod(configDir, 0o700);
   const file = modelSelectionPath(configDir);
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+
   try {
     await dependencies.writeFile(
       temporary,
@@ -131,15 +140,19 @@ export async function resolvePluginConfigDirectory(
   ) => Promise<{ stdout: string; exitCode: number }> = runConfigDirectoryCommand,
 ): Promise<string> {
   if (env.HERDR_PLUGIN_CONFIG_DIR) return env.HERDR_PLUGIN_CONFIG_DIR;
+
   const result = await run(env.HERDR_BIN_PATH || "herdr", [
     "plugin",
     "config-dir",
     "tab-smart-rename",
   ]);
+
   const directory = result.stdout.trim();
+
   if (result.exitCode !== 0 || !directory) {
     throw new Error("Could not resolve the Smart Rename config directory");
   }
+
   return directory;
 }
 
@@ -152,10 +165,12 @@ async function runConfigDirectoryCommand(
     stderr: "ignore",
     env: process.env,
   });
+
   const [stdout, exitCode] = await Promise.all([
     new Response(child.stdout).text(),
     child.exited,
   ]);
+
   return { stdout, exitCode };
 }
 

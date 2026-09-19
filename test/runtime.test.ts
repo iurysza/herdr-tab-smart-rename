@@ -10,12 +10,14 @@ import { shouldIgnoreProgressRename } from "../src/worker.ts";
 
 test("CLI dispatch routes actions without executing on import", async () => {
   const calls: Array<[string, { dryRun: boolean }]> = [];
+
   const actions = {
     status: (options: { dryRun: boolean }) => calls.push(["status", options]),
     once: (options: { dryRun: boolean }) => calls.push(["once", options]),
     "reset-pane": (options: { dryRun: boolean }) =>
       calls.push(["reset-pane", options]),
   };
+
   await dispatch("status", { actions });
   await dispatch("once", { actions, dryRun: true });
   await dispatch("reset-pane", { actions });
@@ -47,6 +49,7 @@ test("CLI dispatch routes actions without executing on import", async () => {
     ownership: { workspaceManual: false, tabManual: false },
     changes: [],
   };
+
   assert.deepEqual(currentResultNotice(result), {
     title: "Tab not renamed",
     body: "No meaningful task found",
@@ -106,10 +109,12 @@ test("Bun launcher survives Herdr's minimal server PATH", async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-bun-"));
   const bunDir = path.join(home, ".bun", "bin");
   const fakeBun = path.join(bunDir, "bun");
+
   try {
     await mkdir(bunDir, { recursive: true });
     await writeFile(fakeBun, "#!/bin/sh\nprintf 'fake-bun:%s\\n' \"$*\"\n");
     await chmod(fakeBun, 0o700);
+
     const child = Bun.spawn(
       [
         "/bin/sh",
@@ -123,11 +128,13 @@ test("Bun launcher survives Herdr's minimal server PATH", async () => {
         stderr: "pipe",
       },
     );
+
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
       child.exited,
     ]);
+
     assert.equal(exitCode, 0, stderr);
     assert.equal(stdout.trim(), "fake-bun:src/cli.ts status");
   } finally {
@@ -154,9 +161,11 @@ test("locks recover dead owners and workers require exact Bun scripts", async ()
   const dir = await mkdtemp(
     path.join(os.tmpdir(), "tab-smart-rename-runtime-"),
   );
+
   const lock = path.join(dir, "state.lock");
   const pidFile = path.join(dir, "worker.json");
   const expected = "/repo/herdr-tab-smart-rename/src/worker.ts";
+
   try {
     await writeFile(lock, '{"pid":99999999,"nonce":"old"}\n');
     const release = await acquireLock(lock, { timeoutMs: 500 });
@@ -167,10 +176,12 @@ test("locks recover dead owners and workers require exact Bun scripts", async ()
       pidFile,
       `${JSON.stringify({ pid: 42, script: expected, startedAt: "now" })}\n`,
     );
+
     const dependencies = {
       isAlive: () => true,
       commandForPid: async () => `bun ${expected}`,
     };
+
     assert.equal((await workerInfo(pidFile, expected, dependencies))?.pid, 42);
     assert.equal(
       await workerInfo(pidFile, "/other/src/worker.ts", dependencies),
@@ -185,10 +196,13 @@ test(
   "worker inspection uses the native process lookup on Windows",
   async () => {
     if (process.platform !== "win32") return;
+
     const dir = await mkdtemp(
       path.join(os.tmpdir(), "tab-smart-rename-process-"),
     );
+
     const pidFile = path.join(dir, "worker.json");
+
     try {
       await writeFile(
         pidFile,
@@ -214,6 +228,7 @@ test("CLI notices distinguish ownership, stale targets, and provider failure", (
     changes: [],
     reason: "manual pane ownership",
   };
+
   assert.equal(currentResultNotice(result).body, "manual pane ownership");
   assert.equal(
     currentResultNotice({ ...result, reason: "target or source changed" }).body,

@@ -11,11 +11,14 @@ test("release-please owns the package version and updates the plugin manifest", 
     ),
     readFile(new URL("../release-please-config.json", import.meta.url), "utf8"),
   ]);
+
   const packageJson = JSON.parse(packageSource) as { version: string };
+
   const releaseManifest = JSON.parse(releaseManifestSource) as Record<
     string,
     string
   >;
+
   const config = JSON.parse(configSource) as {
     packages: Record<string, Record<string, unknown>>;
   };

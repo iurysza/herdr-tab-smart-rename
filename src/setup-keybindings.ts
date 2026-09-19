@@ -4,6 +4,7 @@ import path from "node:path";
 import { sanitizeText } from "./text.ts";
 
 export type KeybindingAction = "rename-now" | "rename-all";
+
 export type KeybindingStatus = "already-configured" | "available" | "colliding" | "uncertain";
 
 export interface KeybindingInstruction {
@@ -53,6 +54,7 @@ export function resolveHerdrConfigPath(
 ): string | undefined {
   if (env.HERDR_CONFIG_PATH) return env.HERDR_CONFIG_PATH;
   const root = env.XDG_CONFIG_HOME || (env.HOME ? path.join(env.HOME, ".config") : undefined);
+
   return root ? path.join(root, "herdr", "config.toml") : undefined;
 }
 
@@ -71,19 +73,23 @@ export async function inspectKeybindings(
   const instructions = KEYBINDING_INSTRUCTIONS.filter((instruction) =>
     requested.includes(instruction.action),
   );
+
   const remoteAttachNote = "For remote attaches, keybindings normally belong to the attaching client. This server-side setup cannot inspect that client configuration.";
   const configPath = resolveHerdrConfigPath(env);
+
   if (!configPath || !(await exists(configPath))) {
     return uncertain(instructions, "The local Herdr config path is unavailable; no binding or collision status was checked.", remoteAttachNote);
   }
 
   const originalCheck = await checkConfig(configPath, env, run);
+
   if (originalCheck.exitCode !== 0) {
     return uncertain(instructions, `The local Herdr config is invalid: ${diagnostic(originalCheck)}.`, remoteAttachNote, configPath);
   }
 
   let original: string;
   let parsed: unknown;
+
   try {
     original = await read(configPath, "utf8");
     parsed = Bun.TOML.parse(original);
@@ -93,11 +99,13 @@ export async function inspectKeybindings(
 
   const existing = configuredActions(parsed);
   const results: KeybindingResult[] = [];
+
   for (const instruction of instructions) {
     if (existing.has(`tab-smart-rename.${instruction.action}`)) {
       results.push({ action: instruction.action, status: "already-configured", instruction });
       continue;
     }
+
     const candidate = `${original.trimEnd()}\n\n${instruction.toml}\n`;
     const checked = await checkCandidate(candidate, env, run, temporaryDirectory, write, remove);
     results.push({
@@ -107,15 +115,19 @@ export async function inspectKeybindings(
       ...(checked.exitCode === 0 ? {} : { diagnostic: diagnostic(checked) }),
     });
   }
+
   return { path: configPath, results, remoteAttachNote };
 }
 
 function configuredActions(value: unknown): Set<string> {
   if (!value || typeof value !== "object") return new Set();
   const keys = (value as Record<string, unknown>).keys;
+
   if (!keys || typeof keys !== "object") return new Set();
   const commands = (keys as Record<string, unknown>).command;
+
   if (!Array.isArray(commands)) return new Set();
+
   return new Set(
     commands
       .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
@@ -134,10 +146,12 @@ async function checkCandidate(
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const directory = await temporaryDirectory("smart-rename-keybindings-");
   const candidate = path.join(directory, "config.toml");
+
   try {
     await chmod(directory, 0o700);
     await write(candidate, content, { mode: 0o600 });
     await chmod(candidate, 0o600);
+
     return await checkConfig(candidate, env, run);
   } finally {
     await remove(directory, { recursive: true, force: true });
@@ -180,6 +194,7 @@ function diagnostic(result: { stdout: string; stderr: string }): string {
 async function fileExists(file: string): Promise<boolean> {
   try {
     await stat(file);
+
     return true;
   } catch {
     return false;
@@ -192,10 +207,12 @@ async function defaultRun(
   env: NodeJS.ProcessEnv,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const child = Bun.spawn([command, ...args], { env, stdout: "pipe", stderr: "pipe" });
+
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
     child.exited,
   ]);
+
   return { exitCode, stdout, stderr };
 }

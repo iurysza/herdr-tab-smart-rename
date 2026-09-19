@@ -93,24 +93,33 @@ const EventEnvelopeSchema = z.object({
 });
 
 export type HerdrSnapshot = z.infer<typeof SnapshotSchema>;
+
 export type HerdrWorkspace = z.infer<typeof WorkspaceSchema>;
+
 export type HerdrTab = z.infer<typeof TabSchema>;
+
 export type HerdrPane = z.infer<typeof PaneSchema>;
+
 export type HerdrEvent = z.infer<typeof EventEnvelopeSchema>["data"] & {
   eventName: string;
   type: string;
 };
 
 const TAB_PROGRESS_MARKER = "\u2063";
+
 const TAB_PROGRESS_FRAMES = ["◇", "◈", "◆", "◈"] as const;
+
 const TAB_PROGRESS_INTERVAL_MS = 120;
 
 export function tabProgressBase(label: string): string | null {
   if (!label.startsWith(TAB_PROGRESS_MARKER)) return null;
   const separator = label.indexOf(" ", TAB_PROGRESS_MARKER.length);
+
   if (separator < 0) return null;
   const frame = label.slice(TAB_PROGRESS_MARKER.length, separator);
+
   if (!(TAB_PROGRESS_FRAMES as readonly string[]).includes(frame)) return null;
+
   return label.slice(separator + 1);
 }
 
@@ -150,24 +159,31 @@ export async function run(
     stderr: "pipe",
     windowsHide: true,
   });
+
   let timedOut = false;
+
   const timer = setTimeout(() => {
     timedOut = true;
     child.kill();
   }, options.timeout ?? 10_000);
+
   try {
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
       child.exited,
     ]);
+
     if (timedOut) throw new Error(`${command} timed out`);
+
     if (exitCode !== 0) {
       throw new Error(stderr.trim() || `${command} exited ${exitCode}`);
     }
+
     if (Buffer.byteLength(stdout) > (options.maxBuffer ?? 2 * 1024 * 1024)) {
       throw new Error(`${command} output exceeded buffer`);
     }
+
     return stdout.trim();
   } finally {
     clearTimeout(timer);
@@ -203,6 +219,7 @@ export async function beginTabProgress(
 ): Promise<() => Promise<void>> {
   // Another request may already own a pulse. Never nest or restore its label.
   if (tabProgressBase(tab.label) !== null) return async () => {};
+
   const base = tab.label;
   let expected = base;
   let frame = 0;
@@ -214,13 +231,17 @@ export async function beginTabProgress(
     work = work
       .then(async () => {
         if (stopped) return;
+
         const current = (await snapshot(env)).tabs.find(
           (item) => item.tab_id === tab.tab_id,
         )?.label;
+
         if (stopped || current !== expected) {
           stopped = true;
+
           return;
         }
+
         const next = tabProgressLabel(base, TAB_PROGRESS_FRAMES[nextFrame]!);
         await rename("tab", tab.tab_id, next, env);
         expected = next;
@@ -229,6 +250,7 @@ export async function beginTabProgress(
       .catch(() => {
         stopped = true;
       });
+
     return work;
   };
 
@@ -241,17 +263,22 @@ export async function beginTabProgress(
   };
 
   await update(0);
+
   if (!stopped) schedule();
 
   return async () => {
     stopped = true;
+
     if (timer) clearTimeout(timer);
     await work;
+
     if (expected === base) return;
+
     try {
       const current = (await snapshot(env)).tabs.find(
         (item) => item.tab_id === tab.tab_id,
       )?.label;
+
       if (current === expected) await rename("tab", tab.tab_id, base, env);
     } catch {
       // Progress cleanup must not hide the naming result.
@@ -261,6 +288,7 @@ export async function beginTabProgress(
 
 export async function gitRoot(cwd?: string): Promise<string | null> {
   if (!cwd) return null;
+
   try {
     return await run("git", ["-C", cwd, "rev-parse", "--show-toplevel"]);
   } catch {
@@ -294,8 +322,11 @@ async function paneProcess(
     const data = ProcessResponseSchema.parse(
       await herdrJson(["pane", "process-info", "--pane", paneId], env),
     );
+
     const item = data.result.process_info.foreground_processes?.[0];
+
     if (!item) return null;
+
     return {
       name: boundedText(item.argv0 ?? item.name, 80),
       command: boundedText(item.cmdline ?? item.argv?.join(" ") ?? "", 500),
@@ -315,6 +346,7 @@ export async function focusedPaneContext(
     paneRecent(pane.pane_id, env),
     paneSessionMessages(pane, env),
   ]);
+
   return {
     focused: true,
     label: boundedText(pane.label, 80),
@@ -344,7 +376,9 @@ export async function siblingPaneContext(
 
 export function normalizeHerdrEvent(message: unknown): HerdrEvent | null {
   const envelope = EventEnvelopeSchema.safeParse(message);
+
   if (!envelope.success) return null;
+
   return {
     ...envelope.data.data,
     eventName: envelope.data.event,
@@ -357,7 +391,9 @@ export function paneLabelUpdate(
   event: HerdrEvent,
 ): { paneId: string; label: string } | null {
   if (event.type !== "pane_updated" || !event.pane) return null;
+
   if (!("label" in event.pane)) return null;
+
   return { paneId: event.pane.pane_id, label: event.pane.label ?? "" };
 }
 
@@ -368,7 +404,9 @@ export function resolveSocketPath(
   platform: NodeJS.Platform = process.platform,
 ): string {
   if (platform !== "win32") return socketPath;
+
   if (socketPath.startsWith(WINDOWS_PIPE_PREFIX)) return socketPath;
+
   return `${WINDOWS_PIPE_PREFIX}${socketPath}`;
 }
 
@@ -393,17 +431,21 @@ export function subscribe(
   socket.on("data", (chunk: string) => {
     buffer += chunk;
     let index: number;
+
     while ((index = buffer.indexOf("\n")) !== -1) {
       const rawLine = buffer.slice(0, index);
       buffer = buffer.slice(index + 1);
       const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+
       try {
         const event = normalizeHerdrEvent(JSON.parse(line));
+
         if (event) onEvent(event);
       } catch {
         // Reconnect handles malformed streams.
       }
     }
   });
+
   return socket;
 }
