@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.5.0...v0.5.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **storage:** retry Windows EPERM/EACCES on exclusive lock create ([d688bcb](https://github.com/iurysza/herdr-tab-smart-rename/commit/d688bcbabc2f604f73e18c50e7ec5a6ac83fa052))
+* **storage:** retry Windows EPERM/EACCES on exclusive lock create ([0e04e8b](https://github.com/iurysza/herdr-tab-smart-rename/commit/0e04e8bf1234c9ab170fa83878b4e49de2c6376e))
+
 ## [0.5.0](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.4.0...v0.5.0) (2026-09-14)
 
 
