@@ -58,19 +58,19 @@ trap 'exit 143' TERM
 
 case "$BUN" in
   */*) [ -x "$BUN" ] || die "Bun executable not found: $BUN" ;;
-  *) command -v "$BUN" >/dev/null 2>&1 || die "Bun 1.1.34 or newer is required before installation" ;;
+  *) command -v "$BUN" >/dev/null 2>&1 || die "Bun 1.1.39 or newer is required before installation" ;;
 esac
 bun_version="$("$BUN" --version 2>/dev/null || true)"
 SMART_RENAME_BUN_VERSION="$bun_version" "$BUN" -e '
 const value = process.env.SMART_RENAME_BUN_VERSION || "";
 const found = value.match(/^(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
-const minimum = [1, 1, 34];
+const minimum = [1, 1, 39];
 if (!found) process.exit(1);
 for (let index = 0; index < minimum.length; index += 1) {
   if (found[index] > minimum[index]) process.exit(0);
   if (found[index] < minimum[index]) process.exit(1);
 }
-' || die "Bun 1.1.34 or newer is required (found ${bun_version:-unknown})"
+' || die "Bun 1.1.39 or newer is required (found ${bun_version:-unknown})"
 
 case "$HERDR" in
   */*) [ -x "$HERDR" ] || die "Herdr executable not found: $HERDR" ;;

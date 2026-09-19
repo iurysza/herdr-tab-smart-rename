@@ -1,6 +1,6 @@
 # Install or upgrade Smart Rename
 
-Use a terminal inside Herdr. Install Herdr 0.7.0+ and Bun 1.1.34+ first. The installer checks these tools; it does not install them.
+Use a terminal inside Herdr. Install Herdr 0.7.0+ and Bun 1.1.39+ first. The installer checks these tools; it does not install them.
 
 ## macOS and Linux
 
