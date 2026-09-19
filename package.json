@@ -7,6 +7,8 @@
   "packageManager": "bun@1.1.34",
   "scripts": {
     "check": "tsc --noEmit",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
     "test": "bun test",
     "setup": "bun src/setup.ts"
   },
@@ -26,7 +28,9 @@
     "@opencode-ai/sdk": "1.18.13"
   },
   "devDependencies": {
+    "@oxlint/plugins": "1.83.0",
     "@types/bun": "1.3.14",
+    "oxlint": "1.83.0",
     "typescript": "7.0.2"
   }
 }
