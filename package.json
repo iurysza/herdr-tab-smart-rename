@@ -4,7 +4,7 @@
   "description": "Context-aware workspace and task tab names for Herdr",
   "type": "module",
   "private": true,
-  "packageManager": "bun@1.1.39",
+  "packageManager": "bun@1.2.23",
   "scripts": {
     "check": "tsc --noEmit",
     "lint": "oxlint",
@@ -13,7 +13,7 @@
     "setup": "bun src/setup.ts"
   },
   "engines": {
-    "bun": ">=1.1.39"
+    "bun": ">=1.2.23"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.49",

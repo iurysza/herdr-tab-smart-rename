@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # Keep in sync with the "packageManager"/"engines" fields in package.json.
-BUN_VERSION="1.1.39"
+BUN_VERSION="1.2.23"
 
 if [ ! -x "$HOME/.bun/bin/bun" ]; then
   curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"

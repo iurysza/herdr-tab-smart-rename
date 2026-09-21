@@ -9,7 +9,7 @@ bun install --frozen-lockfile
 bun run check
 ```
 
-Use Bun 1.1.39 or newer. `bun run check` runs strict TypeScript checks without emitting files.
+Use Bun 1.2.23 or newer. `bun run check` runs strict TypeScript checks without emitting files.
 
 To use the checkout in Herdr, link it after installing dependencies:
 
