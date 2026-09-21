@@ -534,6 +534,7 @@ export class AutoNameService {
         let focused: PaneContext | undefined;
         let sourcePanes: HerdrPane[] = [];
         let agent = false;
+        let transcriptAgent = false;
 
         if (target.kind === "tab") {
           const details = await this.contextFor(
@@ -547,6 +548,7 @@ export class AutoNameService {
           context = details.context;
           focused = details.paneContexts.find((p) => p.focused);
           agent = Boolean(details.focusedPane?.agent);
+          transcriptAgent = ["pi", "claude"].includes(details.focusedPane?.agent ?? "");
           sourcePanes = details.focusedPane ? [details.focusedPane] : [];
         } else if (target.kind === "pane") {
           const pane = panes.find((p) => p.pane_id === target.id)!;
@@ -562,6 +564,7 @@ export class AutoNameService {
           context = details.context;
           focused = details.paneContexts[0];
           agent = true;
+          transcriptAgent = ["pi", "claude"].includes(pane.agent ?? "");
           sourcePanes = [pane];
         }
 
@@ -612,6 +615,14 @@ export class AutoNameService {
           }
 
           if (needsModel && context) {
+            if (
+              transcriptAgent &&
+              !hasUserTask &&
+              !options.forceModel &&
+              !options.forceRefresh
+            )
+              return "waiting for the first user request";
+
             if (
               !hasUserTask &&
               !agent &&
