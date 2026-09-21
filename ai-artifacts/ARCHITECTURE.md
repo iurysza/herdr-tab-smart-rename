@@ -122,7 +122,7 @@ flowchart TD
 
 ## Key Tradeoffs and Constraints
 
-- Direct Bun execution removes a JavaScript build step but requires Bun 1.1.39 or newer on every host.
+- Direct Bun execution removes a JavaScript build step but requires Bun 1.2.23 or newer on every host.
 - Zod schemas add boundary code but prevent external JSON from becoming trusted TypeScript data by assertion.
 - Short state locks protect reconciliation, request gates, and rename writes. Model calls run unlocked. A persisted decision ID rejects older results, including context reads that finish after a newer explicit request.
 - The progress pulse uses temporary Herdr renames because plugins cannot render tab chrome. An invisible marker and exact-label guard prevent those writes from stealing ownership.

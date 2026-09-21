@@ -20,7 +20,7 @@ https://github.com/user-attachments/assets/0c9d1ff9-58c5-4b87-a505-74fcb62e29b1
 
 ## Install on macOS or Linux
 
-You need Herdr 0.7.0+ and Bun 1.1.39+ installed. Pi and OpenCode are optional.
+You need Herdr 0.7.0+ and Bun 1.2.23+ installed. Pi and OpenCode are optional.
 
 Run this from a Herdr terminal:
 
