@@ -109,6 +109,8 @@ flowchart TD
     L --> M[Confirm ownership from rename event]
 ```
 
+Automatic model naming of Pi and Claude Code tabs and panes waits for a readable user request before reserving a model attempt. Empty or unavailable transcripts preserve existing labels without starting a cooldown. Explicit actions and deterministic process labels bypass this gate; agents without transcript support retain terminal-based naming.
+
 ### Explicit action
 
 `rename-now` and `rename-all` reclaim only their target tabs and bypass stability and cooldown gates. `reset-pane` and `reset-workspace` affect only their own target kind. Background evaluation independently names automatic targets. During a model-backed `rename-now`, the service prefixes the current label with a guarded `◇ ◈ ◆ ◈` pulse. It stops if the label changes externally and restores only its own last write. `rename-all` and background naming remain quiet. Every explicit action reports renamed, unchanged, abstained, or failed through Herdr notifications.

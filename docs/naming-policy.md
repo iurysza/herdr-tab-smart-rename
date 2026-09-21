@@ -64,6 +64,7 @@ The model does not simulate or decide the rules below.
 - **Deterministic names:** test runner → `Run Tests`; development server → `Dev Server`; log follower → `View Logs`; SSH or Mosh → `Remote Shell`.
 - **Context:** Pi and Claude Code sessions contribute origin, midpoint, and up to four recent user requests; focused commands contribute bounded process data and output; siblings contribute process summaries only.
 - **Safety:** context is sanitized and capped at 4,500 serialized characters; environment values are excluded; common credential shapes are redacted best-effort.
+- **First request:** automatic model naming for Pi and Claude Code tabs and panes waits for a readable user request; startup banners are not task evidence. Existing labels remain unchanged while waiting. Explicit actions and deterministic process labels bypass this gate; agents without transcript support retain terminal-based naming.
 - **Churn control:** events are debounced; a 60-second sweep catches silent task changes; unchanged successes are skipped; background model attempts wait 10 minutes per target; explicit actions bypass those gates.
 - **Validation:** invalid JSON, unchanged labels, and labels outside the word, length, or format rules are rejected.
 
