@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.5.1...v0.5.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* wait for user requests before naming empty agent sessions ([#35](https://github.com/iurysza/herdr-tab-smart-rename/issues/35)) ([571be23](https://github.com/iurysza/herdr-tab-smart-rename/commit/571be23a695a203160163d93cf22002bd62fefae))
+
 ## [0.5.1](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.5.0...v0.5.1) (2026-09-19)
 
 
