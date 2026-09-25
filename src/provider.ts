@@ -43,7 +43,7 @@ const ProviderConfigSchema = z.object({
     .transform((value) => value.replace(/\/$/, "")),
   model: z.string().min(1).refine((value) => !/[\r\n]/.test(value)),
   timeoutMs: z.number().int().min(1_000).max(300_000),
-  reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
+  reasoningEffort: z.enum(["none", "low", "medium", "high"]).optional(),
   promptPath: z.string().min(1).optional(),
   apiKey: z.string().min(1),
 });
@@ -181,7 +181,7 @@ function configError(error: z.ZodError): Error {
     baseURL: "SMART_RENAME_BASE_URL must be an HTTP(S) URL without credentials",
     model: "SMART_RENAME_MODEL is required",
     timeoutMs: "SMART_RENAME_TIMEOUT_MS must be 1000-300000",
-    reasoningEffort: "SMART_RENAME_REASONING_EFFORT must be low, medium, or high",
+    reasoningEffort: "SMART_RENAME_REASONING_EFFORT must be none, low, medium, or high",
     promptPath: "SMART_RENAME_PROMPT_PATH is invalid",
     apiKey: `AI key missing. Run setup or set a provider key in ${PROVIDER_ENV_NAME}`,
   };

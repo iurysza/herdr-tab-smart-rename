@@ -96,7 +96,7 @@ Known Direct providers are defined in a registry that can supply endpoint, model
 | `SMART_RENAME_BASE_URL` | OpenAI-compatible endpoint |
 | `SMART_RENAME_MODEL` | Model ID |
 | `SMART_RENAME_API_KEY` | API key |
-| `SMART_RENAME_REASONING_EFFORT` | Reasoning level; an empty value disables it |
+| `SMART_RENAME_REASONING_EFFORT` | `none`, `low`, `medium`, or `high`. `none` turns reasoning off; an empty value leaves the field out, so the provider's default applies |
 | `SMART_RENAME_TIMEOUT_MS` | Request timeout in milliseconds |
 | `SMART_RENAME_PROMPT_PATH` | Custom naming prompt |
 

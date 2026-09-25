@@ -127,6 +127,25 @@ test("DeepSeek profile supplies defaults and its standard key alias", async () =
   }
 });
 
+test("reasoning effort accepts none", async () => {
+  const fixture = await tempConfig();
+  const env = { ...fixture.env, OPENAI_API_KEY: "test-key" };
+
+  try {
+    assert.equal(
+      (await loadProviderConfig({ ...env, SMART_RENAME_REASONING_EFFORT: "none" }))
+        .reasoningEffort,
+      "none",
+    );
+    await assert.rejects(
+      loadProviderConfig({ ...env, SMART_RENAME_REASONING_EFFORT: "off" }),
+      /must be none, low, medium, or high/,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("private provider and prompt config enforce templates, permissions, and bounds", async () => {
   const fixture = await tempConfig();
   await rm(fixture.root, { recursive: true, force: true });
@@ -262,6 +281,7 @@ test("provider transport uses the provider-compatible output-token parameter", a
       reason: "transport contract",
     });
     assert.equal(requestBody?.max_tokens, 32_768);
+    assert.equal(requestBody?.reasoning_effort, undefined);
 
     const openaiNamer = new AiSdkNamer({
       SMART_RENAME_PROVIDER: "openai",
@@ -274,6 +294,19 @@ test("provider transport uses the provider-compatible output-token parameter", a
     await openaiNamer.suggest(context);
     assert.equal(requestBody?.max_completion_tokens, 32_768);
     assert.equal(requestBody?.max_tokens, undefined);
+    assert.equal(requestBody?.reasoning_effort, "medium");
+
+    const noThinkingNamer = new AiSdkNamer({
+      SMART_RENAME_PROVIDER: "test-provider",
+      SMART_RENAME_BASE_URL: `http://127.0.0.1:${server.port}/v1`,
+      SMART_RENAME_MODEL: "test-model",
+      SMART_RENAME_API_KEY: "test-key",
+      SMART_RENAME_REASONING_EFFORT: "none",
+      SMART_RENAME_TIMEOUT_MS: "5000",
+    });
+
+    await noThinkingNamer.suggest(context);
+    assert.equal(requestBody?.reasoning_effort, "none");
   } finally {
     server.stop(true);
   }
