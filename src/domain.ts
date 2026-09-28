@@ -15,12 +15,25 @@ export interface SmartRenameState {
   tabs: Record<string, OwnershipRecord>;
   panes: Record<string, OwnershipRecord>;
   modelAttempts: Record<string, number>;
+  // Agent sessions each target already has a model name for, newest last.
+  namedSessions: Record<string, string[]>;
+  retries: Record<string, RetryRecord>;
   fingerprints: Record<string, string>;
   pendingFingerprints: Record<string, string>;
   // Latest decision per target, retained after completion to reject older reads.
   evaluations: Record<string, string>;
   [key: string]: unknown;
 }
+
+// Why the last model call for a target produced no usable name.
+export type RetryRecord =
+  | { status: "declined"; session?: string | undefined; fingerprint: string }
+  | {
+      status: "failed";
+      session?: string | undefined;
+      failures: number;
+      retryAt: number;
+    };
 
 export interface ProcessInfo {
   name: string;
@@ -41,6 +54,8 @@ export interface PaneContext {
   recentOutput: string;
   userMessages: string[];
   sessionMessages?: SessionTimeline;
+  // True when an agent transcript was read, even if it has no requests yet.
+  transcript?: boolean;
 }
 
 interface ProcessEvidence {
@@ -103,6 +118,10 @@ export const MAX_CONTEXT_CHARS = 4_500;
 
 export const MODEL_RATE_MS = 10 * 60 * 1_000;
 
+export const MODEL_RETRY_MS = 30_000;
+
+const NAMED_SESSION_LIMIT = 8;
+
 export function emptyState(): SmartRenameState {
   return {
     version: 1,
@@ -110,6 +129,8 @@ export function emptyState(): SmartRenameState {
     tabs: {},
     panes: {},
     modelAttempts: {},
+    namedSessions: {},
+    retries: {},
     fingerprints: {},
     pendingFingerprints: {},
     evaluations: {},
@@ -457,20 +478,62 @@ export function observeStableContext(
   return false;
 }
 
+function isTaskContext(context: NamingContext): boolean {
+  return !("focusedPane" in context);
+}
+
+function hasNamedSession(
+  state: SmartRenameState,
+  tabId: string,
+  session: string | undefined,
+): boolean {
+  const sessions = state.namedSessions[tabId];
+
+  // State from older versions has fingerprints but no session list.
+  if (!sessions) return Boolean(state.fingerprints[tabId]);
+
+  return session === undefined || sessions.includes(session);
+}
+
+export interface ModelGate {
+  allowed: boolean;
+  fingerprint: string;
+}
+
 export function shouldCallModel(
   state: SmartRenameState,
   tabId: string,
   context: NamingContext,
   now = Date.now(),
-): { allowed: boolean; fingerprint: string } {
+  session?: string,
+): ModelGate {
   const mark = fingerprint(context);
+  const stored = state.retries[tabId];
+  const retry = stored?.session === session ? stored : undefined;
 
-  return {
-    allowed:
-      state.fingerprints[tabId] !== mark &&
-      now - (state.modelAttempts[tabId] ?? 0) >= MODEL_RATE_MS,
-    fingerprint: mark,
-  };
+  const cooledDown =
+    state.fingerprints[tabId] !== mark &&
+    now - (state.modelAttempts[tabId] ?? 0) >= MODEL_RATE_MS;
+
+  // Process output changes constantly, so only task contexts skip the
+  // cooldown. The short gap stops a second call while one is still running.
+  const firstTask =
+    isTaskContext(context) &&
+    !hasNamedSession(state, tabId, session) &&
+    now - (state.modelAttempts[tabId] ?? 0) >= MODEL_RETRY_MS;
+
+  if (retry?.status === "failed")
+    return { allowed: now >= retry.retryAt, fingerprint: mark };
+
+  if (retry?.status === "declined") {
+    return {
+      allowed:
+        retry.fingerprint !== mark && (isTaskContext(context) || cooledDown),
+      fingerprint: mark,
+    };
+  }
+
+  return { allowed: firstTask || cooledDown, fingerprint: mark };
 }
 
 export function markModelAttempt(
@@ -485,7 +548,51 @@ export function markModelSuccess(
   state: SmartRenameState,
   tabId: string,
   context: NamingContext,
+  session?: string,
 ): void {
+  const sessions = (state.namedSessions[tabId] ?? []).filter(
+    (item) => item !== session,
+  );
+
+  if (session) sessions.push(session);
+  state.namedSessions[tabId] = sessions.slice(-NAMED_SESSION_LIMIT);
+  delete state.retries[tabId];
   state.fingerprints[tabId] = fingerprint(context);
   delete state.pendingFingerprints[tabId];
+}
+
+export function markModelDeclined(
+  state: SmartRenameState,
+  tabId: string,
+  context: NamingContext,
+  session?: string,
+): void {
+  state.retries[tabId] = {
+    status: "declined",
+    session,
+    fingerprint: fingerprint(context),
+  };
+  delete state.pendingFingerprints[tabId];
+}
+
+export function markModelFailure(
+  state: SmartRenameState,
+  tabId: string,
+  now = Date.now(),
+  session?: string,
+): void {
+  const previous = state.retries[tabId];
+
+  const failures =
+    previous?.status === "failed" && previous.session === session
+      ? previous.failures + 1
+      : 1;
+
+  state.retries[tabId] = {
+    status: "failed",
+    session,
+    failures,
+    retryAt:
+      now + Math.min(MODEL_RETRY_MS * 2 ** (failures - 1), MODEL_RATE_MS),
+  };
 }

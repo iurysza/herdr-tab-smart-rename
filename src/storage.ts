@@ -29,6 +29,25 @@ const StateSchema: z.ZodType<SmartRenameState> = z.looseObject({
   tabs: z.record(z.string(), OwnershipRecordSchema),
   panes: z.record(z.string(), OwnershipRecordSchema),
   modelAttempts: z.record(z.string(), z.number()),
+  namedSessions: z.record(z.string(), z.array(z.string())).default({}),
+  retries: z
+    .record(
+      z.string(),
+      z.discriminatedUnion("status", [
+        z.object({
+          status: z.literal("declined"),
+          session: z.string().optional(),
+          fingerprint: z.string(),
+        }),
+        z.object({
+          status: z.literal("failed"),
+          session: z.string().optional(),
+          failures: z.number().int().positive(),
+          retryAt: z.number(),
+        }),
+      ]),
+    )
+    .default({}),
   fingerprints: z.record(z.string(), z.string()),
   pendingFingerprints: z.record(z.string(), z.string()),
   evaluations: z.record(z.string(), z.string()),

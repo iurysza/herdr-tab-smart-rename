@@ -7,6 +7,8 @@ import {
   heuristicTitle,
   isDefaultLabel,
   markModelAttempt,
+  markModelDeclined,
+  markModelFailure,
   markModelSuccess,
   observeStableContext,
   prepareRename,
@@ -17,6 +19,7 @@ import {
   workspaceCandidate,
   MAX_CONTEXT_CHARS,
   MODEL_RATE_MS,
+  MODEL_RETRY_MS,
   type NamingContext,
 } from "../src/domain.ts";
 import { sanitizeText } from "../src/text.ts";
@@ -188,4 +191,92 @@ test("process hints match real invocations, not paths, output, or arbitrary argu
       command,
     );
   }
+});
+
+test("first request per session skips the cooldown; later turns keep it", () => {
+  const state = emptyState();
+  const now = 1_000_000;
+  const task: NamingContext = { project: "Agents", userRequests: ["Fix login"] };
+  const next: NamingContext = { project: "Agents", userRequests: ["Add tests"] };
+
+  assert.equal(shouldCallModel(state, "t1", task, now, "s1").allowed, true);
+  markModelAttempt(state, "t1", now);
+  // A call still in flight blocks a duplicate, but not for ten minutes.
+  assert.equal(shouldCallModel(state, "t1", task, now + 1, "s1").allowed, false);
+
+  assert.equal(
+    shouldCallModel(state, "t1", task, now + MODEL_RETRY_MS, "s1").allowed,
+    true,
+  );
+
+  markModelSuccess(state, "t1", task, "s1");
+
+  assert.equal(
+    shouldCallModel(state, "t1", next, now + MODEL_RETRY_MS, "s1").allowed,
+    false,
+  );
+
+  assert.equal(
+    shouldCallModel(state, "t1", next, now + MODEL_RATE_MS, "s1").allowed,
+    true,
+  );
+
+  // A new agent session in the same pane is a new task.
+  assert.equal(
+    shouldCallModel(state, "t1", next, now + MODEL_RETRY_MS, "s2").allowed,
+    true,
+  );
+});
+
+test("upgraded state treats already-named targets as named", () => {
+  const state = emptyState();
+  const task: NamingContext = { project: "Agents", userRequests: ["Fix login"] };
+  const next: NamingContext = { project: "Agents", userRequests: ["Add tests"] };
+  state.fingerprints.t1 = "legacy";
+  markModelAttempt(state, "t1", 1_000_000);
+  assert.equal(shouldCallModel(state, "t1", next, 1_000_001, "s1").allowed, false);
+  assert.equal(shouldCallModel(state, "t2", task, 1_000_001, "s1").allowed, true);
+});
+
+test("process contexts keep the cooldown without a session record", () => {
+  const state = emptyState();
+
+  const context: NamingContext = {
+    project: "Agents",
+    focusedPane: { process: null, recentOutput: "building" },
+  };
+
+  assert.equal(shouldCallModel(state, "p1", context, 1_000_000).allowed, true);
+  markModelAttempt(state, "p1", 1_000_000);
+  assert.equal(shouldCallModel(state, "p1", context, 1_000_001).allowed, false);
+});
+
+test("failures back off exponentially up to the cooldown", () => {
+  const state = emptyState();
+  const context: NamingContext = { project: "Agents", userRequests: ["Fix login"] };
+  let now = 1_000_000;
+
+  for (const wait of [30_000, 60_000, 120_000, 240_000, 480_000, MODEL_RATE_MS]) {
+    markModelAttempt(state, "t1", now);
+    markModelFailure(state, "t1", now, "s1");
+    assert.equal(
+      shouldCallModel(state, "t1", context, now + wait - 1, "s1").allowed,
+      false,
+    );
+    assert.equal(shouldCallModel(state, "t1", context, now + wait, "s1").allowed, true);
+    now += wait;
+  }
+
+  markModelSuccess(state, "t1", context, "s1");
+  assert.equal(state.retries.t1, undefined);
+});
+
+test("a declined answer retries only when the task changes", () => {
+  const state = emptyState();
+  const task: NamingContext = { project: "Agents", userRequests: ["hi"] };
+  const next: NamingContext = { project: "Agents", userRequests: ["hi", "Fix login"] };
+  markModelAttempt(state, "t1", 1_000_000);
+  markModelDeclined(state, "t1", task, "s1");
+  assert.equal(shouldCallModel(state, "t1", task, 1_000_001, "s1").allowed, false);
+  assert.equal(shouldCallModel(state, "t1", next, 1_000_001, "s1").allowed, true);
 });

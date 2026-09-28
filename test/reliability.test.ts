@@ -373,3 +373,153 @@ test("resetting a non-agent pane does not rename it or its tab", async () => {
     await f.close();
   }
 });
+
+test("agents without a transcript reader still get named", async () => {
+  const f = await fixture();
+
+  try {
+    f.snap.panes = [
+      { pane_id: "p1", tab_id: "t1", workspace_id: "w1", agent: "codex" },
+    ];
+    f.setSuggest(async () => ({ tab: "Codex Work", reason: "process" }));
+    await f.service.initialize();
+    // The fixture context has no transcript, as for Codex or OpenCode.
+    const result = await f.service.evaluate("t1");
+    assert.equal(result?.candidate.tab, "Codex Work");
+  } finally {
+    await f.close();
+  }
+});
+
+test("a discarded answer does not start the cooldown", async () => {
+  const f = await fixture();
+
+  try {
+    let calls = 0;
+    f.setSuggest(async () => {
+      // The first answer arrives after its source session was replaced.
+      if (++calls === 1)
+        f.snap.panes[0]!.agent_session = { kind: "path", value: "new.jsonl" };
+
+      return { tab: "Repair Task Naming", reason: "task" };
+    });
+    f.snap.panes = [f.snap.panes[0]!];
+    await f.service.initialize();
+    await f.service.evaluate("t1");
+    assert.deepEqual(f.writes, []);
+    assert.equal((await loadState(f.paths.state)).modelAttempts.t1, undefined);
+    await f.service.evaluate("t1");
+    assert.equal(f.snap.tabs[0]!.label, "Repair Task Naming");
+  } finally {
+    await f.close();
+  }
+});
+
+test("tabs are renamed concurrently and each shows its own marker", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "smart-rename-concurrent-"));
+  const paths = statePaths(dir);
+  const release = deferred<void>();
+  const bothStarted = deferred<void>();
+  const marked = new Set<string>();
+  let peak = 0;
+
+  const snap: HerdrSnapshot = {
+    workspaces: [{ workspace_id: "w1", label: "Project", number: 1 }],
+    tabs: ["t1", "t2"].map((id, index) => ({
+      tab_id: id,
+      workspace_id: "w1",
+      label: String(index + 1),
+      number: index + 1,
+    })),
+    panes: ["t1", "t2"].map((id) => ({
+      pane_id: `p-${id}`,
+      tab_id: id,
+      workspace_id: "w1",
+      agent: "pi",
+    })),
+    layouts: [],
+  };
+
+  const service = new AutoNameService({
+    stateFile: paths.state,
+    stateLock: paths.stateLock,
+    namer: {
+      suggest: async (context) => {
+        const task =
+          "userRequests" in context ? context.userRequests[0]! : "unknown";
+
+        // Hold both answers until both tabs show a marker, so the check does
+        // not depend on which tab reaches its model call first.
+        await bothStarted.promise;
+
+        if (task === "p-t2") return { tab: "Fast Tab", reason: "task" };
+        await release.promise;
+
+        return { tab: "Slow Tab", reason: "task" };
+      },
+    },
+    progress: async (target) => {
+      if (target.kind === "tab") {
+        marked.add(target.id);
+        peak = Math.max(peak, marked.size);
+
+        if (marked.size === 2) bothStarted.resolve();
+      }
+
+      return async () => {
+        if (target.kind === "tab") marked.delete(target.id);
+      };
+    },
+    dependencies: {
+      snapshot: async () => structuredClone(snap),
+      focusedPaneContext: async (pane) => ({
+        focused: true,
+        label: pane.label ?? "",
+        process: null,
+        recentOutput: "",
+        userMessages: [pane.pane_id],
+        transcript: true,
+      }),
+      siblingPaneContext: async (pane) => ({
+        focused: false,
+        label: pane.label ?? "",
+        process: null,
+        recentOutput: "",
+        userMessages: [],
+      }),
+      rename: async (kind, id, label) => {
+        const item =
+          kind === "tab"
+            ? snap.tabs.find((t) => t.tab_id === id)
+            : snap.panes.find((p) => p.pane_id === id);
+
+        if (item) item.label = label;
+      },
+    },
+  });
+
+  try {
+    const all = service.evaluateAll(snap);
+    await bothStarted.promise;
+    // The fast tab finishes while the slow one is still waiting on its model.
+    await waitUntil(() => snap.tabs[1]!.label === "Fast Tab");
+    assert.equal(snap.tabs[0]!.label, "1");
+    release.resolve();
+    await all;
+    assert.equal(snap.tabs[0]!.label, "Slow Tab");
+    assert.equal(peak, 2);
+    assert.equal(marked.size, 0);
+  } finally {
+    release.resolve();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+async function waitUntil(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 2_000;
+
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("condition not met");
+    await Bun.sleep(5);
+  }
+}
