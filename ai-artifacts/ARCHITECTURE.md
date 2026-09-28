@@ -1,142 +1,51 @@
 # Architecture
 
-## System Overview
+Smart Rename is a Herdr plugin that names workspaces, tabs, and agent panes. The worker handles background naming; plugin actions handle explicit renames, setup, and worker control. Both entry points use the same service for naming. The [domain glossary](CONTEXT.md) distinguishes the label being changed from the pane supplying evidence.
 
-Smart Rename is a local Herdr plugin written in strict TypeScript and executed directly by Bun. A singleton worker reacts to Herdr events and periodic sweeps. CLI actions use the same service for manual renames, resets, configuration, and worker control.
+## Where control enters
 
-The service prefers deterministic process labels. It calls an OpenAI-compatible model only when task evidence is ambiguous. Persistent ownership records ensure user labels always win.
+[herdr-plugin.toml](../herdr-plugin.toml) registers actions, setup overlays, and the Bun dependency install. [src/cli.ts](../src/cli.ts) dispatches actions. `start` launches a detached [src/worker.ts](../src/worker.ts) and waits for it to mark the current Herdr socket ready. A live worker serving a different socket blocks another start; `status` reports which session it serves.
 
-```mermaid
-flowchart LR
-    U[User actions] --> CLI[cli.ts]
-    HS[Herdr socket] --> W[worker.ts]
-    T[60-second timer] --> W
-    CLI --> S[AutoNameService]
-    W --> S
-    S --> H[Herdr CLI and socket adapter]
-    S --> D[Pure naming domain]
-    S --> N[OpenAI-compatible namer]
-    S --> F[Private state and locks]
-    H --> P[Optional Pi session files]
-    PC[provider.env] --> N
-    NP[naming-prompt.md or bundled policy] --> N
-    N --> API[Configured AI endpoint]
+The worker subscribes to Herdr lifecycle events through [src/herdr.ts](../src/herdr.ts). Rename events update ownership immediately. Other relevant events schedule an evaluation after 400 ms; a 60-second sweep catches changes without a matching event. Event handling and evaluations run separately, so a model call does not hold up ownership events. The worker evaluates up to three tabs at once, but only one evaluation per tab. [src/model-namer.ts](../src/model-namer.ts) serializes model requests so concurrent evaluations cannot close each other's model source. On socket closure, the worker reconnects; on shutdown, it drains queued work and removes only its own worker record. See [src/worker.ts](../src/worker.ts) and [src/storage.ts](../src/storage.ts).
+
+## How a label is chosen
+
+[src/service.ts](../src/service.ts) reconciles a fresh Herdr snapshot with persisted ownership before deciding what to name. Background evaluations consider the workspace, tab, and recognized agent panes. Explicit actions restrict the target: `rename-now` and `reset-tab` affect the tab, `reset-pane` affects one pane, and `reset-workspace` affects the workspace. `rename-all` evaluates up to three tabs at once. An explicit action clears manual ownership for its target; the worker does not.
+
+For a tab, `focusedPaneFor` prefers the focused agent, then an active agent, then another pane. The service reads full context from that pane and process summaries from siblings. A pane label uses only that pane's context. The workspace candidate uses the worktree repository name, an existing non-default label, a Git root, or a pane directory in that order. These choices are in [src/service.ts](../src/service.ts) and [src/domain.ts](../src/domain.ts).
+
+```text
+Herdr snapshot + ownership
+          |
+          v
+eligible target
+          |
+          +--> workspace identity -> workspace candidate
+          +--> source pane + known command -> fixed task label
+          +--> source pane + other task    -> bounded context -> selected model
+                                                    |
+                                                    v
+                                       validate and recheck -> Herdr rename
 ```
 
-## Major Components and Responsibilities
+`heuristicTitle` names known commands such as test runs without a model call, but a user request takes precedence over that shortcut. For other tasks, `buildModelContext` prefers sampled user requests from a recognized Pi or Claude Code session. Without requests, it uses process and terminal evidence. The context is sanitized and capped at 4,500 JSON characters; redaction is best-effort. See [src/herdr.ts](../src/herdr.ts), [src/pi-context.ts](../src/pi-context.ts), [src/text.ts](../src/text.ts), and [privacy guidance](../docs/configuration.md#private-files-and-context).
 
-| Component | Responsibility |
-| --- | --- |
-| `cli.ts` | Dispatch plugin actions, control the worker, enable current-tab model activity, and show notifications |
-| `configure.ts` | Seed private provider and prompt files from tracked templates, then open them in the user's editor |
-| `worker.ts` | Subscribe to events, ignore owned activity writes, debounce evaluations, run sweeps, reconnect, and shut down cleanly |
-| `service.ts` | Coordinate snapshots, ownership, context, naming, model activity, persistence, and rename writes |
-| `domain.ts` | Define contracts and pure policy for labels, ownership, heuristics, prompts, fingerprints, and cooldowns |
-| `herdr.ts` | Validate Herdr data and manage guarded temporary and final rename writes |
-| `pi-context.ts` | Sample bounded user requests from approved Pi session files |
-| `provider.ts` | Resolve file-based defaults and overrides, reload the naming prompt, call the AI SDK, and validate model output |
-| `storage.ts` | Manage state paths, private permissions, atomic files, locks, worker identity, and stale recovery |
-| `text.ts` | Sanitize and bound text before prompts, state messages, and notifications |
+For Pi and Claude Code panes, background naming waits for the first user request before calling a model. For a non-agent command without user requests, it waits for the same context twice. Normal evaluations skip unchanged successful context. A new agent session can get its first task name after a short gap instead of waiting ten minutes; command-only context keeps the ten-minute limit. An abstention waits for changed context, while failed calls retry with increasing delays up to ten minutes. Explicit refreshes bypass these gates. See `observeStableContext`, `shouldCallModel`, and `evaluate` in [src/domain.ts](../src/domain.ts) and [src/service.ts](../src/service.ts).
 
-`herdr-plugin.toml` registers `tab-smart-rename` with 11 actions and two overlay panes. It also installs production dependencies with Bun.
+## Model and configuration boundary
 
-## Integration Points (APIs, queues, external services)
+[src/model-selection.ts](../src/model-selection.ts) loads `model-selection.json` before each model-backed rename. If it is absent, Direct is selected. [src/model-namer.ts](../src/model-namer.ts) routes to Direct or the selected Pi or OpenCode adapter, without falling back to another source on failure. Selection stores the source, provider, model, and optional profile, not a key. [src/setup.ts](../src/setup.ts) discovers choices and validates configuration before starting the worker; [src/setup-transaction.ts](../src/setup-transaction.ts) restores prior settings if a save or validation fails.
 
-### Herdr
+- **Direct:** [src/provider.ts](../src/provider.ts) reads private `provider.env` settings and the naming prompt for each request, then uses an OpenAI-compatible endpoint through the AI SDK.
+- **Pi:** [src/model-sources/pi.ts](../src/model-sources/pi.ts) uses Pi's model runtime for a completion, without starting a Pi agent or its tools.
+- **OpenCode:** [src/model-sources/opencode.ts](../src/model-sources/opencode.ts) starts a local server and a temporary session, denies tool execution, then attempts to delete the session and close the server. OpenCode may still show tool definitions to the provider.
 
-- CLI: snapshots, process information, terminal reads, renames, notifications, and plugin pane control
-- Unix socket: LF-delimited lifecycle event subscription
-- Environment: plugin root, state directory, config directory, socket path, and focused IDs
+The common output decoder in [src/effect/model-output.ts](../src/effect/model-output.ts) and label rules in [src/domain.ts](../src/domain.ts) reject malformed or invalid suggestions. An invalid model response or source failure is reported as a failed outcome, not a provider switch. `check-ai` validates selection and prompt but does not make a completion. Private configuration is separate from the plugin checkout; [configuration and controls](../docs/configuration.md) lists its files and precedence.
 
-### AI provider
+## Why a late result cannot rename an old task
 
-- protocol: OpenAI-compatible chat completion through Vercel AI SDK
-- default endpoint and model: OpenAI API with `gpt-5.6-luna`
-- provider defaults: tracked `provider.env.example`
-- user configuration: private `provider.env`, reloaded for every call
-- system prompt: bundled `docs/naming-policy.md`, overridden by private `naming-prompt.md` or `SMART_RENAME_PROMPT_PATH`
-- request: one non-streaming call, 45-second default timeout, one retry, and a 32,768 output-token ceiling
-- reasoning: medium by default; provider overrides may omit or replace it
+[src/storage.ts](../src/storage.ts) serializes short state transactions across the worker and CLI. Context reads and model requests happen outside the lock. Before a request, `evaluate` claims a decision ID for the target. Before writing the result, it reads a fresh snapshot and checks target existence, manual ownership, source-pane identity, and that the decision ID is still current. A closed pane, changed agent session, manual rename, or newer evaluation discards the older result. The service persists an expected label before calling Herdr and restores the previous ownership record if the rename command fails.
 
-### Local files and processes
+These checks do not make the Herdr rename atomic with the final snapshot: a manual edit between that check and the CLI write can still race. Pane closure discards a stale result but does not cancel a model request already sent. During model-backed naming, [src/herdr.ts](../src/herdr.ts) marks the tab and, for pane naming, the pane as in progress. It restores only its own marker if the label has not changed. The worker ignores marker events so they do not acquire manual ownership.
 
-- Pi session JSONL: optional task context for detected Pi panes
-- Git: repository root fallback for workspace identity
-- state directory: ownership records, model gates, worker PID, locks, and logs
-- config directory: private `provider.env` and optional `naming-prompt.md`
-- editor process: provider and prompt configuration panes
-
-There is no external queue. Separate promise chains handle events and evaluations, so model calls do not delay ownership or closure events. Short file-lock transactions serialize state across the worker and CLI. Context reads and model calls run outside that lock.
-
-## Runtime Flow (request path, async jobs, background workers)
-
-### Worker start
-
-1. The `start` action acquires the start lock.
-2. It verifies any recorded PID against the exact worker script.
-3. It spawns detached `bun src/worker.ts` and writes private worker metadata.
-4. The worker reconciles the current Herdr snapshot with persisted ownership.
-5. It starts the event subscription and 60-second sweep.
-
-### Background event
-
-1. Herdr emits a workspace, tab, or pane lifecycle event.
-2. The worker validates and normalizes the event.
-3. Marked activity writes and their guarded restoration are ignored; other renames acknowledge automatic writes or mark manual ownership.
-4. Other relevant events resolve a tab and schedule evaluation after 400 milliseconds.
-5. The promise queue runs the service evaluation serially.
-
-### Evaluation
-
-```mermaid
-flowchart TD
-    A[Load fresh snapshot under state lock] --> B{Target label is manual?}
-    B -- yes --> Z[Skip this target]
-    B -- no --> C[Select source pane for this target]
-    C --> D[Build workspace candidate]
-    C --> E[Collect bounded pane context]
-    E --> F{Recognized process?}
-    F -- yes --> G[Use deterministic label]
-    F -- no --> H{Stable and outside cooldown?}
-    H -- no --> Z
-    H -- yes --> I[Record decision ID and release lock before model call]
-    I --> J{Valid task label?}
-    J -- no --> Z
-    J -- yes --> V[Recheck target, source identity, ownership and decision ID]
-    G --> V
-    V --> K[Persist expected write]
-    K --> L[Run Herdr rename]
-    L --> M[Confirm ownership from rename event]
-```
-
-Automatic model naming of Pi and Claude Code tabs and panes waits for a readable user request before reserving a model attempt. Empty or unavailable transcripts preserve existing labels without starting a cooldown. Explicit actions and deterministic process labels bypass this gate; agents without transcript support retain terminal-based naming.
-
-### Explicit action
-
-`rename-now` and `rename-all` reclaim only their target tabs and bypass stability and cooldown gates. `reset-pane` and `reset-workspace` affect only their own target kind. Background evaluation independently names automatic targets. While any model call runs, the service prefixes the tab label, and the pane label for pane targets, with a static guarded `◆` marker. It restores the original label only if its own marker is still there. The worker and `rename-all` evaluate up to three tabs at once, one run per tab; model calls stay serialized per process because model sources are not safe to overlap. Every explicit action reports renamed, unchanged, abstained, or failed through Herdr notifications.
-
-### Shutdown and recovery
-
-- SIGTERM and SIGINT stop timers, destroy the socket, wait for queued work, and remove only the owned PID file.
-- Socket closure schedules reconnect after one second.
-- Dead lock owners and stale worker records are removed after verification.
-- Failed rename commands restore the prior ownership record.
-
-## Key Tradeoffs and Constraints
-
-- Direct Bun execution removes a JavaScript build step but requires Bun 1.2.23 or newer on every host.
-- Zod schemas add boundary code but prevent external JSON from becoming trusted TypeScript data by assertion.
-- Short state locks protect reconciliation, request gates, and rename writes. Model calls run unlocked. A persisted decision ID rejects older results, including context reads that finish after a newer explicit request.
-- The progress marker uses temporary Herdr renames because plugins cannot render tab chrome. An invisible marker and exact-label guard prevent those writes from stealing ownership.
-- Deterministic labels avoid model latency and cost. Broad AI naming remains available for ambiguous tasks.
-- The 4,500-character context cap limits exposure and cost but can omit older evidence.
-- GPT-5.6 Luna suits short, high-volume naming, while medium reasoning trades some latency for label quality.
-- Editable prompts enable personal naming style but may produce rejected output; schema and label validation remain fixed safety boundaries.
-- Provider configuration is portable across OpenAI-compatible endpoints, but reasoning support varies by provider.
-- Pi is a context source, not an inference dependency. Smart Rename never reads Pi credentials or starts Pi.
-- One worker serves the local Herdr socket. Named or remote socket discovery is not automatic.
-- Fresh snapshots prune closed-item naming records. Worker logs are not rotated.
-- Herdr exposes no compare-and-set rename command. A user edit between the final snapshot and CLI write remains a narrow race.
-- Pane closure discards stale results but does not cancel an already-sent model request.
-
-Updated: 2026-09-05, rename reliability repair
+The code entry points and tests for each behavior are listed in the [code map](SEMANTIC_MAP.md). For safe local checks, see the [development guide](../docs/development.md). The bundled [naming policy](../docs/naming-policy.md) is also the runtime's default model prompt, so edits to that file change behavior.
