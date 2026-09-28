@@ -113,7 +113,7 @@ Automatic model naming of Pi and Claude Code tabs and panes waits for a readable
 
 ### Explicit action
 
-`rename-now` and `rename-all` reclaim only their target tabs and bypass stability and cooldown gates. `reset-pane` and `reset-workspace` affect only their own target kind. Background evaluation independently names automatic targets. During a model-backed `rename-now`, the service prefixes the current label with a guarded `◇ ◈ ◆ ◈` pulse. It stops if the label changes externally and restores only its own last write. `rename-all` and background naming remain quiet. Every explicit action reports renamed, unchanged, abstained, or failed through Herdr notifications.
+`rename-now` and `rename-all` reclaim only their target tabs and bypass stability and cooldown gates. `reset-pane` and `reset-workspace` affect only their own target kind. Background evaluation independently names automatic targets. While any model call runs, the service prefixes the tab label, and the pane label for pane targets, with a static guarded `◆` marker. It restores the original label only if its own marker is still there. The worker and `rename-all` evaluate up to three tabs at once, one run per tab; model calls stay serialized per process because model sources are not safe to overlap. Every explicit action reports renamed, unchanged, abstained, or failed through Herdr notifications.
 
 ### Shutdown and recovery
 
@@ -127,7 +127,7 @@ Automatic model naming of Pi and Claude Code tabs and panes waits for a readable
 - Direct Bun execution removes a JavaScript build step but requires Bun 1.2.23 or newer on every host.
 - Zod schemas add boundary code but prevent external JSON from becoming trusted TypeScript data by assertion.
 - Short state locks protect reconciliation, request gates, and rename writes. Model calls run unlocked. A persisted decision ID rejects older results, including context reads that finish after a newer explicit request.
-- The progress pulse uses temporary Herdr renames because plugins cannot render tab chrome. An invisible marker and exact-label guard prevent those writes from stealing ownership.
+- The progress marker uses temporary Herdr renames because plugins cannot render tab chrome. An invisible marker and exact-label guard prevent those writes from stealing ownership.
 - Deterministic labels avoid model latency and cost. Broad AI naming remains available for ambiguous tasks.
 - The 4,500-character context cap limits exposure and cost but can omit older evidence.
 - GPT-5.6 Luna suits short, high-volume naming, while medium reasoning trades some latency for label quality.

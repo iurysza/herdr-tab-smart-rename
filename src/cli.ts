@@ -121,7 +121,7 @@ export function currentResultNotice(result: RenameResult | null): {
       ? `Already named ${result.candidate.tab}`
       : result.reason === "no meaningful task"
         ? "No meaningful task found"
-        : result.reason === "no task yet"
+        : result.reason === "waiting for the first user request"
           ? "No request in this agent session yet"
           : result.reason,
     sound: "request",

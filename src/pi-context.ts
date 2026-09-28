@@ -300,28 +300,14 @@ export async function recentUserMessages(
   }
 }
 
-const EMPTY_TIMELINE: SessionTimeline = { origin: [], middle: [], recent: [] };
-
 export async function sampledUserMessages(
   sessionPath: string | null,
   env: NodeJS.ProcessEnv = process.env,
   allowedRoots = [sessionsRoot(env)],
 ): Promise<SessionTimeline> {
-  return (
-    (await readTimeline(sessionPath, allowedRoots)) ?? {
-      ...EMPTY_TIMELINE,
-    }
-  );
-}
-
-// Null means no transcript could be read, as opposed to an empty one.
-async function readTimeline(
-  sessionPath: string | null,
-  allowedRoots: string[],
-): Promise<SessionTimeline | null> {
   const session = await openSession(sessionPath, allowedRoots);
 
-  if (!session) return null;
+  if (!session) return { origin: [], middle: [], recent: [] };
 
   try {
     const middleStart = Math.max(
@@ -369,14 +355,7 @@ export async function paneSessionMessages(
   pane: SessionPane,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<SessionTimeline> {
-  return (await paneTranscript(pane, env)) ?? { ...EMPTY_TIMELINE };
-}
-
-export async function paneTranscript(
-  pane: SessionPane,
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<SessionTimeline | null> {
   const sessionPath = await paneSessionPath(pane, env);
 
-  return readTimeline(sessionPath, sessionAllowedRoots(pane, env));
+  return sampledUserMessages(sessionPath, env, sessionAllowedRoots(pane, env));
 }

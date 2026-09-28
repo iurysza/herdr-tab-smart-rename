@@ -28,7 +28,7 @@ Replace `rename-now` with the action you need:
 
 `configure-ai` remains an alias for `setup`. Tab actions leave pane and workspace labels alone.
 
-Explicit renames end with a notification showing the result or failure. A diamond pulse marks a model-backed `rename-now`; background naming does not show it.
+Explicit renames end with a notification showing the result or failure. While a model names a tab or pane, its label shows a static `◆` marker. This applies to background naming and to every command. Up to three tabs are renamed at once, so several tabs can show the marker together.
 
 ## Shortcuts
 

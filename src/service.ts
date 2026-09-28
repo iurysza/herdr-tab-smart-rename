@@ -668,13 +668,6 @@ export class AutoNameService {
 
         const needsModel = target.kind !== "workspace" && !label;
 
-        // Only a readable, empty transcript proves there is no request yet.
-        // Agents without a transcript reader still name from process output.
-        if (needsModel && agent && !hasUserTask && focused?.transcript) {
-          outcome.reason = "no task yet";
-          continue;
-        }
-
         session = sessionPane ? sessionKey(sessionPane) : undefined;
 
         const claim = await transaction((state, latest) => {

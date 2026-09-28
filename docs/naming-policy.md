@@ -66,6 +66,7 @@ The model does not simulate or decide the rules below.
 - **Safety:** context is sanitized and capped at 4,500 serialized characters; environment values are excluded; common credential shapes are redacted best-effort.
 - **First request:** automatic model naming for Pi and Claude Code tabs and panes waits for a readable user request; startup banners are not task evidence. Existing labels remain unchanged while waiting. Explicit actions and deterministic process labels bypass this gate; agents without transcript support retain terminal-based naming.
 - **Churn control:** events are debounced; a 60-second sweep catches silent task changes; unchanged successes are skipped; background model attempts wait 10 minutes per target; explicit actions bypass those gates.
+- **Retries:** the first request of each agent session skips the 10-minute wait. A failed call retries after 30 seconds, doubling up to 10 minutes. A model that declines to name retries only when the context changes. An answer discarded because its source changed does not count as an attempt.
 - **Validation:** invalid JSON, unchanged labels, and labels outside the word, length, or format rules are rejected.
 
 - **Concurrency:** model calls run outside the shared state lock. Each write rechecks ownership, target existence, and source-pane identity. New explicit requests supersede older work. Independent target failures are reported separately.

@@ -10,12 +10,12 @@ Smart Rename turns live Herdr activity into stable workspace names and current-t
 | Tab task | The current persistent task, expressed as a 2 to 4 word label | `domain.ts` |
 | Ownership | Whether Smart Rename or the user controls a label | `domain.ts`, `storage.ts` |
 | Expected write | A rename recorded before Herdr applies it, so its event is not mistaken for a manual rename | `domain.ts`, `service.ts` |
-| Rename activity | A guarded `◇ ◈ ◆ ◈` prefix shown only during current-tab model calls | `cli.ts`, `service.ts`, `herdr.ts`, `worker.ts` |
+| Rename activity | A guarded static `◆` prefix on tabs and panes during any model call | `service.ts`, `herdr.ts`, `worker.ts` |
 | Dominant pane | The pane that supplies task evidence: focused agent, active agent, focused command, then first pane | `service.ts` |
 | Naming context | Bounded project, process, terminal, and optional Pi session evidence sent to the namer | `domain.ts`, `herdr.ts`, `pi-context.ts` |
 | Name suggestion | A validated label and reason, or `null` when evidence does not describe a task | `provider.ts` |
 | Rename result | Candidate names, ownership state, model usage, reason, and applied changes | `domain.ts`, `service.ts` |
-| Churn gate | Fingerprints, stability observations, and model cooldowns that prevent repeated calls | `domain.ts` |
+| Churn gate | Fingerprints, stability observations, cooldowns, per-session naming, and retry backoff that prevent repeated calls | `domain.ts` |
 | Provider configuration | Tracked defaults plus private endpoint, model, key, timeout, reasoning, and prompt-path overrides | `provider.env.example`, `provider.ts`, `configure.ts` |
 | Naming prompt | Bundled policy or user-owned instructions reloaded before each model request | `docs/naming-policy.md`, `provider.ts` |
 
@@ -78,12 +78,12 @@ sequenceDiagram
     alt deterministic process
         S->>S: choose fixed label
     else ambiguous task
-        opt current-tab action
-            S->>H: guarded diamond pulse
+        opt progress marker
+            S->>H: guarded ◆ marker
         end
         S->>N: bounded NamingContext
         N-->>S: NameSuggestion
-        opt current-tab action
+        opt progress marker
             S->>H: restore original label
         end
     end

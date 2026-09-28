@@ -51,8 +51,7 @@ function contextFor(
   {
     command = "node --test",
     userMessages = [],
-    transcript = userMessages.length > 0,
-  }: { command?: string; userMessages?: string[]; transcript?: boolean } = {},
+  }: { command?: string; userMessages?: string[] } = {},
 ): PaneContext {
   return {
     focused: true,
@@ -60,7 +59,6 @@ function contextFor(
     process: { name: "node", command, cwd: pane.cwd ?? "" },
     recentOutput: "",
     userMessages,
-    transcript,
   };
 }
 
@@ -720,8 +718,7 @@ function unexpectedModel(): NameSuggestion {
 }
 
 
-for (const force of [false, true]) {
-  test(`empty agent skips model, then names first request (explicit=${force})`, async () => {
+test("an attempt before the first request does not delay naming it", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "rename-first-task-"));
     const paths = statePaths(dir);
     const snap = liveSnapshot();
@@ -739,11 +736,9 @@ for (const force of [false, true]) {
     });
 
     try {
-      const empty = await service.evaluate("t1", force
-        ? { resetKind: "tab", forceRefresh: true, forceModel: true }
-        : {});
+      const empty = await service.evaluate("t1");
 
-      assert.equal(empty?.reason, "no task yet");
+      assert.equal(empty?.reason, "waiting for the first user request");
       assert.equal(empty?.usedModel, false);
       assert.deepEqual((await loadState(paths.state)).modelAttempts, {});
       // Simulate an attempt made by an older worker before a task existed.
@@ -758,8 +753,7 @@ for (const force of [false, true]) {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  });
-}
+});
 
 for (const firstResult of ["failure", "null"] as const) {
   test(`task retries after ${firstResult}, then successful naming restores cooldown`, async () => {

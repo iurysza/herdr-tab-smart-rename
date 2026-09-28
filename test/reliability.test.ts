@@ -478,7 +478,6 @@ test("tabs are renamed concurrently and each shows its own marker", async () => 
         process: null,
         recentOutput: "",
         userMessages: [pane.pane_id],
-        transcript: true,
       }),
       siblingPaneContext: async (pane) => ({
         focused: false,

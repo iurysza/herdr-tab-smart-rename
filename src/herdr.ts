@@ -1,7 +1,7 @@
 import net, { type Socket } from "node:net";
 import { z } from "zod";
 import { type PaneContext } from "./domain.ts";
-import { paneTranscript } from "./pi-context.ts";
+import { paneSessionMessages } from "./pi-context.ts";
 import { boundedText } from "./text.ts";
 
 const WorkspaceSchema = z.looseObject({
@@ -265,8 +265,9 @@ export async function beginProgress(
       try {
         const current = liveLabel(await snapshot(env), target);
 
-        if (current !== undefined && progressBase(current) !== null)
-          await rename(target.kind, target.id, base, env);
+        // Restore only our own marker. Anything else is a newer name, a
+        // manual edit, or another process's marker.
+        if (current === marked) await rename(target.kind, target.id, base, env);
       } catch {
         // Progress cleanup must not hide the naming result.
       }
@@ -332,13 +333,11 @@ export async function focusedPaneContext(
   pane: HerdrPane,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<PaneContext> {
-  const [process, recentOutput, transcript] = await Promise.all([
+  const [process, recentOutput, sessionMessages] = await Promise.all([
     paneProcess(pane.pane_id, env),
     paneRecent(pane.pane_id, env),
-    paneTranscript(pane, env),
+    paneSessionMessages(pane, env),
   ]);
-
-  const sessionMessages = transcript ?? { origin: [], middle: [], recent: [] };
 
   return {
     focused: true,
@@ -346,7 +345,6 @@ export async function focusedPaneContext(
     process,
     recentOutput,
     sessionMessages,
-    transcript: transcript !== null,
     userMessages: [
       ...sessionMessages.origin,
       ...sessionMessages.middle,

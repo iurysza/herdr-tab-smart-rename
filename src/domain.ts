@@ -54,8 +54,6 @@ export interface PaneContext {
   recentOutput: string;
   userMessages: string[];
   sessionMessages?: SessionTimeline;
-  // True when an agent transcript was read, even if it has no requests yet.
-  transcript?: boolean;
 }
 
 interface ProcessEvidence {

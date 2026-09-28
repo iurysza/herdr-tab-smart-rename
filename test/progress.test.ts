@@ -1,9 +1,12 @@
-import { test } from "bun:test";
+import { test as bunTest } from "bun:test";
 import assert from "node:assert/strict";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { beginProgress, progressBase } from "../src/herdr.ts";
+
+// The fake Herdr CLI is a shebang script, which Windows cannot execute.
+const test = process.platform === "win32" ? bunTest.skip : bunTest;
 
 // A fake Herdr CLI that keeps labels in a JSON file and logs rename calls.
 async function fakeHerdr(tabLabel: string, paneLabel?: string) {
@@ -88,6 +91,23 @@ test("restoring never overwrites a new name or a manual edit", async () => {
     await herdr.setTab("My Own Name");
     await stop();
     assert.equal((await herdr.labels()).tab, "My Own Name");
+  } finally {
+    await herdr.close();
+  }
+});
+
+test("restoring never reverts another process's marker over a newer name", async () => {
+  const herdr = await fakeHerdr("1");
+
+  try {
+    const stop = await beginProgress({ kind: "tab", id: "t1" }, herdr.env);
+    // Our run names the tab, then another process marks the new name.
+    await herdr.setTab("Fix Login");
+    const other = await beginProgress({ kind: "tab", id: "t1" }, herdr.env);
+    await stop();
+    assert.equal(progressBase((await herdr.labels()).tab), "Fix Login");
+    await other();
+    assert.equal((await herdr.labels()).tab, "Fix Login");
   } finally {
     await herdr.close();
   }
