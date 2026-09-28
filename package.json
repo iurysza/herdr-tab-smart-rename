@@ -22,7 +22,7 @@
     "@earendil-works/pi-coding-agent": "0.87.1",
     "@opencode-ai/sdk": "1.18.32",
     "ai": "7.0.114",
-    "dotenv": "17.4.2",
+    "dotenv": "18.0.3",
     "effect": "^3.22.2",
     "secret-sniff": "0.2.1",
     "strip-ansi": "7.2.0",
