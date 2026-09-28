@@ -105,26 +105,33 @@ export type HerdrEvent = z.infer<typeof EventEnvelopeSchema>["data"] & {
   type: string;
 };
 
-const TAB_PROGRESS_MARKER = "\u2063";
+const PROGRESS_MARKER = "\u2063";
 
-const TAB_PROGRESS_FRAMES = ["◇", "◈", "◆", "◈"] as const;
+const PROGRESS_FRAME = "◆";
 
-const TAB_PROGRESS_INTERVAL_MS = 120;
+// Older versions animated through these frames. Still parse them so a label
+// left behind by an interrupted run is never mistaken for a manual name.
+const LEGACY_PROGRESS_FRAMES = ["◇", "◈", "◆"] as const;
 
-export function tabProgressBase(label: string): string | null {
-  if (!label.startsWith(TAB_PROGRESS_MARKER)) return null;
-  const separator = label.indexOf(" ", TAB_PROGRESS_MARKER.length);
+// Returns the label underneath a rename-in-progress marker, or null when the
+// label carries no marker.
+export function progressBase(label: string): string | null {
+  if (!label.startsWith(PROGRESS_MARKER)) return null;
+  const rest = label.slice(PROGRESS_MARKER.length);
 
-  if (separator < 0) return null;
-  const frame = label.slice(TAB_PROGRESS_MARKER.length, separator);
+  const frame = LEGACY_PROGRESS_FRAMES.find((item) => rest.startsWith(item));
 
-  if (!(TAB_PROGRESS_FRAMES as readonly string[]).includes(frame)) return null;
+  if (!frame) return null;
+  const base = rest.slice(frame.length);
 
-  return label.slice(separator + 1);
+  // Herdr may trim the trailing space of a marker on an empty pane label.
+  if (!base) return "";
+
+  return base.startsWith(" ") ? base.slice(1) : null;
 }
 
-function tabProgressLabel(base: string, frame: string): string {
-  return `${TAB_PROGRESS_MARKER}${frame} ${base}`;
+function progressLabel(base: string): string {
+  return `${PROGRESS_MARKER}${PROGRESS_FRAME} ${base}`;
 }
 
 export const LIFECYCLE_SUBSCRIPTIONS = [
@@ -210,80 +217,65 @@ export async function rename(
   label: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
-  await run(env.HERDR_BIN_PATH || "herdr", [kind, "rename", id, label], { env });
+  // Herdr clears a pane label with a flag rather than an empty argument.
+  const args =
+    kind === "pane" && !label
+      ? [kind, "rename", id, "--clear"]
+      : [kind, "rename", id, label];
+
+  await run(env.HERDR_BIN_PATH || "herdr", args, { env });
 }
 
-export async function beginTabProgress(
-  tab: HerdrTab,
+export interface ProgressTarget {
+  kind: "tab" | "pane";
+  id: string;
+}
+
+function liveLabel(
+  snap: HerdrSnapshot,
+  target: ProgressTarget,
+): string | undefined {
+  if (target.kind === "tab")
+    return snap.tabs.find((item) => item.tab_id === target.id)?.label;
+
+  const pane = snap.panes.find((item) => item.pane_id === target.id);
+
+  return pane ? (pane.label ?? "") : undefined;
+}
+
+// Shows a static marker on a label while it is being renamed. The returned
+// function restores the original label unless something else changed it,
+// such as the new name or a manual edit.
+export async function beginProgress(
+  target: ProgressTarget,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<() => Promise<void>> {
-  // Another request may already own a pulse. Never nest or restore its label.
-  if (tabProgressBase(tab.label) !== null) return async () => {};
+  const none = async (): Promise<void> => {};
 
-  const base = tab.label;
-  let expected = base;
-  let frame = 0;
-  let stopped = false;
-  let work = Promise.resolve();
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const base = liveLabel(await snapshot(env), target);
 
-  const update = (nextFrame: number): Promise<void> => {
-    work = work
-      .then(async () => {
-        if (stopped) return;
+    // Another request may already own the marker. Never nest or restore it.
+    if (base === undefined || progressBase(base) !== null) return none;
 
-        const current = (await snapshot(env)).tabs.find(
-          (item) => item.tab_id === tab.tab_id,
-        )?.label;
+    const marked = progressLabel(base);
+    await rename(target.kind, target.id, marked, env);
 
-        if (stopped || current !== expected) {
-          stopped = true;
+    return async () => {
+      try {
+        const current = liveLabel(await snapshot(env), target);
 
-          return;
-        }
-
-        const next = tabProgressLabel(base, TAB_PROGRESS_FRAMES[nextFrame]!);
-        await rename("tab", tab.tab_id, next, env);
-        expected = next;
-        frame = nextFrame;
-      })
-      .catch(() => {
-        stopped = true;
-      });
-
-    return work;
-  };
-
-  const schedule = (): void => {
-    timer = setTimeout(() => {
-      void update((frame + 1) % TAB_PROGRESS_FRAMES.length).then(() => {
-        if (!stopped) schedule();
-      });
-    }, TAB_PROGRESS_INTERVAL_MS);
-  };
-
-  await update(0);
-
-  if (!stopped) schedule();
-
-  return async () => {
-    stopped = true;
-
-    if (timer) clearTimeout(timer);
-    await work;
-
-    if (expected === base) return;
-
-    try {
-      const current = (await snapshot(env)).tabs.find(
-        (item) => item.tab_id === tab.tab_id,
-      )?.label;
-
-      if (current === expected) await rename("tab", tab.tab_id, base, env);
-    } catch {
-      // Progress cleanup must not hide the naming result.
-    }
-  };
+        // Restore only our own marker. Anything else is a newer name, a
+        // manual edit, or another process's marker.
+        if (current === marked) await rename(target.kind, target.id, base, env);
+      } catch {
+        // Progress cleanup must not hide the naming result.
+      }
+    };
+  } catch {
+    // Progress is cosmetic. Naming continues without it.
+    return none;
+  }
 }
 
 export async function gitRoot(cwd?: string): Promise<string | null> {

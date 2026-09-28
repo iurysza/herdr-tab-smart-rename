@@ -3,13 +3,13 @@ import { appendFile, chmod } from "node:fs/promises";
 import { type Socket } from "node:net";
 import {
   paneLabelUpdate,
+  progressBase,
   snapshot,
   subscribe,
-  tabProgressBase,
   type HerdrEvent,
   type HerdrSnapshot,
 } from "./herdr.ts";
-import { createService } from "./service.ts";
+import { createService, MAX_CONCURRENT_TABS } from "./service.ts";
 import {
   ensurePrivateDir,
   markWorkerReady,
@@ -24,10 +24,10 @@ export function shouldIgnoreProgressRename(
   tabId: string,
   label: string,
 ): boolean {
-  const progressBase = tabProgressBase(label);
+  const base = progressBase(label);
 
-  if (progressBase !== null) {
-    progressBases.set(tabId, progressBase);
+  if (base !== null) {
+    progressBases.set(tabId, base);
 
     return true;
   }
@@ -61,19 +61,16 @@ export async function runWorker(
   let stopped = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let sweepTimer: ReturnType<typeof setInterval> | undefined;
-  let work = Promise.resolve();
   let events = Promise.resolve();
   let sweepQueued = false;
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const progressBases = new Map<string, string>();
-
-  const enqueue = (task: () => Promise<void>): Promise<void> => {
-    work = work
-      .then(task, task)
-      .catch((error: unknown) => log(`task failed: ${errorMessage(error)}`));
-
-    return work;
-  };
+  // Tabs waiting for a free slot, in request order.
+  const waiting: string[] = [];
+  const running = new Set<string>();
+  // Tabs that received events while running. Each gets one follow-up run.
+  const rerun = new Set<string>();
+  const tasks = new Set<Promise<void>>();
 
   const evaluate = async (
     tabId: string | undefined,
@@ -99,6 +96,34 @@ export async function runWorker(
     }
   };
 
+  // Runs up to MAX_CONCURRENT_TABS tabs at once, and one run per tab.
+  const pump = (): void => {
+    while (!stopped && running.size < MAX_CONCURRENT_TABS && waiting.length) {
+      const tabId = waiting.shift()!;
+      running.add(tabId);
+
+      const task = evaluate(tabId)
+        .catch((error: unknown) => log(`task failed: ${errorMessage(error)}`))
+        .finally(() => {
+          running.delete(tabId);
+          tasks.delete(task);
+
+          if (rerun.delete(tabId)) request(tabId);
+          pump();
+        });
+
+      tasks.add(task);
+    }
+  };
+
+  const request = (tabId: string): void => {
+    if (stopped) return;
+
+    if (running.has(tabId)) rerun.add(tabId);
+    else if (!waiting.includes(tabId)) waiting.push(tabId);
+    pump();
+  };
+
   const schedule = (tabId: string | undefined, delay = 400): void => {
     if (!tabId || stopped) return;
     const previous = timers.get(tabId);
@@ -107,29 +132,24 @@ export async function runWorker(
 
     const timer = setTimeout(() => {
       timers.delete(tabId);
-      enqueue(() => evaluate(tabId));
+      request(tabId);
     }, delay);
 
     timers.set(tabId, timer);
   };
 
-  const sweep = async (): Promise<void> => {
-    if (stopped) return;
-    const current = await snapshot(env);
-
-    for (const tab of current.tabs) await evaluate(tab.tab_id);
-  };
-
   const queueSweep = (): void => {
     if (stopped || sweepQueued) return;
     sweepQueued = true;
-    enqueue(async () => {
-      try {
-        await sweep();
-      } finally {
+
+    void snapshot(env)
+      .then((current) => {
+        for (const tab of current.tabs) request(tab.tab_id);
+      })
+      .catch((error: unknown) => log(`sweep failed: ${errorMessage(error)}`))
+      .finally(() => {
         sweepQueued = false;
-      }
-    });
+      });
   };
 
   const handleEvent = async (event: HerdrEvent): Promise<void> => {
@@ -168,6 +188,9 @@ export async function runWorker(
     }
 
     const paneUpdate = paneLabelUpdate(event);
+
+    // The rename-in-progress marker is not a manual edit or new work.
+    if (paneUpdate && progressBase(paneUpdate.label) !== null) return;
 
     if (paneUpdate) {
       await service.acknowledge("pane", paneUpdate.paneId, paneUpdate.label);
@@ -254,7 +277,7 @@ export async function runWorker(
     for (const timer of timers.values()) clearTimeout(timer);
     socket?.destroy();
     await events.catch(() => {});
-    await work.catch(() => {});
+    await Promise.allSettled(tasks);
     await service.close();
     await removeOwnedWorkerPid(paths.pid, process.pid);
     await log(`stopped by ${signal}`);

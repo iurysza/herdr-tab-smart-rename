@@ -111,7 +111,7 @@ test("state transactions serialize concurrent writers", async () => {
   }
 });
 
-test("all-tab dry run visits tabs sequentially without writing state", async () => {
+test("all-tab dry run visits every tab without writing state", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "tab-smart-rename-dry-"));
   const paths = statePaths(dir);
   const snap = liveSnapshot();
@@ -139,7 +139,8 @@ test("all-tab dry run visits tabs sequentially without writing state", async () 
 
   try {
     const results = await service.evaluateAll(snap);
-    assert.deepEqual(visits, ["p1", "p2"]);
+    // Tabs run concurrently, so only the set of visits is stable.
+    assert.deepEqual(visits.sort(), ["p1", "p2"]);
     assert.deepEqual(
       results.map((result) => result.candidate.tab),
       ["Run Tests", "Run Tests"],
@@ -198,11 +199,11 @@ test("explicit tab refresh reclaims only the tab; background work still names pa
         return { tab: "Fresh Task Name", reason: "current task" };
       },
     },
-    modelActivity: async (tab) => {
-      activity.push(`start:${tab.label}`);
+    progress: async (target) => {
+      activity.push(`start:${target.kind}:${target.id}`);
 
       return async () => {
-        activity.push("stop");
+        activity.push(`stop:${target.kind}:${target.id}`);
       };
     },
     dependencies: dependencies(() => snap, {
@@ -241,11 +242,19 @@ test("explicit tab refresh reclaims only the tab; background work still names pa
       gated.changes.some((change) => change.kind === "pane"),
       true,
     );
+    // The tab stays marked for the whole evaluation; each pane only while
+    // its own model call runs.
     assert.deepEqual(activity, [
-      "start:Manual Task",
-      "stop",
-      "start:Fresh Task Name",
-      "stop",
+      "start:tab:t1",
+      "stop:tab:t1",
+      "start:tab:t1",
+      "start:pane:p1",
+      "stop:pane:p1",
+      "stop:tab:t1",
+      "start:tab:t1",
+      "start:pane:p1",
+      "stop:pane:p1",
+      "stop:tab:t1",
     ]);
     assert.equal((await loadState(paths.state)).tabs.t1?.manual, false);
   } finally {
@@ -287,7 +296,7 @@ test("concurrent evaluations keep expected writes durable and avoid stale races"
   }
 });
 
-test("failed model calls persist attempt backoff without success fingerprint", async () => {
+test("failed model calls persist retry eligibility without success fingerprint", async () => {
   const dir = await mkdtemp(
     path.join(os.tmpdir(), "tab-smart-rename-failure-"),
   );
@@ -304,7 +313,7 @@ test("failed model calls persist attempt backoff without success fingerprint", a
         throw new Error("provider unavailable");
       },
     },
-    modelActivity: async () => async () => {
+    progress: async () => async () => {
       stopped = true;
     },
     dependencies: dependencies(() => snap, {
@@ -326,6 +335,7 @@ test("failed model calls persist attempt backoff without success fingerprint", a
     const state = await loadState(paths.state);
     assert.equal(typeof state.modelAttempts.t1, "number");
     assert.equal(state.fingerprints.t1, undefined);
+    assert.equal(state.retries.t1?.status, "failed");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -397,6 +407,7 @@ test("pane model failure preserves successful independent tab and pane writes", 
     await withStateTransaction(paths.state, paths.stateLock, (state) => {
       state.modelAttempts.t1 = 0;
       state.modelAttempts.p2 = 0;
+      delete state.retries.p2;
     });
     paneFails = false;
     const recovered = await service.evaluate("t1");
@@ -704,4 +715,105 @@ test("non-agent panes are not renamed", async () => {
 
 function unexpectedModel(): NameSuggestion {
   throw new Error("unexpected model call");
+}
+
+
+test("an attempt before the first request does not delay naming it", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "rename-first-task-"));
+    const paths = statePaths(dir);
+    const snap = liveSnapshot();
+    let messages = ["  "];
+
+    const service = new AutoNameService({
+      stateFile: paths.state,
+      stateLock: paths.stateLock,
+      namer: { suggest: async () => ({ tab: "Fix Login", reason: "task" }) },
+      dependencies: dependencies(() => snap, {
+        focusedPaneContext: async (pane) => contextFor(pane, {
+          command: "pi", userMessages: messages,
+        }),
+      }),
+    });
+
+    try {
+      const empty = await service.evaluate("t1");
+
+      assert.equal(empty?.reason, "waiting for the first user request");
+      assert.equal(empty?.usedModel, false);
+      assert.deepEqual((await loadState(paths.state)).modelAttempts, {});
+      // Simulate an attempt made by an older worker before a task existed.
+      await withStateTransaction(paths.state, paths.stateLock, (state) => {
+        state.modelAttempts.t1 = Date.now() - 60_000;
+        state.modelAttempts.p1 = Date.now() - 60_000;
+      });
+      messages = ["Fix the login redirect"];
+      const first = await service.evaluate("t1");
+      assert.equal(first?.candidate.tab, "Fix Login");
+      assert.equal(first?.candidate.panes?.p1, "Fix Login");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+});
+
+for (const firstResult of ["failure", "null"] as const) {
+  test(`task retries after ${firstResult}, then successful naming restores cooldown`, async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "rename-retry-task-"));
+    const paths = statePaths(dir);
+    const snap = liveSnapshot();
+    let retry = false;
+    let messages = ["Fix login"];
+
+    const service = new AutoNameService({
+      stateFile: paths.state,
+      stateLock: paths.stateLock,
+      namer: { suggest: async () => {
+        if (retry) return { tab: "Fix Login", reason: "task" };
+
+        if (firstResult === "failure") throw new Error("offline");
+
+        return { tab: null, reason: "not enough evidence" };
+      } },
+      dependencies: dependencies(() => snap, {
+        focusedPaneContext: async (pane) => contextFor(pane, { userMessages: messages }),
+        rename: async (kind, _id, label) => {
+          if (kind === "tab") snap.tabs[0]!.label = label;
+
+          if (kind === "pane") snap.panes[0]!.label = label;
+        },
+      }),
+    });
+
+    try {
+      await service.evaluate("t1");
+      const failed = await loadState(paths.state);
+
+      assert.equal(
+        failed.retries.t1?.status,
+        firstResult === "failure" ? "failed" : "declined",
+      );
+
+      retry = true;
+
+      // A failure waits for its backoff; a declined answer for a new request.
+      if (firstResult === "failure") {
+        await withStateTransaction(paths.state, paths.stateLock, (state) => {
+          const record = state.retries.t1;
+
+          if (record?.status === "failed") record.retryAt = 0;
+        });
+      } else {
+        messages = ["Fix login", "the redirect loop"];
+      }
+
+      const result = await service.evaluate("t1");
+      assert.equal(result?.candidate.tab, "Fix Login");
+      assert.equal((await loadState(paths.state)).retries.t1, undefined);
+      messages = [...messages, "Now add tests"];
+      const next = await service.evaluate("t1");
+      assert.equal(next?.usedModel, false);
+      assert.equal(next?.reason, "unchanged or rate-limited context");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 }

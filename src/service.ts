@@ -7,6 +7,8 @@ import {
   heuristicTitle,
   isDefaultLabel,
   markModelAttempt,
+  markModelDeclined,
+  markModelFailure,
   markModelSuccess,
   observeStableContext,
   prepareRename,
@@ -23,12 +25,14 @@ import {
   type SmartRenameState,
 } from "./domain.ts";
 import {
+  beginProgress,
   focusedPaneContext,
   gitRoot,
+  progressBase,
   rename,
   siblingPaneContext,
   snapshot,
-  tabProgressBase,
+  type ProgressTarget,
   type HerdrPane,
   type HerdrSnapshot,
   type HerdrTab,
@@ -66,7 +70,13 @@ export interface EvaluateOptions {
   forceRefresh?: boolean;
 }
 
-export type ModelActivity = (tab: HerdrTab) => Promise<() => Promise<void>>;
+// Marks a label as being renamed. The returned function removes the marker.
+export type Progress = (
+  target: ProgressTarget,
+) => Promise<() => Promise<void>>;
+
+// Tabs evaluated at once by evaluateAll and the worker.
+export const MAX_CONCURRENT_TABS = 3;
 
 interface ServiceOptions {
   stateFile?: string | null;
@@ -74,7 +84,7 @@ interface ServiceOptions {
   namer: Namer;
   env?: NodeJS.ProcessEnv;
   dryRun?: boolean;
-  modelActivity?: ModelActivity;
+  progress?: Progress;
   dependencies?: Partial<ServiceDependencies>;
 }
 
@@ -106,12 +116,29 @@ function targetLabel(
   if (target.kind === "tab") {
     const label = snap.tabs.find((t) => t.tab_id === target.id)?.label;
 
-    return label === undefined ? undefined : (tabProgressBase(label) ?? label);
+    return label === undefined ? undefined : (progressBase(label) ?? label);
   }
 
   const pane = snap.panes.find((p) => p.pane_id === target.id && p.agent);
 
-  return pane ? (pane.label ?? "") : undefined;
+  return pane ? paneLabel(pane) : undefined;
+}
+
+// A pane label with any rename-in-progress marker removed.
+function paneLabel(pane: HerdrPane): string {
+  const label = pane.label ?? "";
+
+  return progressBase(label) ?? label;
+}
+
+// Identifies one agent conversation, so a new session in the same pane is
+// treated as a new task.
+function sessionKey(pane: HerdrPane): string | undefined {
+  const session = pane.agent_session;
+
+  return session
+    ? `${pane.agent ?? ""}:${session.kind}:${session.value}`
+    : undefined;
 }
 
 function paneIdentity(pane: HerdrPane): string {
@@ -170,7 +197,7 @@ export function reconcileSnapshot(
   }
 
   for (const tab of snap.tabs) {
-    const label = tabProgressBase(tab.label) ?? tab.label;
+    const label = progressBase(tab.label) ?? tab.label;
     state.tabs[tab.tab_id] = reconcileItem(
       state.tabs[tab.tab_id],
       label,
@@ -179,10 +206,11 @@ export function reconcileSnapshot(
   }
 
   for (const pane of snap.panes) {
+    const label = paneLabel(pane);
     state.panes[pane.pane_id] = reconcileItem(
       state.panes[pane.pane_id],
-      pane.label ?? "",
-      isDefaultLabel(pane.label),
+      label,
+      isDefaultLabel(label),
     );
   }
 
@@ -197,6 +225,8 @@ export function reconcileSnapshot(
     state.tabs,
     state.panes,
     state.modelAttempts,
+    state.namedSessions,
+    state.retries,
     state.fingerprints,
     state.pendingFingerprints,
     state.evaluations,
@@ -215,7 +245,7 @@ export class AutoNameService {
   readonly #namer: Namer;
   readonly #env: NodeJS.ProcessEnv;
   readonly #dryRun: boolean;
-  readonly #modelActivity: ModelActivity | undefined;
+  readonly #progress: Progress | undefined;
   readonly #dependencies: ServiceDependencies;
 
   constructor({
@@ -224,7 +254,7 @@ export class AutoNameService {
     namer,
     env = process.env,
     dryRun = false,
-    modelActivity,
+    progress,
     dependencies = {},
   }: ServiceOptions) {
     this.#stateFile = stateFile;
@@ -232,7 +262,7 @@ export class AutoNameService {
     this.#namer = namer;
     this.#env = env;
     this.#dryRun = dryRun;
-    this.#modelActivity = modelActivity;
+    this.#progress = dryRun ? undefined : progress;
     this.#dependencies = { ...defaultDependencies, ...dependencies };
   }
 
@@ -255,6 +285,12 @@ export class AutoNameService {
 
   async close(): Promise<void> {
     await this.#namer.close?.();
+  }
+
+  private async beginProgress(
+    target: ProgressTarget,
+  ): Promise<() => Promise<void>> {
+    return (await this.#progress?.(target)) ?? (async () => {});
   }
 
   async acknowledge(
@@ -394,15 +430,24 @@ export class AutoNameService {
     options: EvaluateOptions = {},
   ): Promise<RenameResult[]> {
     const snap = initial ?? (await this.#dependencies.snapshot(this.#env));
-    const results: RenameResult[] = [];
+    const results: (RenameResult | null)[] = [];
+    let next = 0;
 
-    for (const tab of snap.tabs) {
-      const result = await this.evaluate(tab.tab_id, options);
+    const lane = async (): Promise<void> => {
+      while (next < snap.tabs.length) {
+        const index = next++;
+        results[index] = await this.evaluate(snap.tabs[index]!.tab_id, options);
+      }
+    };
 
-      if (result) results.push(result);
-    }
+    await Promise.all(
+      Array.from(
+        { length: Math.min(MAX_CONCURRENT_TABS, snap.tabs.length) },
+        lane,
+      ),
+    );
 
-    return results;
+    return results.filter((result) => result !== null);
   }
 
   async evaluate(
@@ -506,7 +551,10 @@ export class AutoNameService {
     // Label ownership controls writes, not whether a pane supplies tab evidence.
     const panes = snap.panes.filter((p) => p.tab_id === tabId);
     let workspaceName: string | undefined;
+    // One tab marker covers every model call in this evaluation.
+    let stopTabProgress: (() => Promise<void>) | undefined;
 
+    try {
     for (const target of targets) {
       const outcome: RenameOutcome = {
         ...target,
@@ -516,6 +564,23 @@ export class AutoNameService {
 
       result.outcomes.push(outcome);
       let ticket: string | undefined;
+      // Set only when this run claimed a model call for the target.
+      let attemptedAt: number | undefined;
+      let previousAttempt: number | undefined;
+      let modelAnswered = false;
+      let session: string | undefined;
+      let stopPaneProgress: (() => Promise<void>) | undefined;
+
+      // A discarded answer must not count as an attempt, or the target waits
+      // out the full cooldown before it can be named.
+      const releaseAttempt = (state: SmartRenameState): void => {
+        if (attemptedAt === undefined) return;
+
+        if (state.modelAttempts[target.id] !== attemptedAt) return;
+
+        if (previousAttempt === undefined) delete state.modelAttempts[target.id];
+        else state.modelAttempts[target.id] = previousAttempt;
+      };
 
       try {
         if (records(initial.state, target.kind)[target.id]?.manual) {
@@ -533,6 +598,7 @@ export class AutoNameService {
         let context: NamingContext | undefined;
         let focused: PaneContext | undefined;
         let sourcePanes: HerdrPane[] = [];
+        let sessionPane: HerdrPane | undefined;
         let agent = false;
         let transcriptAgent = false;
 
@@ -548,7 +614,10 @@ export class AutoNameService {
           context = details.context;
           focused = details.paneContexts.find((p) => p.focused);
           agent = Boolean(details.focusedPane?.agent);
-          transcriptAgent = ["pi", "claude"].includes(details.focusedPane?.agent ?? "");
+          transcriptAgent = ["pi", "claude"].includes(
+            details.focusedPane?.agent ?? "",
+          );
+          sessionPane = details.focusedPane;
           sourcePanes = details.focusedPane ? [details.focusedPane] : [];
         } else if (target.kind === "pane") {
           const pane = panes.find((p) => p.pane_id === target.id)!;
@@ -565,6 +634,7 @@ export class AutoNameService {
           focused = details.paneContexts[0];
           agent = true;
           transcriptAgent = ["pi", "claude"].includes(pane.agent ?? "");
+          sessionPane = pane;
           sourcePanes = [pane];
         }
 
@@ -580,7 +650,9 @@ export class AutoNameService {
             ),
           );
 
-        const hasUserTask = Boolean(focused?.userMessages.length);
+        const hasUserTask = Boolean(
+          focused?.userMessages.some((message) => message.trim()),
+        );
 
         const heuristic =
           !hasUserTask && focused
@@ -594,8 +666,9 @@ export class AutoNameService {
               ? heuristic
               : null;
 
-        let modelSuccess = false;
         const needsModel = target.kind !== "workspace" && !label;
+
+        session = sessionPane ? sessionKey(sessionPane) : undefined;
 
         const claim = await transaction((state, latest) => {
           if (
@@ -631,11 +704,14 @@ export class AutoNameService {
               !observeStableContext(state, target.id, context)
             )
               return "waiting for stable command context";
-            const gate = shouldCallModel(state, target.id, context);
+            const now = Date.now();
+            const gate = shouldCallModel(state, target.id, context, now, session);
 
             if (!gate.allowed && !options.forceModel && !options.forceRefresh)
               return "unchanged or rate-limited context";
-            markModelAttempt(state, target.id);
+            previousAttempt = state.modelAttempts[target.id];
+            attemptedAt = now;
+            markModelAttempt(state, target.id, now);
           }
 
           ticket = randomUUID();
@@ -650,22 +726,22 @@ export class AutoNameService {
         }
 
         if (needsModel && context) {
+          stopTabProgress ??= await this.beginProgress({
+            kind: "tab",
+            id: tabId,
+          });
+
+          if (target.kind === "pane")
+            stopPaneProgress = await this.beginProgress({
+              kind: "pane",
+              id: target.id,
+            });
+
           const key = fingerprint(context);
           let pending = suggestions.get(key);
 
           if (!pending) {
-            const stop =
-              target.kind === "tab"
-                ? await this.#modelActivity?.(tab)
-                : undefined;
-
-            pending = (async () => {
-              try {
-                return await this.#namer.suggest(context);
-              } finally {
-                await stop?.();
-              }
-            })();
+            pending = this.#namer.suggest(context);
             suggestions.set(key, pending);
             result.usedModel = true;
           }
@@ -673,7 +749,7 @@ export class AutoNameService {
           const suggestion = await pending;
           label = suggestion.tab;
           outcome.reason = suggestion.reason;
-          modelSuccess = true;
+          modelAnswered = true;
         } else {
           outcome.reason =
             target.kind === "workspace"
@@ -691,6 +767,7 @@ export class AutoNameService {
 
           if (current === undefined || !sourcesStillLive(latest)) {
             outcome.reason = "target or source changed";
+            releaseAttempt(state);
 
             return;
           }
@@ -705,6 +782,7 @@ export class AutoNameService {
 
           if (state.evaluations[target.id] !== ticket) {
             outcome.reason = "superseded by a newer evaluation";
+            releaseAttempt(state);
 
             return;
           }
@@ -747,15 +825,31 @@ export class AutoNameService {
             outcome.reason = `Already named ${label}`;
           }
 
-          if (modelSuccess && context)
-            markModelSuccess(state, target.id, context);
+          if (modelAnswered && context) {
+            if (label) markModelSuccess(state, target.id, context, session);
+            else markModelDeclined(state, target.id, context, session);
+          }
         });
       } catch (error) {
+        if (attemptedAt !== undefined && ticket) {
+          // Recording the backoff is best effort. It must not hide the error
+          // or stop the remaining targets.
+          await transaction((state) => {
+            if (state.evaluations[target.id] === ticket)
+              markModelFailure(state, target.id, Date.now(), session);
+          }).catch(() => {});
+        }
+
         outcome.status = "failed";
         outcome.reason = sanitizeText(
           error instanceof Error ? error.message : String(error),
         );
+      } finally {
+        await stopPaneProgress?.();
       }
+    }
+    } finally {
+      await stopTabProgress?.();
     }
 
     const primary =
@@ -773,7 +867,6 @@ interface CompositionOptions {
   env?: NodeJS.ProcessEnv;
   dryRun?: boolean;
   namer?: Namer;
-  modelActivity?: ModelActivity;
   dependencies?: Partial<ServiceDependencies>;
 }
 
@@ -782,7 +875,6 @@ export function createService({
   env = process.env,
   dryRun = false,
   namer = new ModelSourceNamer(env),
-  modelActivity,
   dependencies = {},
 }: CompositionOptions = {}): AutoNameService {
   const paths = stateDir ? statePaths(stateDir) : null;
@@ -793,7 +885,8 @@ export function createService({
     namer,
     env,
     dryRun,
-    ...(modelActivity ? { modelActivity } : {}),
+    // Every real rename shows a marker, whichever command or worker runs it.
+    progress: (target) => beginProgress(target, env),
     dependencies,
   });
 }

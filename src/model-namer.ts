@@ -9,6 +9,9 @@ export type ModelSourceFactory = (selection: ModelSelection, env: NodeJS.Process
 export class ModelSourceNamer implements Namer {
   #active: { key: string; source: ModelSource } | undefined;
   readonly #direct: Namer;
+  // Sources are swapped and closed between calls, so overlapping calls could
+  // close each other's connection. Tabs still evaluate concurrently.
+  #queue: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly env: NodeJS.ProcessEnv = process.env,
@@ -18,7 +21,18 @@ export class ModelSourceNamer implements Namer {
     this.#direct = direct;
   }
 
-  async suggest(context: NamingContext): Promise<NameSuggestion> {
+  suggest(context: NamingContext): Promise<NameSuggestion> {
+    const next = this.#queue.then(
+      () => this.suggestNow(context),
+      () => this.suggestNow(context),
+    );
+
+    this.#queue = next.catch(() => {});
+
+    return next;
+  }
+
+  private async suggestNow(context: NamingContext): Promise<NameSuggestion> {
     const selection = await loadModelSelection(this.env.HERDR_PLUGIN_CONFIG_DIR, this.env);
 
     if (selection.source === "direct") {

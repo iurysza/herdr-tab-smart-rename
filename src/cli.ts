@@ -4,7 +4,7 @@ import { chmod as chmodAsync, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Match } from "effect";
 import { type RenameResult } from "./domain.ts";
-import { beginTabProgress, run, snapshot } from "./herdr.ts";
+import { run, snapshot } from "./herdr.ts";
 import { loadModelSelection } from "./model-selection.ts";
 import {
   selectionLabel,
@@ -121,7 +121,9 @@ export function currentResultNotice(result: RenameResult | null): {
       ? `Already named ${result.candidate.tab}`
       : result.reason === "no meaningful task"
         ? "No meaningful task found"
-        : result.reason,
+        : result.reason === "waiting for the first user request"
+          ? "No request in this agent session yet"
+          : result.reason,
     sound: "request",
   };
 }
@@ -338,7 +340,6 @@ interface OnceOptions {
   resetKind?: "workspace" | "tab" | "pane" | null;
   forceRefresh?: boolean;
   dryRun?: boolean;
-  progress?: boolean;
   targetPaneId?: string | null;
 }
 
@@ -346,7 +347,6 @@ async function once({
   resetKind = null,
   forceRefresh = false,
   dryRun = false,
-  progress = false,
   targetPaneId = null,
 }: OnceOptions = {}): Promise<RenameResult | null> {
   const current = await snapshot();
@@ -382,7 +382,6 @@ async function once({
 
   const service = createService({
     ...(stateDir ? { stateDir } : {}),
-    ...(progress ? { modelActivity: beginTabProgress } : {}),
     dryRun,
   });
 
@@ -484,7 +483,6 @@ async function renameNow(): Promise<void> {
   const result = await once({
     resetKind: "tab",
     forceRefresh: true,
-    progress: true,
   });
 
   if (result?.outcomes?.some((item) => item.status === "failed"))

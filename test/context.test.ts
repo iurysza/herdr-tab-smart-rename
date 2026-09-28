@@ -7,7 +7,7 @@ import {
   LIFECYCLE_SUBSCRIPTIONS,
   normalizeHerdrEvent,
   paneLabelUpdate,
-  tabProgressBase,
+  progressBase,
 } from "../src/herdr.ts";
 import {
   paneSessionMessages,
@@ -72,8 +72,10 @@ test("Herdr events normalize while subscriptions avoid output spam", () => {
   assert.ok(subscriptions.includes("pane.updated"));
   assert.equal(subscriptions.includes("pane.renamed"), false);
   assert.equal(subscriptions.includes("pane.output_matched"), false);
-  assert.equal(tabProgressBase("\u2063◆ Review Auth"), "Review Auth");
-  assert.equal(tabProgressBase("◆ Review Auth"), null);
+  assert.equal(progressBase("\u2063◆ Review Auth"), "Review Auth");
+  assert.equal(progressBase("\u2063◈ Review Auth"), "Review Auth");
+  assert.equal(progressBase("\u2063◆"), "");
+  assert.equal(progressBase("◆ Review Auth"), null);
 });
 
 test("Pi session sampling weights origin, midpoint, and recent requests", async () => {
