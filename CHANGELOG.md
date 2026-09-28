@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.5.2...v0.6.0) (2026-09-28)
+
+
+### Features
+
+* **provider:** accept none as a reasoning effort ([#37](https://github.com/iurysza/herdr-tab-smart-rename/issues/37)) ([6fa5a7f](https://github.com/iurysza/herdr-tab-smart-rename/commit/6fa5a7fdb8e290f8bceac6a5bfe4586cc8b5cd79))
+
+
+### Bug Fixes
+
+* **rename:** name first requests promptly and mark renames in progress ([#40](https://github.com/iurysza/herdr-tab-smart-rename/issues/40)) ([8ac2a96](https://github.com/iurysza/herdr-tab-smart-rename/commit/8ac2a96fc4eedc4e998d4233a8c2ebe3b175c951))
+
 ## [0.5.2](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.5.1...v0.5.2) (2026-09-21)
 
 
