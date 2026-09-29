@@ -66,6 +66,7 @@ The tests use a local fake provider, not a billed model. They cover pane closure
 
 ```sh
 bun run check
+bun run lint
 bun scripts/scan-secrets.ts
 git diff --check
 ```

@@ -94,6 +94,7 @@ Smart Rename runs TypeScript directly with Bun. There is no build step.
 ```sh
 bun install --frozen-lockfile
 bun run check
+bun run lint
 ```
 
 On macOS, run tests with the contained runner to keep them away from your real credentials and Herdr sessions:
