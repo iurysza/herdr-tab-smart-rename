@@ -30,6 +30,11 @@ export interface ActionFailure {
   readonly message: string;
 }
 
+interface ServerTarget {
+  socket?: string;
+  session?: string | null;
+}
+
 const ServerSchema = z.looseObject({
   running: z.boolean(),
   compatible: z.boolean().optional(),
@@ -133,7 +138,7 @@ export class HerdrPluginClient {
     this.#actionTimeoutMs = actionTimeoutMs;
   }
 
-  async preflightServer(): Promise<{ readonly socket?: string; readonly session?: string | null }> {
+  async preflightServer(): Promise<ServerTarget> {
     const value = await this.#json("status server", ["status", "server", "--json"]);
     const server = ServerSchema.safeParse(value);
 
@@ -145,10 +150,13 @@ export class HerdrPluginClient {
       throw new Error(`Herdr target server is incompatible${server.data.version ? ` (${server.data.version})` : ""}`);
     }
 
-    return {
-      ...(server.data.socket ? { socket: server.data.socket } : {}),
-      ...(server.data.session !== undefined ? { session: server.data.session } : {}),
-    };
+    const target: ServerTarget = {};
+
+    if (server.data.socket) target.socket = server.data.socket;
+
+    if (server.data.session !== undefined) target.session = server.data.session;
+
+    return target;
   }
 
   async installedPlugin(): Promise<InstalledPlugin | null> {
@@ -178,17 +186,21 @@ export class HerdrPluginClient {
     const commit =
       plugin.resolved_commit ?? plugin.commit ?? source.resolved_commit ?? source.commit;
 
-    return {
+    const sourceDetails = { kind: source.kind };
+
+    if (source.owner) Object.assign(sourceDetails, { owner: source.owner });
+
+    if (source.repo) Object.assign(sourceDetails, { repo: source.repo });
+
+    if (ref) Object.assign(sourceDetails, { ref });
+
+    const installed = {
       id: plugin.plugin_id ?? plugin.id ?? this.#pluginId,
       root,
-      source: {
-        kind: source.kind,
-        ...(source.owner ? { owner: source.owner } : {}),
-        ...(source.repo ? { repo: source.repo } : {}),
-        ...(ref ? { ref } : {}),
-      },
-      ...(commit !== undefined ? { commit } : {}),
+      source: sourceDetails,
     };
+
+    return commit !== undefined ? { ...installed, commit } : installed;
   }
 
   async configDirectory(): Promise<string> {
@@ -274,10 +286,14 @@ export class HerdrPluginClient {
   }
 
   #actionFailure(action: string, logId: string, log: PluginLog): Error {
-    const details = [log.stderr, log.stdout, log.error]
-      .filter((value): value is string => Boolean(value?.trim()))
-      .map((value) => sanitizeText(value).trim())
-      .find(Boolean);
+    let details = "";
+
+    for (const value of [log.stderr, log.stdout, log.error]) {
+      if (!value?.trim()) continue;
+      details = sanitizeText(value).trim();
+
+      if (details) break;
+    }
 
     const message = details || `status ${log.status}${log.exit_code === undefined || log.exit_code === null ? "" : `, exit ${log.exit_code}`}`;
 

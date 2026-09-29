@@ -3,6 +3,7 @@ import { chmod, closeSync, openSync } from "node:fs";
 import { chmod as chmodAsync, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Match } from "effect";
+import { z } from "zod";
 import { type RenameResult } from "./domain.ts";
 import { run, snapshot } from "./herdr.ts";
 import { loadModelSelection } from "./model-selection.ts";
@@ -13,7 +14,7 @@ import {
 } from "./model-source.ts";
 import { loadModelSource } from "./model-sources/index.ts";
 import { loadNamingPrompt, loadProviderConfig } from "./provider.ts";
-import { createService } from "./service.ts";
+import { createService, type EvaluateOptions } from "./service.ts";
 import {
   acquireLock,
   ensurePrivateDir,
@@ -65,11 +66,13 @@ export function renamedTabCount(results: readonly RenameResult[]): number {
   );
 }
 
-export function currentResultNotice(result: RenameResult | null): {
+export interface ResultNotice {
   title: string;
   body: string;
   sound: "done" | "request";
-} {
+}
+
+export function currentResultNotice(result: RenameResult | null): ResultNotice {
   const failure = result?.outcomes?.find((item) => item.status === "failed");
 
   if (failure) {
@@ -380,10 +383,7 @@ async function once({
 
   if (stateDir) await ensurePrivateDir(stateDir);
 
-  const service = createService({
-    ...(stateDir ? { stateDir } : {}),
-    dryRun,
-  });
+  const service = createService(stateDir ? { stateDir, dryRun } : { dryRun });
 
   try {
     await service.initialize(current);
@@ -394,12 +394,11 @@ async function once({
             ?.active_tab_id || tabId
         : tabId;
 
-    const result = await service.evaluate(targetTab, {
-      snapshot: current,
-      resetKind,
-      ...(targetPane ? { targetPaneId: targetPane.pane_id } : {}),
-      forceRefresh,
-    });
+    const options: EvaluateOptions = { snapshot: current, resetKind, forceRefresh };
+
+    if (targetPane) options.targetPaneId = targetPane.pane_id;
+
+    const result = await service.evaluate(targetTab, options);
 
     console.log(JSON.stringify(result, null, 2));
 
@@ -469,7 +468,9 @@ export async function checkAi(
 
     return summary;
   } catch (error) {
-    const message = errorMessage(error);
+    const parsed = z.instanceof(Error).safeParse(error);
+    const message = parsed.success ? parsed.data.message : String(error);
+
     await sendNotice("AI config needs attention", message, "request");
     throw error;
   } finally {
@@ -557,17 +558,17 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
       dryRun: argv.includes("--dry-run"),
     });
 
-    if (
-      result &&
-      typeof result === "object" &&
-      "outcomes" in result &&
-      Array.isArray(result.outcomes)
-    ) {
-      if (result.outcomes.some((outcome) => outcome.status === "failed"))
+    const outcomes = z.object({ outcomes: z.array(z.unknown()) }).safeParse(result);
+
+    if (outcomes.success) {
+      const status = z.object({ status: z.string().optional() });
+
+      if (outcomes.data.outcomes.some((item) => status.parse(item).status === "failed"))
         process.exitCode = 1;
     }
   } catch (error) {
-    const message = errorMessage(error);
+    const parsed = z.instanceof(Error).safeParse(error);
+    const message = parsed.success ? parsed.data.message : String(error);
 
     if (command === "rename-now" || command === "all") {
       await notify("Rename failed", message, "request");
@@ -576,10 +577,6 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
     console.error(`Smart Rename: ${message}`);
     process.exitCode = 1;
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 if (import.meta.main) await main();

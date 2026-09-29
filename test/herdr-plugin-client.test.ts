@@ -52,6 +52,14 @@ test("preflights the target server and preserves target environment", async () =
   });
 });
 
+test("preflight retains null sessions without inventing an empty socket", async () => {
+  const client = new HerdrPluginClient({
+    run: async () => result({ ...runningServer, socket: "", session: null }),
+  });
+
+  assert.deepEqual(await client.preflightServer(), { session: null });
+});
+
 test("rejects absent, incompatible, malformed, and failed server preflight boundaries", async () => {
   for (const response of [
     result({ running: false }),
