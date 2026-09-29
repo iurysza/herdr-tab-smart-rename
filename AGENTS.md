@@ -4,7 +4,7 @@ Herdr plugin that autorenames tabs with short, context-aware names.
 
 ## Map
 
-1. Research in `ai-artifacts/`: `ARCHITECTURE.md`, `SEMANTIC_MAP.md`, `goals/`, `plans/`.
+1. Start with the [knowledge-base index](ai-artifacts/README.md), then follow the glossary, architecture explanations, and code and test map. Treat `goals/` and `plans/` as historical checkpoints.
 2. Change the code.
 3. Typecheck: `bun run check`.
 4. Lint: `bun run lint`.

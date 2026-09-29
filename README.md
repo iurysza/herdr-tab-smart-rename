@@ -84,7 +84,7 @@ Model-backed naming sends bounded terminal context to your selected provider. Pi
 - [Installation](./docs/install.md): platforms, upgrades, and migration from a local checkout.
 - [Configuration and controls](./docs/configuration.md): actions, shortcuts, model sources, and troubleshooting.
 - [Naming policy](./docs/naming-policy.md): the default instructions used to generate labels.
-- [Architecture](./ai-artifacts/ARCHITECTURE.md): worker lifecycle, naming decisions, model sources, and stale-result guards.
+- [Knowledge base](./ai-artifacts/README.md): architecture diagrams, naming glossary, runtime flows, and a code and test map.
 - [Release process](./docs/releasing.md) and [changelog](./CHANGELOG.md).
 
 ## Development
