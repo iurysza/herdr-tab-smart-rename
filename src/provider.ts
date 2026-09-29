@@ -176,17 +176,17 @@ async function readNamingPrompt(filePath: string, required = false): Promise<str
 function configError(error: z.ZodError): Error {
   const field = error.issues[0]?.path[0];
 
-  const messages: Record<PropertyKey, string> = {
-    provider: "SMART_RENAME_PROVIDER is invalid",
-    baseURL: "SMART_RENAME_BASE_URL must be an HTTP(S) URL without credentials",
-    model: "SMART_RENAME_MODEL is required",
-    timeoutMs: "SMART_RENAME_TIMEOUT_MS must be 1000-300000",
-    reasoningEffort: "SMART_RENAME_REASONING_EFFORT must be none, low, medium, or high",
-    promptPath: "SMART_RENAME_PROMPT_PATH is invalid",
-    apiKey: `AI key missing. Run setup or set a provider key in ${PROVIDER_ENV_NAME}`,
-  };
+  const messages = new Map<PropertyKey, string>([
+    ["provider", "SMART_RENAME_PROVIDER is invalid"],
+    ["baseURL", "SMART_RENAME_BASE_URL must be an HTTP(S) URL without credentials"],
+    ["model", "SMART_RENAME_MODEL is required"],
+    ["timeoutMs", "SMART_RENAME_TIMEOUT_MS must be 1000-300000"],
+    ["reasoningEffort", "SMART_RENAME_REASONING_EFFORT must be none, low, medium, or high"],
+    ["promptPath", "SMART_RENAME_PROMPT_PATH is invalid"],
+    ["apiKey", `AI key missing. Run setup or set a provider key in ${PROVIDER_ENV_NAME}`],
+  ]);
 
-  return new Error(messages[field ?? ""] ?? "AI provider configuration is invalid");
+  return new Error(messages.get(field ?? "") ?? "AI provider configuration is invalid");
 }
 
 export async function loadProviderConfig(
@@ -228,12 +228,12 @@ export async function loadProviderConfig(
       profile?.defaultModel ||
       "",
     timeoutMs: Number(pick(env, fileEnv, defaults, "SMART_RENAME_TIMEOUT_MS")),
-    ...(reasoningEffort ? { reasoningEffort } : {}),
-    ...(configuredPrompt
-      ? { promptPath: resolvePromptPath(configuredPrompt, env) }
-      : {}),
     apiKey: providerApiKey(provider, env, fileEnv),
   };
+
+  if (reasoningEffort) Object.assign(input, { reasoningEffort });
+
+  if (configuredPrompt) Object.assign(input, { promptPath: resolvePromptPath(configuredPrompt, env) });
 
   const parsed = ProviderConfigSchema.safeParse(input);
 
@@ -248,16 +248,19 @@ export async function loadNamingPrompt(
   configOrEnv: ProviderConfig | NodeJS.ProcessEnv = process.env,
   suppliedEnv?: NodeJS.ProcessEnv,
 ): Promise<string> {
-  const isConfig = typeof configOrEnv.baseURL === "string";
-  const env = isConfig ? suppliedEnv ?? process.env : configOrEnv as NodeJS.ProcessEnv;
+  const config = ProviderConfigSchema.safeParse(configOrEnv);
 
-  const promptPath = isConfig
-    ? (configOrEnv as ProviderConfig).promptPath
+  const env = config.success
+    ? suppliedEnv ?? process.env
+    : z.record(z.string(), z.string().optional()).parse(configOrEnv);
+
+  const promptPath = config.success
+    ? config.data.promptPath
     : await configuredNamingPromptPath(env);
 
-  if (isConfig && promptPath) return readNamingPrompt(promptPath, true);
+  if (config.success && promptPath) return readNamingPrompt(promptPath, true);
 
-  if (!isConfig && promptPath) {
+  if (!config.success && promptPath) {
     const privateDefault = env.HERDR_PLUGIN_CONFIG_DIR && path.join(env.HERDR_PLUGIN_CONFIG_DIR, NAMING_PROMPT_NAME);
 
     if (promptPath !== privateDefault) return readNamingPrompt(promptPath, true);
@@ -293,13 +296,6 @@ export function parseSuggestion(text: string): NameSuggestion {
   });
 }
 
-function safeProviderError(error: unknown, config: ProviderConfig): string {
-  let message = error instanceof Error ? error.message : String(error || "provider request failed");
-  message = message.replaceAll(config.apiKey, "[redacted]");
-
-  return sanitizeText(message).slice(0, 400) || "provider request failed";
-}
-
 export interface CompletionRequest {
   config: ProviderConfig;
   context: NamingContext;
@@ -322,34 +318,30 @@ export function transformOpenAiRequestBody(
 }
 
 export async function completeWithAiSdk(request: CompletionRequest): Promise<string> {
-  const provider = createOpenAICompatible({
+  const options = {
     name: request.config.provider,
     baseURL: request.config.baseURL,
     apiKey: request.config.apiKey,
-    ...(request.config.provider === "openai"
-      ? {
-          transformRequestBody: transformOpenAiRequestBody,
-        }
-      : {}),
-  });
+  };
 
-  const result = await generateText({
+  if (request.config.provider === "openai") Object.assign(options, { transformRequestBody: transformOpenAiRequestBody });
+
+  const provider = createOpenAICompatible(options);
+
+  const parameters = {
     model: provider(request.config.model),
     system: request.system,
     prompt: `Suggest one label from this sanitized context:\n${JSON.stringify(request.context)}`,
     maxOutputTokens: request.maxOutputTokens,
-    ...(request.config.reasoningEffort
-      ? {
-          providerOptions: {
-            openaiCompatible: {
-              reasoningEffort: request.config.reasoningEffort,
-            },
-          },
-        }
-      : {}),
     maxRetries: request.maxRetries,
     abortSignal: request.abortSignal,
+  };
+
+  if (request.config.reasoningEffort) Object.assign(parameters, {
+    providerOptions: { openaiCompatible: { reasoningEffort: request.config.reasoningEffort } },
   });
+
+  const result = await generateText(parameters);
 
   return result.text;
 }
@@ -386,9 +378,12 @@ export class AiSdkNamer implements Namer {
 
     return Exit.match(await Effect.runPromiseExit(program), {
       onFailure: (cause) => {
-        throw new Error(
-          `AI request failed (${config.provider}/${config.model}): ${safeProviderError(Cause.squash(cause), config)}`,
-        );
+        const failure = Cause.squash(cause);
+        const parsed = z.instanceof(Error).safeParse(failure);
+        const message = parsed.success ? parsed.data.message : String(failure || "provider request failed");
+        const detail = sanitizeText(message.replaceAll(config.apiKey, "[redacted]")).slice(0, 400) || "provider request failed";
+
+        throw new Error(`AI request failed (${config.provider}/${config.model}): ${detail}`);
       },
       onSuccess: (suggestion) => suggestion,
     });

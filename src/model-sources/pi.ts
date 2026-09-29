@@ -1,10 +1,5 @@
-import type {
-  Api,
-  Context,
-  Model,
-  ModelThinkingLevel,
-  ThinkingLevel,
-} from "@earendil-works/pi-ai";
+import type { Api, Context, Model } from "@earendil-works/pi-ai";
+import { z } from "zod";
 import {
   ModelSourceError,
   type ModelCompletionRequest,
@@ -120,14 +115,9 @@ export class PiModelSource implements ModelSource {
             },
           ],
         },
-        {
-          ...(request.selection.profile && request.selection.profile !== "off"
-            ? { reasoning: request.selection.profile }
-            : {}),
-          maxTokens: request.maxOutputTokens,
-          maxRetries: request.maxRetries,
-          signal: request.abortSignal,
-        },
+        request.selection.profile && request.selection.profile !== "off"
+          ? { reasoning: request.selection.profile, maxTokens: request.maxOutputTokens, maxRetries: request.maxRetries, signal: request.abortSignal }
+          : { maxTokens: request.maxOutputTokens, maxRetries: request.maxRetries, signal: request.abortSignal },
       );
 
       if (response.stopReason === "error" || response.stopReason === "aborted") {
@@ -201,17 +191,28 @@ async function createPiRuntime(): Promise<PiRuntimeResources> {
     runtime: {
       getAvailable: (providerId) => runtime.getAvailable(providerId),
       getModel: (providerId, modelId) => runtime.getModel(providerId, modelId),
-      completeSimple: (model, context, options) =>
-        runtime.completeSimple(model as Model<Api>, context, {
-          ...(options.reasoning
-            ? { reasoning: options.reasoning as ThinkingLevel }
-            : {}),
+      completeSimple: (model, context, options) => {
+        // SAFETY: This model came from ModelRuntime.getModel, which returns Model<Api>.
+        const selectedModel = model as Model<Api>;
+
+        const runtimeOptions = {
           maxTokens: options.maxTokens,
           maxRetries: options.maxRetries,
           signal: options.signal,
-        }),
+        };
+
+        if (options.reasoning) Object.assign(runtimeOptions, {
+          reasoning: z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]).parse(options.reasoning),
+        });
+
+        return runtime.completeSimple(selectedModel, context, runtimeOptions);
+      },
     },
-    profiles: (model) =>
-      getSupportedThinkingLevels(model as Model<Api>) as readonly ModelThinkingLevel[],
+    profiles: (model) => {
+      // SAFETY: This model came from ModelRuntime.getModel, which returns Model<Api>.
+      const selectedModel = model as Model<Api>;
+
+      return getSupportedThinkingLevels(selectedModel);
+    },
   };
 }
