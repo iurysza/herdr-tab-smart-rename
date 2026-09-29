@@ -17,7 +17,34 @@ type FunctionWithReturnType =
   | ESTree.TSFunctionType
   | ESTree.TSMethodSignature;
 
-/** Ban function contracts that return unknown instead of a parsed domain type. */
+function isInjectedActionResult(node: FunctionWithReturnType, sourceCode: { getText(node: ESTree.Node): string }): boolean {
+  if (node.type !== 'TSFunctionType' || node.parent.type !== 'TSTypeParameterInstantiation' || node.parent.parent.type !== 'TSTypeReference') return false;
+  const record = node.parent.parent;
+  if (record.typeName.type !== 'Identifier' || record.typeName.name !== 'Record') return false;
+  const annotation = record.parent;
+  if (annotation.type !== 'TSTypeAnnotation' || annotation.parent.type !== 'TSPropertySignature') return false;
+  const property = annotation.parent;
+  if (property.key.type !== 'Identifier' || property.key.name !== 'actions') return false;
+  const owner = property.parent.parent;
+  if (owner?.type !== 'TSInterfaceDeclaration' || owner.id.name !== 'DispatchOptions') return false;
+
+  return node.params.length === 1 && sourceCode.getText(node.params[0]).replace(/\s+/g, '') === 'options:{dryRun:boolean}' &&
+    record.typeArguments?.params[0]?.type === 'TSStringKeyword';
+}
+
+function isDelegatedActionResult(node: FunctionWithReturnType, sourceCode: { getText(node: ESTree.Node): string }): boolean {
+  if (node.type !== 'FunctionDeclaration' || node.id?.name !== 'dispatch' || node.body?.type !== 'BlockStatement') return false;
+  const returns = node.body.body.filter((item) => item.type === 'ReturnStatement');
+  if (returns.length !== 1 || returns[0].argument?.type !== 'CallExpression') return false;
+  const call = returns[0].argument;
+  if (call.callee.type !== 'Identifier' || call.callee.name !== 'action' || call.arguments.length !== 1 ||
+    sourceCode.getText(call.arguments[0]).replace(/\s+/g, '') !== '{dryRun}') return false;
+  const body = sourceCode.getText(node.body);
+
+  return body.includes('actions[command]') && body.includes('if (!action)') && body.includes('throw new Error(');
+}
+
+/** Ban function contracts that return unknown except the checked opaque action seam. */
 export const noUnknownReturnsRule = defineRule({
   meta: {
     type: "problem",
@@ -57,6 +84,7 @@ export const noUnknownReturnsRule = defineRule({
       const annotation = node.returnType;
       if (annotation === null || annotation === undefined) return;
       if (!resolvesToUnknown(annotation.typeAnnotation)) return;
+      if (isInjectedActionResult(node, context.sourceCode) || isDelegatedActionResult(node, context.sourceCode)) return;
       context.report({ node: annotation.typeAnnotation, messageId: "unknownReturn" });
     };
 

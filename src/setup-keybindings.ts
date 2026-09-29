@@ -1,7 +1,17 @@
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import { sanitizeText } from "./text.ts";
+
+const CommandsSchema = z.object({
+  keys: z.object({ command: z.array(z.unknown()) }),
+});
+
+const PluginActionSchema = z.object({
+  type: z.literal("plugin_action"),
+  command: z.string(),
+});
 
 export type KeybindingAction = "rename-now" | "rename-all";
 
@@ -88,16 +98,23 @@ export async function inspectKeybindings(
   }
 
   let original: string;
-  let parsed: unknown;
+  let existing: Set<string>;
 
   try {
     original = await read(configPath, "utf8");
-    parsed = Bun.TOML.parse(original);
+    const parsed = CommandsSchema.safeParse(Bun.TOML.parse(original));
+
+    existing = parsed.success
+      ? new Set(parsed.data.keys.command.flatMap((item) => {
+          const action = PluginActionSchema.safeParse(item);
+
+          return action.success ? [action.data.command] : [];
+        }))
+      : new Set();
   } catch {
     return uncertain(instructions, "The local Herdr config could not be read or parsed; no binding or collision status was checked.", remoteAttachNote, configPath);
   }
 
-  const existing = configuredActions(parsed);
   const results: KeybindingResult[] = [];
 
   for (const instruction of instructions) {
@@ -108,32 +125,15 @@ export async function inspectKeybindings(
 
     const candidate = `${original.trimEnd()}\n\n${instruction.toml}\n`;
     const checked = await checkCandidate(candidate, env, run, temporaryDirectory, write, remove);
-    results.push({
-      action: instruction.action,
-      status: checked.exitCode === 0 ? "available" : "colliding",
-      instruction,
-      ...(checked.exitCode === 0 ? {} : { diagnostic: diagnostic(checked) }),
-    });
+
+    const result: KeybindingResult = checked.exitCode === 0
+      ? { action: instruction.action, status: "available", instruction }
+      : { action: instruction.action, status: "colliding", instruction, diagnostic: diagnostic(checked) };
+
+    results.push(result);
   }
 
   return { path: configPath, results, remoteAttachNote };
-}
-
-function configuredActions(value: unknown): Set<string> {
-  if (!value || typeof value !== "object") return new Set();
-  const keys = (value as Record<string, unknown>).keys;
-
-  if (!keys || typeof keys !== "object") return new Set();
-  const commands = (keys as Record<string, unknown>).command;
-
-  if (!Array.isArray(commands)) return new Set();
-
-  return new Set(
-    commands
-      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
-      .filter((item) => item.type === "plugin_action" && typeof item.command === "string")
-      .map((item) => item.command as string),
-  );
 }
 
 async function checkCandidate(
@@ -175,8 +175,7 @@ function uncertain(
   remoteAttachNote: string,
   configPath?: string,
 ): KeybindingInspection {
-  return {
-    ...(configPath ? { path: configPath } : {}),
+  const inspection: KeybindingInspection = {
     results: instructions.map((instruction) => ({
       action: instruction.action,
       status: "uncertain",
@@ -185,6 +184,8 @@ function uncertain(
     uncertainty: message,
     remoteAttachNote,
   };
+
+  return configPath ? { ...inspection, path: configPath } : inspection;
 }
 
 function diagnostic(result: { stdout: string; stderr: string }): string {

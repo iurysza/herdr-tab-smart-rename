@@ -50,7 +50,7 @@ interface OpenCodeClient {
     ): Promise<{
       data?: { parts: Array<{ type: string; text?: string }> } | undefined;
     }>;
-    delete(input: { sessionID: string; directory?: string }, options?: { signal?: AbortSignal }): Promise<unknown>;
+    delete(input: { sessionID: string; directory?: string }, options?: { signal?: AbortSignal }): Promise<{ data?: boolean | undefined } | void>;
   };
 }
 
@@ -141,18 +141,19 @@ export class OpenCodeModelSource implements ModelSource {
       const toolIds = (await client.tool.ids({ directory: this.#directory }, { signal })).data;
 
       if (!toolIds) throw new Error("OpenCode did not list available tools");
-      const tools = Object.fromEntries(toolIds.map((id) => [id, false])) as Record<string, false>;
+      const tools = Object.fromEntries(toolIds.map((id): [string, false] => [id, false]));
+
+      const model: NonNullable<Parameters<OpenCodeClient["session"]["create"]>[0]["model"]> = {
+        providerID: request.selection.provider,
+        id: request.selection.model,
+      };
+
+      if (request.selection.profile) model.variant = request.selection.profile;
 
       const created = await client.session.create({
         directory: this.#directory,
         title: "Smart Rename",
-        model: {
-          providerID: request.selection.provider,
-          id: request.selection.model,
-          ...(request.selection.profile
-            ? { variant: request.selection.profile }
-            : {}),
-        },
+        model,
         permission: [...denyAllPermissions],
       }, { signal });
 
@@ -160,7 +161,7 @@ export class OpenCodeModelSource implements ModelSource {
 
       if (!sessionId) throw new Error("OpenCode did not create a session");
 
-      const response = await client.session.prompt({
+      const input: Parameters<OpenCodeClient["session"]["prompt"]>[0] = {
         sessionID: sessionId,
         directory: this.#directory,
         model: {
@@ -168,12 +169,13 @@ export class OpenCodeModelSource implements ModelSource {
           modelID: request.selection.model,
         },
         system: request.system,
-        ...(request.selection.profile
-          ? { variant: request.selection.profile }
-          : {}),
         tools,
         parts: [{ type: "text", text: request.prompt }],
-      }, { signal: request.abortSignal });
+      };
+
+      if (request.selection.profile) input.variant = request.selection.profile;
+
+      const response = await client.session.prompt(input, { signal: request.abortSignal });
 
       const text = response.data?.parts
         .filter((part) => part.type === "text")
@@ -273,7 +275,11 @@ async function createOpenCodeResources(signal?: AbortSignal): Promise<OpenCodeRe
     "@opencode-ai/sdk/v2"
   );
 
-  const server = await createOpencodeServer({ hostname: "127.0.0.1", port: 0, ...(signal ? { signal } : {}) });
+  const options = { hostname: "127.0.0.1", port: 0 };
+
+  if (signal) Object.assign(options, { signal });
+
+  const server = await createOpencodeServer(options);
 
   return {
     server,

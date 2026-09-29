@@ -26,6 +26,8 @@ export const ModelSelectionSchema: z.ZodType<ModelSelection> = z
   })
   .strict();
 
+const ErrorCodeSchema = z.object({ code: z.string() });
+
 const DEFAULT_DIRECT_SELECTION: ModelSelection = {
   version: 1,
   source: "direct",
@@ -60,13 +62,14 @@ function environmentSelection(
     return DEFAULT_DIRECT_SELECTION;
   }
 
-  return parseModelSelection({
+  const requested = {
     version: 1,
     source,
     provider: env.SMART_RENAME_PROVIDER ?? selection.provider,
     model: env.SMART_RENAME_MODEL ?? selection.model,
-    ...(profile ? { profile } : {}),
-  });
+  };
+
+  return parseModelSelection(profile ? { ...requested, profile } : requested);
 }
 
 export async function loadModelSelection(
@@ -82,7 +85,9 @@ export async function loadModelSelection(
 
     return environmentSelection(selection, env);
   } catch (error) {
-    if (errorCode(error) === "ENOENT") {
+    const parsed = ErrorCodeSchema.safeParse(error);
+
+    if (parsed.success && parsed.data.code === "ENOENT") {
       return environmentSelection(DEFAULT_DIRECT_SELECTION, env);
     }
 
@@ -172,10 +177,4 @@ async function runConfigDirectoryCommand(
   ]);
 
   return { stdout, exitCode };
-}
-
-function errorCode(error: unknown): string | undefined {
-  return error && typeof error === "object" && "code" in error
-    ? String(error.code)
-    : undefined;
 }

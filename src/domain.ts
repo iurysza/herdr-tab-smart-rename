@@ -256,22 +256,12 @@ export function validateTabLabel(label: unknown): label is string {
 
   if (words.length < 2 || words.length > 4) return false;
 
-  const connectors: Record<string, true> = {
-    a: true,
-    an: true,
-    and: true,
-    for: true,
-    in: true,
-    of: true,
-    on: true,
-    to: true,
-    with: true,
-  };
+  const connectors = new Set(["a", "an", "and", "for", "in", "of", "on", "to", "with"]);
 
   return words.every(
     (word, index) =>
       /^[A-Z0-9][A-Za-z0-9+.#/'-]*$/.test(word) ||
-      (index > 0 && connectors[word]),
+      (index > 0 && connectors.has(word)),
   );
 }
 
@@ -384,8 +374,8 @@ export function buildModelContext({
 
   const timeline = focused?.sessionMessages;
 
-  const hasTimeline = ["origin", "middle", "recent"].some(
-    (section) => timeline?.[section as keyof SessionTimeline]?.length,
+  const hasTimeline = Boolean(
+    timeline && (timeline.origin.length || timeline.middle.length || timeline.recent.length),
   );
 
   let context: NamingContext = requests.length

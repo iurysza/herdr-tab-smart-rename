@@ -48,6 +48,8 @@ test("label, workspace, and process policy stays deterministic", () => {
   for (const [label, valid] of [
     ["Fix Socket Reconnect", true],
     ["Optimize VAR for Explainers", true],
+    ["Fix to", true],
+    ["Fix constructor", false],
     ["fix socket", false],
     ["One", false],
     ["This Label Has Far Too Many Words", false],
@@ -131,11 +133,13 @@ test("text sanitization delegates ANSI and secret removal to libraries", () => {
   ].join(" ");
 
   const output = sanitizeText(input, "");
-  assert.doesNotMatch(
-    output,
-    /\u001b|abc\.def|verysecret|password@example|abcdefghijklmnop|tPJd/,
-  );
+  assert.equal(output.includes("\u001b"), false);
+  assert.doesNotMatch(output, /abc\.def|verysecret|password@example|abcdefghijklmnop|tPJd/);
   assert.match(output, /redacted/i);
+  assert.equal(
+    sanitizeText("A\u0000B\u0008C\u0009D\u000bE\u000cF\u000dG\u000eH\u001fI\u007fJ\u0080K", ""),
+    "A B C D E F G H I J\u0080K",
+  );
 });
 
 test("stable fingerprints and model cooldown suppress churn", () => {

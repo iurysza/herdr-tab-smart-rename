@@ -10,6 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { z } from "zod";
 import { modelSelectionPath } from "./model-selection.ts";
 import { providerEnvPath } from "./provider.ts";
 
@@ -84,7 +85,9 @@ async function snapshotFile(file: string): Promise<FileSnapshot> {
 
     return { path: file, exists: true, bytes, mode: details.mode & 0o777 };
   } catch (error) {
-    if (errorCode(error) === "ENOENT") return { path: file, exists: false };
+    const parsed = z.object({ code: z.string() }).safeParse(error);
+
+    if (parsed.success && parsed.data.code === "ENOENT") return { path: file, exists: false };
     throw error;
   }
 }
@@ -95,7 +98,9 @@ async function snapshotDirectory(directory: string): Promise<DirectorySnapshot> 
 
     return { path: directory, exists: true, mode: details.mode & 0o777 };
   } catch (error) {
-    if (errorCode(error) === "ENOENT") return { path: directory, exists: false };
+    const parsed = z.object({ code: z.string() }).safeParse(error);
+
+    if (parsed.success && parsed.data.code === "ENOENT") return { path: directory, exists: false };
     throw error;
   }
 }
@@ -129,13 +134,11 @@ async function restoreDirectory(snapshot: DirectorySnapshot): Promise<void> {
     return;
   }
 
-  await rmdir(snapshot.path).catch((error: unknown) => {
-    if (errorCode(error) !== "ENOENT") throw error;
-  });
-}
+  try {
+    await rmdir(snapshot.path);
+  } catch (error) {
+    const parsed = z.object({ code: z.string() }).safeParse(error);
 
-function errorCode(error: unknown): string | undefined {
-  return error && typeof error === "object" && "code" in error
-    ? String(error.code)
-    : undefined;
+    if (!parsed.success || parsed.data.code !== "ENOENT") throw error;
+  }
 }

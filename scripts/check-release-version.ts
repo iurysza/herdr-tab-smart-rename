@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { z } from "zod";
 
 const [tag, expectedCommit] = process.argv.slice(2);
 
@@ -15,7 +16,7 @@ const [packageJson, manifest] = await Promise.all([
   readFile(new URL("../herdr-plugin.toml", import.meta.url), "utf8"),
 ]);
 
-const packageVersion = (JSON.parse(packageJson) as { version?: string }).version;
+const packageVersion = z.object({ version: z.string().optional() }).parse(JSON.parse(packageJson)).version;
 
 const manifestVersion = Bun.TOML.parse(manifest).version;
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { createRequire } from "node:module";
+import { z } from "zod";
 import {
   saveDirectProviderConfig,
   validateDirectSetupConfig,
@@ -16,11 +17,7 @@ import {
   resolvePluginConfigDirectory,
   saveModelSelection,
 } from "./model-selection.ts";
-import type {
-  ModelSelection,
-  ModelSource,
-  ModelSourceId,
-} from "./model-source.ts";
+import { MODEL_SOURCE_IDS, type ModelSelection, type ModelSource } from "./model-source.ts";
 import { loadModelSource } from "./model-sources/index.ts";
 import { HerdrPluginClient } from "./herdr-plugin-client.ts";
 import { inspectKeybindings, type KeybindingInspection } from "./setup-keybindings.ts";
@@ -39,14 +36,16 @@ interface Spinner {
   error(message?: string): void;
 }
 
+type PromptValue = string | boolean | symbol | undefined;
+
 export interface SetupPrompts {
-  select(options: { message: string; options: Choice[]; initialValue?: string }): Promise<unknown>;
-  autocomplete(options: { message: string; options: Choice[]; placeholder?: string }): Promise<unknown>;
-  text(options: { message: string; placeholder?: string; defaultValue?: string }): Promise<unknown>;
-  password(options: { message: string }): Promise<unknown>;
-  confirm(options: { message: string; initialValue?: boolean }): Promise<unknown>;
+  select(options: { message: string; options: Choice[]; initialValue?: string }): Promise<string | symbol>;
+  autocomplete(options: { message: string; options: Choice[]; placeholder?: string }): Promise<string | symbol>;
+  text(options: { message: string; placeholder?: string; defaultValue?: string }): Promise<string | symbol>;
+  password(options: { message: string }): Promise<string | symbol>;
+  confirm(options: { message: string; initialValue?: boolean }): Promise<boolean | symbol>;
   spinner(): Spinner;
-  isCancel(value: unknown): boolean;
+  isCancel(value: PromptValue): boolean;
   summary(message: string): void;
   cancel(message: string): void;
   success(message: string): void;
@@ -76,16 +75,16 @@ async function defaultPrompts(): Promise<SetupPrompts> {
 
 function patchBunStyleText(): void {
   if (!process.versions.bun) return;
-  const util = require("node:util") as { styleText: (format: string | readonly string[], text: string) => string };
+  // SAFETY: Node's node:util module exports the callable, mutable styleText property.
+  const util = require("node:util") as typeof import("node:util");
   const original = util.styleText;
 
-  if ((original as { __smartRenamePatched?: boolean }).__smartRenamePatched) return;
+  if ("__smartRenamePatched" in original && original.__smartRenamePatched === true) return;
 
   const compatible = (format: string | readonly string[], text: string): string =>
     (Array.isArray(format) ? format : [format]).reduce((styled, item) => original(item, styled), text);
 
-  (compatible as { __smartRenamePatched?: boolean }).__smartRenamePatched = true;
-  util.styleText = compatible;
+  util.styleText = Object.assign(compatible, { __smartRenamePatched: true });
 }
 
 interface CollectedChoice {
@@ -135,10 +134,10 @@ export async function runSetup(
   let action: "keep" | "replace";
 
   if (existing) {
-    const keep = await answer<boolean>(prompts, prompts.confirm({
+    const keep = await answer(prompts, prompts.confirm({
       message: `Keep existing AI setup (${existing.source} ${existing.provider}/${existing.model})?`,
       initialValue: true,
-    }));
+    }), z.boolean());
 
     if (keep === undefined) return cancelled(prompts);
 
@@ -163,7 +162,7 @@ export async function runSetup(
   if (!requested) return cancelled(prompts);
   const keybindings = await inspect(requested, setupEnv);
   prompts.summary(setupReview({ selection: choice.selection, action, keybindings }));
-  const confirmed = await answer<boolean>(prompts, prompts.confirm({ message: "Apply this setup?", initialValue: true }));
+  const confirmed = await answer(prompts, prompts.confirm({ message: "Apply this setup?", initialValue: true }), z.boolean());
 
   if (confirmed !== true) return cancelled(prompts);
 
@@ -188,7 +187,10 @@ export async function runSetup(
   try {
     await startWorker(setupEnv);
   } catch (error) {
-    throw new Error(`AI configuration is valid but Smart Rename could not start. ${errorMessage(error)}\nRetry: herdr plugin action invoke start --plugin tab-smart-rename`);
+    const parsed = z.instanceof(Error).safeParse(error);
+    const detail = parsed.success ? parsed.data.message : String(error);
+
+    throw new Error(`AI configuration is valid but Smart Rename could not start. ${detail}\nRetry: herdr plugin action invoke start --plugin tab-smart-rename`);
   }
 
   prompts.success("Smart Rename is ready");
@@ -207,7 +209,11 @@ async function defaultProbeExisting(
     if (selection.source !== "direct") return selection;
     const config = await loadProviderConfig(env);
 
-    return { version: 1, source: "direct", provider: config.provider, model: config.model, ...(config.reasoningEffort ? { profile: config.reasoningEffort } : {}) };
+    const directSelection: ModelSelection = { version: 1, source: "direct", provider: config.provider, model: config.model };
+
+    if (config.reasoningEffort) directSelection.profile = config.reasoningEffort;
+
+    return directSelection;
   } catch {
     return undefined;
   }
@@ -219,26 +225,37 @@ async function rollbackOrThrow(transaction: SetupTransaction | undefined, cause:
   try {
     await transaction.rollback();
   } catch (rollback) {
-    throw new Error(`${errorMessage(cause)}; ${errorMessage(rollback)}`);
+    const original = z.instanceof(Error).safeParse(cause);
+    const failedRollback = z.instanceof(Error).safeParse(rollback);
+    const originalMessage = original.success ? original.data.message : String(cause);
+    const rollbackMessage = failedRollback.success ? failedRollback.data.message : String(rollback);
+
+    throw new Error(`${originalMessage}; ${rollbackMessage}`);
   }
 }
 
 async function collectKeybindingChoices(prompts: SetupPrompts): Promise<("rename-now" | "rename-all")[] | undefined> {
-  const current = await answer<boolean>(prompts, prompts.confirm({
+  const current = await answer(prompts, prompts.confirm({
     message: "Show current-tab rename keybinding instructions?",
     initialValue: false,
-  }));
+  }), z.boolean());
 
   if (current === undefined) return undefined;
 
-  const all = await answer<boolean>(prompts, prompts.confirm({
+  const all = await answer(prompts, prompts.confirm({
     message: "Show all-tabs rename keybinding instructions?",
     initialValue: false,
-  }));
+  }), z.boolean());
 
   if (all === undefined) return undefined;
 
-  return [ ...(current ? ["rename-now" as const] : []), ...(all ? ["rename-all" as const] : []) ];
+  const requested: ("rename-now" | "rename-all")[] = [];
+
+  if (current) requested.push("rename-now");
+
+  if (all) requested.push("rename-all");
+
+  return requested;
 }
 
 async function collectChoice(
@@ -246,14 +263,14 @@ async function collectChoice(
   env: NodeJS.ProcessEnv,
   sourceFactory: NonNullable<SetupDependencies["sourceFactory"]>,
 ): Promise<CollectedChoice | undefined> {
-  const source = await answer<ModelSourceId>(prompts, prompts.select({
+  const source = await answer(prompts, prompts.select({
     message: "Model source",
     options: [
       { value: "pi", label: "Pi", hint: "Use Pi's connected providers" },
       { value: "opencode", label: "OpenCode", hint: "Use OpenCode's connected providers" },
       { value: "direct", label: "Direct", hint: "Use a private OpenAI-compatible key" },
     ],
-  }));
+  }), z.enum(MODEL_SOURCE_IDS));
 
   if (!source) return undefined;
 
@@ -262,7 +279,11 @@ async function collectChoice(
 
     if (!direct) return undefined;
 
-    return { direct, selection: { version: 1, source, provider: direct.provider, model: direct.model, ...(direct.reasoningEffort ? { profile: direct.reasoningEffort } : {}) } };
+    const selection: ModelSelection = { version: 1, source, provider: direct.provider, model: direct.model };
+
+    if (direct.reasoningEffort) selection.profile = direct.reasoningEffort;
+
+    return { direct, selection };
   }
 
   const adapter = await sourceFactory({ version: 1, source, provider: source, model: source }, env);
@@ -271,29 +292,37 @@ async function collectChoice(
     const spinner = prompts.spinner();
     spinner.start(`Discovering connected ${source} providers`);
 
-    const providers = await adapter.listProviders().catch((error: unknown) => {
+    let providers: Awaited<ReturnType<ModelSource["listProviders"]>>;
+
+    try {
+      providers = await adapter.listProviders();
+    } catch (error) {
       spinner.error(`Could not discover ${source} providers`);
       throw error;
-    });
+    }
 
     spinner.stop("Connected providers found");
 
     if (!providers.length) throw new Error(`No connected ${source} providers. Sign in, then run setup.`);
-    const provider = await answer<string>(prompts, prompts.autocomplete({ message: "Provider", options: providers.map((item) => ({ value: item.id, label: item.label })), placeholder: "Search providers" }));
+    const provider = await answer(prompts, prompts.autocomplete({ message: "Provider", options: providers.map((item) => ({ value: item.id, label: item.label })), placeholder: "Search providers" }), z.string());
 
     if (!provider) return undefined;
     const models = await adapter.listModels(provider);
 
     if (!models.length) throw new Error("No models are available for this provider.");
-    const model = await answer<string>(prompts, prompts.autocomplete({ message: "Model", options: models.map((item) => ({ value: item.id, label: item.label })), placeholder: "Search models" }));
+    const model = await answer(prompts, prompts.autocomplete({ message: "Model", options: models.map((item) => ({ value: item.id, label: item.label })), placeholder: "Search models" }), z.string());
 
     if (!model) return undefined;
     const profiles = await adapter.listProfiles(provider, model);
-    const profile = profiles.length ? await answer<string>(prompts, prompts.autocomplete({ message: source === "pi" ? "Thinking level" : "Variant", options: profiles.map((item) => ({ value: item.id, label: item.label })), placeholder: source === "pi" ? "Search thinking levels" : "Search variants" })) : undefined;
+    const profile = profiles.length ? await answer(prompts, prompts.autocomplete({ message: source === "pi" ? "Thinking level" : "Variant", options: profiles.map((item) => ({ value: item.id, label: item.label })), placeholder: source === "pi" ? "Search thinking levels" : "Search variants" }), z.string()) : undefined;
 
     if (profiles.length && !profile) return undefined;
 
-    return { selection: { version: 1, source, provider, model, ...(profile ? { profile } : {}) } };
+    const selection: ModelSelection = { version: 1, source, provider, model };
+
+    if (profile) selection.profile = profile;
+
+    return { selection };
   } finally {
     await adapter.close?.();
   }
@@ -301,42 +330,53 @@ async function collectChoice(
 
 async function collectDirectConfig(prompts: SetupPrompts): Promise<DirectSetupConfig | undefined> {
   const defaultProvider = defaultDirectProviderProfile();
-  const provider = await answer<string>(prompts, prompts.text({ message: "Provider", defaultValue: defaultProvider.id }));
+  const provider = await answer(prompts, prompts.text({ message: "Provider", defaultValue: defaultProvider.id }), z.string());
 
   if (provider === undefined) return undefined;
   const profile = directProviderProfile(provider);
-  const baseURL = await answer<string>(prompts, prompts.text({ message: "Base URL", ...(profile?.defaultBaseURL ? { defaultValue: profile.defaultBaseURL } : {}) }));
+
+  const baseURL = await answer(prompts, prompts.text(profile?.defaultBaseURL
+    ? { message: "Base URL", defaultValue: profile.defaultBaseURL }
+    : { message: "Base URL" }), z.string());
 
   if (baseURL === undefined) return undefined;
-  const model = await answer<string>(prompts, prompts.text({ message: "Model", ...(profile?.defaultModel ? { defaultValue: profile.defaultModel } : {}) }));
+
+  const model = await answer(prompts, prompts.text(profile?.defaultModel
+    ? { message: "Model", defaultValue: profile.defaultModel }
+    : { message: "Model" }), z.string());
 
   if (model === undefined) return undefined;
-  const apiKey = await answer<string>(prompts, prompts.password({ message: "API key" }));
+  const apiKey = await answer(prompts, prompts.password({ message: "API key" }), z.string());
 
   if (apiKey === undefined) return undefined;
-  const reasoning = await answer<string>(prompts, prompts.select({ message: "Reasoning level", initialValue: profile?.defaultReasoningEffort ?? "none", options: [{ value: "none", label: "None" }, { value: "low", label: "Low" }, { value: "medium", label: "Medium" }, { value: "high", label: "High" }] }));
+  const reasoning = await answer(prompts, prompts.select({ message: "Reasoning level", initialValue: profile?.defaultReasoningEffort ?? "none", options: [{ value: "none", label: "None" }, { value: "low", label: "Low" }, { value: "medium", label: "Medium" }, { value: "high", label: "High" }] }), z.enum(["none", "low", "medium", "high"]));
 
   if (reasoning === undefined) return undefined;
-  const timeout = await answer<string>(prompts, prompts.text({ message: "Timeout (ms)", defaultValue: "45000" }));
+  const timeout = await answer(prompts, prompts.text({ message: "Timeout (ms)", defaultValue: "45000" }), z.string());
 
   if (!provider || !baseURL || !model || !apiKey || !reasoning || !timeout) return undefined;
   const timeoutMs = Number(timeout);
 
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000) throw new Error("Timeout must be between 1000 and 300000 ms");
-  const config = { provider, baseURL, model, apiKey, ...(reasoning === "none" ? {} : { reasoningEffort: reasoning as "low" | "medium" | "high" }), timeoutMs };
+  const baseConfig = { provider, baseURL, model, apiKey, timeoutMs };
+
+  const config = reasoning === "none"
+    ? baseConfig
+    : { ...baseConfig, reasoningEffort: reasoning };
+
   validateDirectSetupConfig(config);
 
   return config;
 }
 
-async function maskedPassword({ message }: { message: string }): Promise<unknown> {
+async function maskedPassword({ message }: { message: string }): Promise<string | typeof SETUP_CANCELLED> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("An interactive terminal is required to enter the Direct API key");
   process.stdout.write(`◆  ${message}\n│  `);
   process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.setEncoding("utf8");
   let value = "";
 
   return new Promise((resolve) => {
-    const finish = (result: string | symbol): void => { process.stdin.off("data", onData); process.stdin.setRawMode(false); process.stdin.pause(); process.stdout.write("\n"); resolve(result); };
+    const finish = (result: string | typeof SETUP_CANCELLED): void => { process.stdin.off("data", onData); process.stdin.setRawMode(false); process.stdin.pause(); process.stdout.write("\n"); resolve(result); };
 
     const onData = (chunk: string): void => { for (const character of chunk) { if (character === "\u0003") return finish(SETUP_CANCELLED);
 
@@ -352,10 +392,10 @@ async function maskedPassword({ message }: { message: string }): Promise<unknown
   });
 }
 
-async function answer<T>(prompts: SetupPrompts, pending: Promise<unknown>): Promise<T | undefined> {
+async function answer<T extends z.ZodType>(prompts: SetupPrompts, pending: Promise<PromptValue>, schema: T): Promise<z.output<T> | undefined> {
   const value = await pending;
 
-  return prompts.isCancel(value) ? undefined : value as T;
+  return prompts.isCancel(value) ? undefined : schema.parse(value);
 }
 
 function cancelled(prompts: SetupPrompts): SetupResult {
@@ -364,10 +404,16 @@ function cancelled(prompts: SetupPrompts): SetupResult {
   return { saved: false };
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+async function runMain(): Promise<void> {
+  try {
+    await runSetup();
+  } catch (error) {
+    const parsed = z.instanceof(Error).safeParse(error);
+    const detail = parsed.success ? parsed.data.message : String(error);
+
+    console.error(`Smart Rename: ${detail}`);
+    process.exitCode = 1;
+  }
 }
 
-if (import.meta.main) {
-  runSetup().catch((error: unknown) => { console.error(`Smart Rename: ${errorMessage(error)}`); process.exitCode = 1; });
-}
+if (import.meta.main) void runMain();

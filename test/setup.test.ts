@@ -1,12 +1,27 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { z } from "zod";
 import { runSetup, type SetupPrompts } from "../src/setup.ts";
 import { renderKeybindingGuidance } from "../src/setup-plan.ts";
 import type { ModelSource } from "../src/model-source.ts";
 
 const cancelled = Symbol("cancelled");
 
-function scriptedPrompts(values: unknown[]) {
+const PlaceholderSchema = z.object({ placeholder: z.string() });
+
+const DefaultValueSchema = z.object({ defaultValue: z.string() });
+
+const ReasoningOptionsSchema = z.object({ message: z.literal("Reasoning level"), initialValue: z.string() });
+
+function reasoningOptions(calls: Array<{ kind: string; options: unknown }>) {
+  const call = calls.find((item) => item.kind === "select" && ReasoningOptionsSchema.safeParse(item.options).success);
+
+  return ReasoningOptionsSchema.parse(call?.options);
+}
+
+function scriptedPrompts(values: Array<string | boolean | symbol>) {
+  const nextText = (): string | symbol => z.union([z.string(), z.symbol()]).parse(values.shift());
+  const nextConfirm = (): boolean | symbol => z.union([z.boolean(), z.symbol()]).parse(values.shift());
   const calls: Array<{ kind: string; options: unknown }> = [];
   const summaries: string[] = [];
 
@@ -14,27 +29,27 @@ function scriptedPrompts(values: unknown[]) {
     select: async (options) => {
       calls.push({ kind: "select", options });
 
-      return values.shift();
+      return nextText();
     },
     autocomplete: async (options) => {
       calls.push({ kind: "autocomplete", options });
 
-      return values.shift();
+      return nextText();
     },
     text: async (options) => {
       calls.push({ kind: "text", options });
 
-      return values.shift();
+      return nextText();
     },
     password: async (options) => {
       calls.push({ kind: "password", options });
 
-      return values.shift();
+      return nextText();
     },
     confirm: async (options) => {
       calls.push({ kind: "confirm", options });
 
-      return values.shift();
+      return nextConfirm();
     },
     spinner: () => ({ start: () => {}, stop: () => {}, error: () => {} }),
     isCancel: (value) => value === cancelled,
@@ -144,7 +159,7 @@ test("wizard discovers and searches each selected Pi stage before persisting", a
     3,
   );
   assert.equal(
-    (ui.calls.find((call) => call.kind === "autocomplete")?.options as { placeholder: string }).placeholder,
+    PlaceholderSchema.parse(ui.calls.find((call) => call.kind === "autocomplete")?.options).placeholder,
     "Search providers",
   );
   assert.deepEqual(result, {
@@ -289,25 +304,19 @@ test("Direct wizard masks the API key and persists private connection mapping", 
   assert.equal(ui.calls.filter((call) => call.kind === "password").length, 1);
   const textCalls = ui.calls.filter((call) => call.kind === "text");
   assert.equal(
-    (textCalls[0]?.options as { defaultValue?: string }).defaultValue,
+    DefaultValueSchema.parse(textCalls[0]?.options).defaultValue,
     "openai",
   );
   assert.equal(
-    (textCalls[1]?.options as { defaultValue?: string }).defaultValue,
+    DefaultValueSchema.parse(textCalls[1]?.options).defaultValue,
     "https://api.openai.com/v1",
   );
   assert.equal(
-    (textCalls[2]?.options as { defaultValue?: string }).defaultValue,
+    DefaultValueSchema.parse(textCalls[2]?.options).defaultValue,
     "gpt-5.6-luna",
   );
   assert.equal(
-    (
-      ui.calls.find(
-        (call) =>
-          call.kind === "select" &&
-          (call.options as { message?: string }).message === "Reasoning level",
-      )?.options as { initialValue?: string }
-    ).initialValue,
+    reasoningOptions(ui.calls).initialValue,
     "medium",
   );
   assert.deepEqual(writes, [
@@ -363,21 +372,15 @@ test("Direct wizard derives DeepSeek suggestions from its provider profile", asy
   );
   const textCalls = ui.calls.filter((call) => call.kind === "text");
   assert.equal(
-    (textCalls[1]?.options as { defaultValue?: string }).defaultValue,
+    DefaultValueSchema.parse(textCalls[1]?.options).defaultValue,
     "https://api.deepseek.com",
   );
   assert.equal(
-    (textCalls[2]?.options as { defaultValue?: string }).defaultValue,
+    DefaultValueSchema.parse(textCalls[2]?.options).defaultValue,
     "deepseek-flash",
   );
   assert.equal(
-    (
-      ui.calls.find(
-        (call) =>
-          call.kind === "select" &&
-          (call.options as { message?: string }).message === "Reasoning level",
-      )?.options as { initialValue?: string }
-    ).initialValue,
+    reasoningOptions(ui.calls).initialValue,
     "none",
   );
 });

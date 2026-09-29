@@ -27,6 +27,7 @@ jobs:
           bun-version: ${{ matrix.bun-version }}
       - run: bun install --frozen-lockfile
       - run: bun run check
+      - run: bun run lint
       - name: Test with an isolated home directory
         env:
           HOME: ${{ runner.temp }}/test-home
@@ -44,4 +45,5 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - run: bun run check
+      - run: bun run lint
       - run: bun test

@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { parse as parseEnv } from "dotenv";
 import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { z } from "zod";
 import {
   bundledNamingPrompt,
   configuredNamingPromptPath,
@@ -90,7 +91,9 @@ async function createPrivateFile(file: string, content: string): Promise<void> {
   try {
     await writeFile(file, content, { flag: "wx", mode: 0o600 });
   } catch (error) {
-    if (errorCode(error) !== "EEXIST") throw error;
+    const parsed = z.object({ code: z.string() }).safeParse(error);
+
+    if (!parsed.success || parsed.data.code !== "EEXIST") throw error;
   }
 
   await chmod(file, 0o600);
@@ -145,18 +148,19 @@ export async function configurePrompt(
   await openEditor(await ensureNamingPromptFile(env), env);
 }
 
-function errorCode(error: unknown): string | undefined {
-  return error && typeof error === "object" && "code" in error
-    ? String(error.code)
-    : undefined;
-}
-
-if (import.meta.main) {
+async function main(): Promise<void> {
   const command = process.argv[2] || "provider";
   const configure = command === "prompt" ? configurePrompt : configureProvider;
-  configure().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
+
+  try {
+    await configure();
+  } catch (error) {
+    const parsed = z.instanceof(Error).safeParse(error);
+    const message = parsed.success ? parsed.data.message : String(error);
+
     console.error(`Smart Rename: ${message}`);
     process.exitCode = 1;
-  });
+  }
 }
+
+if (import.meta.main) void main();

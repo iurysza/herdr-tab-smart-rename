@@ -1,6 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { z } from "zod";
 
 test("release-please owns the package version and updates the plugin manifest", async () => {
   const [packageSource, releaseManifestSource, configSource] = await Promise.all([
@@ -12,16 +13,19 @@ test("release-please owns the package version and updates the plugin manifest", 
     readFile(new URL("../release-please-config.json", import.meta.url), "utf8"),
   ]);
 
-  const packageJson = JSON.parse(packageSource) as { version: string };
+  const packageJson = z.object({ version: z.string() }).parse(JSON.parse(packageSource));
 
-  const releaseManifest = JSON.parse(releaseManifestSource) as Record<
-    string,
-    string
-  >;
+  const releaseManifest = z.record(z.string(), z.string()).parse(JSON.parse(releaseManifestSource));
 
-  const config = JSON.parse(configSource) as {
-    packages: Record<string, Record<string, unknown>>;
-  };
+  const packageConfig = z.looseObject({
+    "release-type": z.string(),
+    "package-name": z.string(),
+    "include-component-in-tag": z.boolean(),
+    "include-v-in-tag": z.boolean(),
+    "extra-files": z.array(z.looseObject({ type: z.string(), path: z.string(), jsonpath: z.string() })),
+  });
+
+  const config = z.object({ packages: z.record(z.string(), packageConfig) }).parse(JSON.parse(configSource));
 
   assert.equal(releaseManifest["."], packageJson.version);
   assert.deepEqual(config.packages["."], {

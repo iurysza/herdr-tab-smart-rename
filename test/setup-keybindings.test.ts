@@ -48,6 +48,25 @@ command = "tab-smart-rename.rename-all"
   }
 });
 
+test("ignores malformed commands while retaining valid plugin actions", async () => {
+  const { root, config } = await fixture(`[[keys.command]]
+type = "plugin_action"
+command = 42
+
+[[keys.command]]
+type = "plugin_action"
+command = "tab-smart-rename.rename-now"
+`);
+
+  try {
+    const inspected = await inspectKeybindings(requested, { HERDR_CONFIG_PATH: config }, { run: validRunner([]) });
+
+    assert.deepEqual(inspected.results.map((item) => item.status), ["already-configured", "available"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("validates each missing action independently and leaves source config byte-for-byte unchanged", async () => {
   const content = `[[keys.command]]
 type = "plugin_action"

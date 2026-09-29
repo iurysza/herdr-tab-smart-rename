@@ -30,6 +30,11 @@ export interface ActionFailure {
   readonly message: string;
 }
 
+interface ServerTarget {
+  socket?: string;
+  session?: string | null;
+}
+
 const ServerSchema = z.looseObject({
   running: z.boolean(),
   compatible: z.boolean().optional(),
@@ -133,9 +138,8 @@ export class HerdrPluginClient {
     this.#actionTimeoutMs = actionTimeoutMs;
   }
 
-  async preflightServer(): Promise<{ readonly socket?: string; readonly session?: string | null }> {
-    const value = await this.#json("status server", ["status", "server", "--json"]);
-    const server = ServerSchema.safeParse(value);
+  async preflightServer(): Promise<ServerTarget> {
+    const server = await this.#json("status server", ["status", "server", "--json"], ServerSchema);
 
     if (!server.success) throw new Error("Herdr server status returned invalid JSON");
 
@@ -145,22 +149,23 @@ export class HerdrPluginClient {
       throw new Error(`Herdr target server is incompatible${server.data.version ? ` (${server.data.version})` : ""}`);
     }
 
-    return {
-      ...(server.data.socket ? { socket: server.data.socket } : {}),
-      ...(server.data.session !== undefined ? { session: server.data.session } : {}),
-    };
+    const target: ServerTarget = {};
+
+    if (server.data.socket) target.socket = server.data.socket;
+
+    if (server.data.session !== undefined) target.session = server.data.session;
+
+    return target;
   }
 
   async installedPlugin(): Promise<InstalledPlugin | null> {
-    const value = await this.#json("plugin list", [
+    const list = await this.#json("plugin list", [
       "plugin",
       "list",
       "--plugin",
       this.#pluginId,
       "--json",
-    ]);
-
-    const list = PluginListSchema.safeParse(value);
+    ], PluginListSchema);
 
     if (!list.success) throw new Error("Herdr plugin list returned invalid JSON");
 
@@ -178,17 +183,21 @@ export class HerdrPluginClient {
     const commit =
       plugin.resolved_commit ?? plugin.commit ?? source.resolved_commit ?? source.commit;
 
-    return {
+    const sourceDetails = { kind: source.kind };
+
+    if (source.owner) Object.assign(sourceDetails, { owner: source.owner });
+
+    if (source.repo) Object.assign(sourceDetails, { repo: source.repo });
+
+    if (ref) Object.assign(sourceDetails, { ref });
+
+    const installed = {
       id: plugin.plugin_id ?? plugin.id ?? this.#pluginId,
       root,
-      source: {
-        kind: source.kind,
-        ...(source.owner ? { owner: source.owner } : {}),
-        ...(source.repo ? { repo: source.repo } : {}),
-        ...(ref ? { ref } : {}),
-      },
-      ...(commit !== undefined ? { commit } : {}),
+      source: sourceDetails,
     };
+
+    return commit !== undefined ? { ...installed, commit } : installed;
   }
 
   async configDirectory(): Promise<string> {
@@ -206,16 +215,14 @@ export class HerdrPluginClient {
   }
 
   async invoke(action: string): Promise<string> {
-    const value = await this.#json(`plugin action ${action}`, [
+    const invocation = await this.#json(`plugin action ${action}`, [
       "plugin",
       "action",
       "invoke",
       action,
       "--plugin",
       this.#pluginId,
-    ]);
-
-    const invocation = InvocationSchema.safeParse(value);
+    ], InvocationSchema);
 
     if (!invocation.success) {
       throw new Error(`Herdr did not return an action log id for ${action}`);
@@ -256,7 +263,7 @@ export class HerdrPluginClient {
   }
 
   async #logs(): Promise<readonly PluginLog[]> {
-    const value = await this.#json("plugin log list", [
+    const logs = await this.#json("plugin log list", [
       "plugin",
       "log",
       "list",
@@ -264,9 +271,7 @@ export class HerdrPluginClient {
       this.#pluginId,
       "--limit",
       String(HERDR_PLUGIN_LOG_LIMIT),
-    ]);
-
-    const logs = LogListSchema.safeParse(value);
+    ], LogListSchema);
 
     if (!logs.success) throw new Error("Herdr plugin log list returned invalid JSON");
 
@@ -274,24 +279,35 @@ export class HerdrPluginClient {
   }
 
   #actionFailure(action: string, logId: string, log: PluginLog): Error {
-    const details = [log.stderr, log.stdout, log.error]
-      .filter((value): value is string => Boolean(value?.trim()))
-      .map((value) => sanitizeText(value).trim())
-      .find(Boolean);
+    let details = "";
+
+    for (const value of [log.stderr, log.stdout, log.error]) {
+      if (!value?.trim()) continue;
+      details = sanitizeText(value).trim();
+
+      if (details) break;
+    }
 
     const message = details || `status ${log.status}${log.exit_code === undefined || log.exit_code === null ? "" : `, exit ${log.exit_code}`}`;
 
     return new Error(`Smart Rename ${action} action log ${logId} failed: ${message}`);
   }
 
-  async #json(label: string, args: readonly string[]): Promise<unknown> {
+  async #json<T extends z.ZodType>(
+    label: string,
+    args: readonly string[],
+    schema: T,
+  ): Promise<z.ZodSafeParseResult<z.output<T>>> {
     const result = await this.#command(label, args);
+    let value: unknown;
 
     try {
-      return JSON.parse(result.stdout);
+      value = JSON.parse(result.stdout);
     } catch {
       throw new Error(`${label} returned invalid JSON`);
     }
+
+    return schema.safeParse(value);
   }
 
   async #command(label: string, args: readonly string[]): Promise<CommandResult> {

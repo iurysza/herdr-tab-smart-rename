@@ -2,6 +2,7 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { z } from "zod";
 import { PiModelSource } from "../src/model-sources/pi.ts";
 import { OpenCodeModelSource } from "../src/model-sources/opencode.ts";
 
@@ -9,14 +10,16 @@ const contained = process.env.SMART_RENAME_HARNESS_TEST === "1";
 
 const runtimeTest = contained ? test : test.skip;
 
+const RequestSchema = z.looseObject({ model: z.string().optional(), stream: z.boolean().optional() });
+
 function fakeProvider(toolSentinel?: string) {
-  const requests: Record<string, unknown>[] = [];
+  const requests: z.infer<typeof RequestSchema>[] = [];
 
   const server = Bun.serve({
     hostname: "127.0.0.1", port: 0,
     async fetch(request) {
       if (!request.url.endsWith("/chat/completions")) return new Response("unexpected route", { status: 404 });
-      const body = await request.json() as Record<string, unknown>;
+      const body = RequestSchema.parse(await request.json());
       requests.push(body);
       const text = '{"tab":"Repair Reconnect","reason":"task"}';
       const base = { id: "fixture", model: "naming-fixture", created: 0 };

@@ -19,7 +19,7 @@ const STRUCTURED_SECRETS: SecretPattern[] = [
   },
 ];
 
-const LEGACY_TOKEN_SHAPES: SecretPattern[] = [
+const LEGACY_PREFIX_CREDENTIALS: SecretPattern[] = [
   {
     id: "legacy-prefixed-token",
     label: "prefixed token",
@@ -40,7 +40,7 @@ export function sanitizeText(
   let text = stripAnsi(String(input ?? ""));
   text = redact(text, { patterns: STRUCTURED_SECRETS, replacement: "[redacted]" });
   text = redact(text, { patterns: DEFAULT_PATTERNS, replacement: "[redacted]" });
-  text = redact(text, { patterns: LEGACY_TOKEN_SHAPES, replacement: "[redacted]" });
+  text = redact(text, { patterns: LEGACY_PREFIX_CREDENTIALS, replacement: "[redacted]" });
   text = text.replace(
     /\/var\/folders\/\S*?pi-clipboard-[\w-]+\.(?:png|jpe?g|gif|webp)/gi,
     "[clipboard image]",
@@ -49,7 +49,13 @@ export function sanitizeText(
   if (home) text = text.replaceAll(home, "~");
 
   return text
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .replace(/\p{Cc}/gu, (character) => {
+      const code = character.charCodeAt(0);
+
+      return (code < 32 && code !== 9 && code !== 10 && code !== 13) || code === 127
+        ? " "
+        : character;
+    })
     .replace(/\s+/g, " ")
     .trim();
 }

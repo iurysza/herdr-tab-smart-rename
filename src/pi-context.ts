@@ -1,6 +1,7 @@
 import { open, readdir, realpath, stat, type FileHandle } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import { type SessionTimeline } from "./domain.ts";
 import { boundedText } from "./text.ts";
 
@@ -13,6 +14,23 @@ const SESSION_TAIL_BYTES = 512 * 1024;
 const CLAUDE_WRAPPER =
   /^(?:<(?:command-name|command-message|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr|task-notification)\b)/i;
 
+const UserRecordSchema = z.object({
+  type: z.enum(["user", "message"]),
+  isMeta: z.unknown().optional(),
+  isSidechain: z.unknown().optional(),
+});
+
+const DirectContentSchema = z.object({ content: z.string() });
+
+const MessageContentSchema = z.object({
+  message: z.object({
+    role: z.literal("user"),
+    content: z.union([z.string(), z.array(z.unknown())]),
+  }),
+});
+
+const TextPartSchema = z.object({ type: z.literal("text"), text: z.string() });
+
 export interface SessionPane {
   agent?: string | undefined;
   agent_session?: { kind: string; value: string } | undefined;
@@ -23,19 +41,14 @@ interface OpenSession {
   size: number;
 }
 
-function contentText(content: unknown): string {
-  if (typeof content === "string") return content;
-
-  if (!Array.isArray(content)) return "";
+function contentText(content: z.infer<typeof MessageContentSchema>["message"]["content"]): string {
+  if (!Array.isArray(content)) return content;
 
   return content
     .flatMap((part) => {
-      if (!part || typeof part !== "object") return [];
-      const item = part as { type?: unknown; text?: unknown };
+      const parsed = TextPartSchema.safeParse(part);
 
-      return item.type === "text" && typeof item.text === "string"
-        ? [item.text]
-        : [];
+      return parsed.success ? [parsed.data.text] : [];
     })
     .join(" ");
 }
@@ -54,36 +67,20 @@ function isClaudeNoise(text: string): boolean {
   return false;
 }
 
-function userRequestText(entry: unknown): string {
-  if (!entry || typeof entry !== "object") return "";
-  const record = entry as Record<string, unknown>;
+function userRequestText(line: string): string {
+  const value: unknown = JSON.parse(line);
+  const record = UserRecordSchema.safeParse(value);
 
-  if (record.isMeta === true || record.isSidechain === true) return "";
+  if (!record.success || record.data.isMeta === true || record.data.isSidechain === true) return "";
 
-  if (record.type === "tool_use" || record.type === "tool_result") return "";
+  const direct = DirectContentSchema.safeParse(value);
+  const message = direct.success ? null : MessageContentSchema.safeParse(value);
 
-  if (record.type !== "user" && record.type !== "message") return "";
-
-  let raw = "";
-
-  if (typeof record.content === "string") {
-    raw = record.content;
-  } else if (record.message && typeof record.message === "object") {
-    const message = record.message as Record<string, unknown>;
-
-    if (message.role !== "user") return "";
-    raw = contentText(message.content);
-  } else {
-    return "";
-  }
-
-  raw = raw
+  const raw = (direct.success ? direct.data.content : message?.success ? contentText(message.data.message.content) : "")
     .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, " ")
     .trim();
 
-  if (isClaudeNoise(raw)) return "";
-
-  return raw;
+  return isClaudeNoise(raw) ? "" : raw;
 }
 
 function sessionsRoot(env: NodeJS.ProcessEnv): string {
@@ -263,7 +260,7 @@ function userMessagesFrom(text: string): string[] {
     if (!line) continue;
 
     try {
-      const value = boundedText(userRequestText(JSON.parse(line)), 2_000);
+      const value = boundedText(userRequestText(line), 2_000);
 
       if (value) messages.push(value);
     } catch {
