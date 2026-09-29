@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { z } from "zod";
 import {
   PiModelSource,
   type PiRuntime,
@@ -49,7 +50,11 @@ test("Pi exposes only authenticated providers and their staged model profiles", 
 });
 
 test("Pi completion uses Pi-owned model and thinking configuration", async () => {
-  const calls: Array<{ model: string; context: unknown; options: unknown }> = [];
+  const calls: Array<{
+    model: string;
+    context: Parameters<PiRuntime["completeSimple"]>[1];
+    options: Parameters<PiRuntime["completeSimple"]>[2];
+  }> = [];
 
   const adapter = source({
     ...runtimeWithModel(),
@@ -62,6 +67,8 @@ test("Pi completion uses Pi-owned model and thinking configuration", async () =>
       };
     },
   });
+
+  const signal = AbortSignal.timeout(1_000);
 
   const text = await adapter.complete({
     selection: {
@@ -76,23 +83,29 @@ test("Pi completion uses Pi-owned model and thinking configuration", async () =>
     prompt: "Name this task",
     maxOutputTokens: 123,
     maxRetries: 1,
-    abortSignal: AbortSignal.timeout(1_000),
+    abortSignal: signal,
   });
 
   assert.match(text, /Repair Socket Reconnect/);
-  assert.deepEqual(calls[0]?.options, {
+  const call = calls[0];
+
+  assert.ok(call);
+  assert.deepEqual(call.options, {
     reasoning: "high",
     maxTokens: 123,
     maxRetries: 1,
-    signal: calls[0] && (calls[0].options as { signal: AbortSignal }).signal,
+    signal,
   });
-  assert.deepEqual(calls[0]?.context, {
+  const firstMessage = call.context.messages[0];
+
+  assert.ok(firstMessage);
+  assert.deepEqual(call.context, {
     systemPrompt: "JSON only",
     messages: [
       {
         role: "user",
         content: "Name this task",
-        timestamp: (calls[0]?.context as { messages: Array<{ timestamp: number }> }).messages[0]?.timestamp,
+        timestamp: firstMessage.timestamp,
       },
     ],
   });
@@ -107,8 +120,7 @@ test("Pi failures are fail-closed and secret-free", async () => {
     },
   });
 
-  await assert.rejects(
-    adapter.complete({
+  const failure = await adapter.complete({
       selection: {
         version: 1,
         source: "pi",
@@ -121,13 +133,11 @@ test("Pi failures are fail-closed and secret-free", async () => {
       maxOutputTokens: 123,
       maxRetries: 1,
       abortSignal: AbortSignal.timeout(1_000),
-    }),
-    (error: unknown) => {
-      assert.ok(error instanceof ModelSourceError);
-      assert.match(error.message, /not connected/);
-      assert.doesNotMatch(error.message, /private-token/);
+    }).then(
+      () => { throw new Error("Expected Pi to reject an unavailable provider"); },
+      (cause) => z.instanceof(ModelSourceError).parse(cause),
+    );
 
-      return true;
-    },
-  );
+  assert.match(failure.message, /not connected/);
+  assert.doesNotMatch(failure.message, /private-token/);
 });

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import { ModelSourceNamer } from "../src/model-namer.ts";
 import { saveModelSelection } from "../src/model-selection.ts";
 import type { ModelCompletionRequest, ModelSelection, ModelSource } from "../src/model-source.ts";
@@ -70,12 +71,13 @@ test("a selected harness failure neither exposes its raw error nor falls back to
       suggest: async () => { throw new Error("must not fall back"); },
     });
 
-    await assert.rejects(namer.suggest(context), (error: unknown) => {
-      assert.match(String(error), /AI pi source failed/);
-      assert.doesNotMatch(String(error), /private-provider-detail|must not fall back/);
+    const failure = await namer.suggest(context).then(
+      () => { throw new Error("Expected the Pi source to fail"); },
+      (cause) => z.instanceof(Error).parse(cause),
+    );
 
-      return true;
-    });
+    assert.match(failure.message, /AI pi source failed/);
+    assert.doesNotMatch(failure.message, /private-provider-detail|must not fall back/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

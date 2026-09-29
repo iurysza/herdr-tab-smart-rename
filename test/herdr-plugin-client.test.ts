@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { z } from "zod";
 import {
   HERDR_PLUGIN_LOG_LIMIT,
   HerdrPluginClient,
@@ -7,11 +8,17 @@ import {
   type CommandRunner,
 } from "../src/herdr-plugin-client.ts";
 
-const result = (stdout: unknown, exitCode = 0, stderr = ""): CommandResult => ({
-  exitCode,
-  stdout: typeof stdout === "string" ? stdout : JSON.stringify(stdout),
-  stderr,
-});
+type JsonFixture = string | number | boolean | null | JsonFixture[] | { [key: string]: JsonFixture };
+
+const result = (stdout: JsonFixture, exitCode = 0, stderr = ""): CommandResult => {
+  const text = z.string().safeParse(stdout);
+
+  return {
+    exitCode,
+    stdout: text.success ? text.data : JSON.stringify(stdout),
+    stderr,
+  };
+};
 
 const runningServer = {
   status: "running",
@@ -151,12 +158,13 @@ test("reports terminal failures with sanitized matching output", async () => {
     }),
   });
 
-  await assert.rejects(client.waitForAction("start", "wanted"), (error: unknown) => {
-    assert.match(String(error), /start action log wanted failed/);
-    assert.doesNotMatch(String(error), /sk-12345678901234567890/);
+  const failure = await client.waitForAction("start", "wanted").then(
+    () => { throw new Error("Expected the action to fail"); },
+    (cause) => z.instanceof(Error).parse(cause),
+  );
 
-    return true;
-  });
+  assert.match(failure.message, /start action log wanted failed/);
+  assert.doesNotMatch(failure.message, /sk-12345678901234567890/);
 });
 
 test("names every action timeout diagnostic", async () => {
@@ -169,15 +177,15 @@ test("names every action timeout diagnostic", async () => {
     run: async () => result({ result: { logs: [] } }),
   });
 
-  await assert.rejects(client.waitForAction("start", "gone"), (error: unknown) => {
-    const message = String(error);
-    assert.match(message, /action=start/);
-    assert.match(message, /log_id=gone/);
-    assert.match(message, /requested_log_limit=200/);
-    assert.match(message, /elapsed_ms=20/);
-    assert.match(message, /configured_timeout_ms=20/);
-    assert.match(message, /requested_operation=herdr plugin action invoke start --plugin tab-smart-rename/);
+  const failure = await client.waitForAction("start", "gone").then(
+    () => { throw new Error("Expected the action to time out"); },
+    (cause) => z.instanceof(Error).parse(cause),
+  );
 
-    return true;
-  });
+  assert.match(failure.message, /action=start/);
+  assert.match(failure.message, /log_id=gone/);
+  assert.match(failure.message, /requested_log_limit=200/);
+  assert.match(failure.message, /elapsed_ms=20/);
+  assert.match(failure.message, /configured_timeout_ms=20/);
+  assert.match(failure.message, /requested_operation=herdr plugin action invoke start --plugin tab-smart-rename/);
 });

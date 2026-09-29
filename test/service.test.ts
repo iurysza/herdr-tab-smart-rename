@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import { type PaneContext, type NameSuggestion } from "../src/domain.ts";
 import { type HerdrPane, type HerdrSnapshot } from "../src/herdr.ts";
 import {
@@ -101,7 +102,9 @@ test("state transactions serialize concurrent writers", async () => {
     await Promise.all(
       Array.from({ length: 20 }, () =>
         withStateTransaction(paths.state, paths.stateLock, (state) => {
-          state.count = (typeof state.count === "number" ? state.count : 0) + 1;
+          const count = z.number().safeParse(state.count);
+
+          state.count = (count.success ? count.data : 0) + 1;
         }),
       ),
     );
@@ -333,7 +336,7 @@ test("failed model calls persist retry eligibility without success fingerprint",
     );
     assert.equal(stopped, true);
     const state = await loadState(paths.state);
-    assert.equal(typeof state.modelAttempts.t1, "number");
+    assert.equal(z.number().safeParse(state.modelAttempts.t1).success, true);
     assert.equal(state.fingerprints.t1, undefined);
     assert.equal(state.retries.t1?.status, "failed");
   } finally {
@@ -399,8 +402,8 @@ test("pane model failure preserves successful independent tab and pane writes", 
       ),
     );
     const failedState = await loadState(paths.state);
-    assert.equal(typeof failedState.fingerprints.t1, "string");
-    assert.equal(typeof failedState.fingerprints.p1, "string");
+    assert.equal(z.string().safeParse(failedState.fingerprints.t1).success, true);
+    assert.equal(z.string().safeParse(failedState.fingerprints.p1).success, true);
     assert.equal(failedState.fingerprints.p2, undefined);
     assert.deepEqual(renames, ["tab:t1", "pane:p1"]);
 

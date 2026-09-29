@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { z } from "zod";
 import { OpenCodeModelSource } from "../src/model-sources/opencode.ts";
 import { ModelSourceError } from "../src/model-source.ts";
 
@@ -207,23 +208,21 @@ test("OpenCode sends the caller abort signal to the SDK and deletes a hung tempo
 
 test("OpenCode deletes temporary sessions when a request fails", async () => {
   const { source, calls } = fixture({ failPrompt: true });
-  await assert.rejects(
-    source.complete({
-      selection,
-      context: { project: "Plugin", userRequests: ["Fix reconnect"] },
-      system: "JSON only",
-      prompt: "Name this task",
-      maxOutputTokens: 123,
-      maxRetries: 1,
-      abortSignal: AbortSignal.timeout(1_000),
-    }),
-    (error: unknown) => {
-      assert.ok(error instanceof ModelSourceError);
-      assert.match(error.message, /OpenCode request failed/);
 
-      return true;
-    },
+  const failure = await source.complete({
+    selection,
+    context: { project: "Plugin", userRequests: ["Fix reconnect"] },
+    system: "JSON only",
+    prompt: "Name this task",
+    maxOutputTokens: 123,
+    maxRetries: 1,
+    abortSignal: AbortSignal.timeout(1_000),
+  }).then(
+    () => { throw new Error("Expected OpenCode to fail"); },
+    (cause) => z.instanceof(ModelSourceError).parse(cause),
   );
+
+  assert.match(failure.message, /OpenCode request failed/);
   assert.equal(calls.at(-1)?.type, "delete");
 });
 

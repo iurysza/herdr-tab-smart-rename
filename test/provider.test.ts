@@ -10,6 +10,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import {
   ensureNamingPromptFile,
   ensureProviderFile,
@@ -21,6 +22,13 @@ import {
   transformOpenAiRequestBody,
 } from "../src/provider.ts";
 import { type NamingContext } from "../src/domain.ts";
+
+const RequestBodySchema = z.looseObject({
+  stream: z.boolean().optional(),
+  max_tokens: z.number().optional(),
+  max_completion_tokens: z.number().optional(),
+  reasoning_effort: z.string().optional(),
+});
 
 const context: NamingContext = {
   project: "Agents",
@@ -219,7 +227,7 @@ test("namer sends one bounded completion and validates model output", async () =
 });
 
 test("provider transport uses the provider-compatible output-token parameter", async () => {
-  let requestBody: Record<string, unknown> | undefined;
+  let requestBody: z.infer<typeof RequestBodySchema> | undefined;
 
   const responseText =
     '{"tab":"Bound Provider Output","reason":"transport contract"}';
@@ -227,7 +235,7 @@ test("provider transport uses the provider-compatible output-token parameter", a
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
-      requestBody = (await request.json()) as Record<string, unknown>;
+      requestBody = RequestBodySchema.parse(await request.json());
 
       if (requestBody.stream === true) {
         const chunk = {
@@ -369,14 +377,14 @@ test("namer reloads provider.env and naming-prompt.md, then redacts failures", a
       throw new Error(`401 Authorization: Bearer ${key}`);
     });
 
-    await assert.rejects(failing.suggest(context), (error: unknown) => {
-      assert.ok(error instanceof Error);
-      assert.match(error.message, /AI request failed/);
-      assert.doesNotMatch(error.message, new RegExp(key));
-      assert.match(error.message, /redacted/);
+    const failure = await failing.suggest(context).then(
+      () => { throw new Error("Expected the provider to fail"); },
+      (cause) => z.instanceof(Error).parse(cause),
+    );
 
-      return true;
-    });
+    assert.match(failure.message, /AI request failed/);
+    assert.doesNotMatch(failure.message, new RegExp(key));
+    assert.match(failure.message, /redacted/);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -388,7 +396,7 @@ test("manifest uses portable Bun runtime without Pi model coupling", async () =>
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
-  const packageJson = JSON.parse(packageSource) as { version: string };
+  const packageJson = z.object({ version: z.string() }).parse(JSON.parse(packageSource));
   const manifestVersion = manifest.match(/^version = "([^"]+)"$/m)?.[1];
 
   assert.match(manifest, /^id = "tab-smart-rename"$/m);

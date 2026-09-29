@@ -1,6 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { z } from "zod";
 
 const INTERNAL_COMMANDS = new Set(["once", "dry-run"]);
 
@@ -21,7 +22,7 @@ function manifestCliCommands(source: string): string[] {
   for (const block of actionBlocks) {
     const encodedArgs = block.match(/^command = \[(.*)\]$/m)?.[1];
     assert.ok(encodedArgs, "plugin action command not found");
-    const args = JSON.parse(`[${encodedArgs}]`) as string[];
+    const args = z.array(z.string()).parse(JSON.parse(`[${encodedArgs}]`));
     assert.equal(
       args[0],
       "bun",

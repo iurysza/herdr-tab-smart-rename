@@ -61,8 +61,9 @@ const env = {
   PI_CODING_AGENT_DIR: path.join(home, ".pi/agent"),
   BUN_INSTALL_CACHE_DIR: path.join(runRoot, "bun-cache"),
   TERM: "xterm-256color",
-  ...(harness ? { SMART_RENAME_HARNESS_TEST: "1", OPENCODE_DISABLE_AUTOUPDATE: "true" } : {}),
 };
+
+if (harness) Object.assign(env, { SMART_RENAME_HARNESS_TEST: "1", OPENCODE_DISABLE_AUTOUPDATE: "true" });
 
 const prefix = ["/usr/bin/sandbox-exec", "-D", `RUN_ROOT=${runRoot}`, "-D", `HOST_HOME=${await realpath(os.homedir())}`, "-D", `PROJECT=${project}`, "-D", `DEPENDENCIES=${dependencies}`, "-f", profile];
 
