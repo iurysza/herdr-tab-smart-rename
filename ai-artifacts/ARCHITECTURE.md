@@ -48,4 +48,4 @@ The common output decoder in [src/effect/model-output.ts](../src/effect/model-ou
 
 These checks do not make the Herdr rename atomic with the final snapshot: a manual edit between that check and the CLI write can still race. Pane closure discards a stale result but does not cancel a model request already sent. During model-backed naming, [src/herdr.ts](../src/herdr.ts) marks the tab and, for pane naming, the pane as in progress. It restores only its own marker if the label has not changed. The worker ignores marker events so they do not acquire manual ownership.
 
-The code entry points and tests for each behavior are listed in the [code map](SEMANTIC_MAP.md). For safe local checks, see the [development guide](../docs/development.md). The bundled [naming policy](../docs/naming-policy.md) is also the runtime's default model prompt, so edits to that file change behavior.
+For safe local checks, see the [development guide](../docs/development.md). The bundled [naming policy](../docs/naming-policy.md) is also the runtime's default model prompt, so edits to that file change behavior.
