@@ -1,139 +1,53 @@
-# Semantic map
+# Code and test map
 
-Smart Rename turns live Herdr activity into stable workspace names and current-task tab names. The code separates naming policy from context collection, provider access, persistence, and runtime control.
+Use this reference to locate the implementation and tests for a change. Start with the [knowledge-base index](README.md) for explanations and the [glossary](CONTEXT.md) for domain terms.
 
-## Domain Concepts
+## Naming and runtime
 
-| Concept | Meaning | Owner |
+| Behavior | Source | Regression evidence |
 | --- | --- | --- |
-| Workspace identity | Stable project identity from the worktree, existing label, Git root, or pane directory | `domain.ts` |
-| Tab task | The current persistent task, expressed as a 2 to 4 word label | `domain.ts` |
-| Ownership | Whether Smart Rename or the user controls a label | `domain.ts`, `storage.ts` |
-| Expected write | A rename recorded before Herdr applies it, so its event is not mistaken for a manual rename | `domain.ts`, `service.ts` |
-| Rename activity | A guarded static `◆` prefix on tabs and panes during any model call | `service.ts`, `herdr.ts`, `worker.ts` |
-| Dominant pane | The pane that supplies task evidence: focused agent, active agent, focused command, then first pane | `service.ts` |
-| Naming context | Bounded project, process, terminal, and optional Pi session evidence sent to the namer | `domain.ts`, `herdr.ts`, `pi-context.ts` |
-| Name suggestion | A validated label and reason, or `null` when evidence does not describe a task | `provider.ts` |
-| Rename result | Candidate names, ownership state, model usage, reason, and applied changes | `domain.ts`, `service.ts` |
-| Churn gate | Fingerprints, stability observations, cooldowns, per-session naming, and retry backoff that prevent repeated calls | `domain.ts` |
-| Provider configuration | Tracked defaults plus private endpoint, model, key, timeout, reasoning, and prompt-path overrides | `provider.env.example`, `provider.ts`, `configure.ts` |
-| Naming prompt | Bundled policy or user-owned instructions reloaded before each model request | `docs/naming-policy.md`, `provider.ts` |
+| Ownership transitions, label policy, workspace identity, context bounds, model gates | [domain.ts](../src/domain.ts) | [domain.test.ts](../test/domain.test.ts) |
+| Target scope, source-pane choice, context caching, decision IDs, guarded writes | [service.ts](../src/service.ts) | [service.test.ts](../test/service.test.ts), [reliability.test.ts](../test/reliability.test.ts) |
+| First-request wait for Pi and Claude Code | [service.ts](../src/service.ts) | [agent-startup.test.ts](../test/agent-startup.test.ts) |
+| Snapshots, socket framing, process info, rename commands, progress markers | [herdr.ts](../src/herdr.ts) | [herdr.test.ts](../test/herdr.test.ts), [progress.test.ts](../test/progress.test.ts), [context.test.ts](../test/context.test.ts) |
+| Bounded Pi and Claude Code session reads | [pi-context.ts](../src/pi-context.ts) | [context.test.ts](../test/context.test.ts) |
+| ANSI removal and best-effort redaction | [text.ts](../src/text.ts) | [domain.test.ts](../test/domain.test.ts) |
+| State transactions, atomic files, locks, worker identity | [storage.ts](../src/storage.ts) | [runtime.test.ts](../test/runtime.test.ts), [service.test.ts](../test/service.test.ts) |
+| Debounce, concurrent tab scheduling, event handling, reconnect, shutdown | [worker.ts](../src/worker.ts) | [worker-readiness.integration.test.ts](../test/worker-readiness.integration.test.ts), opt-in [herdr-live.test.ts](../test/herdr-live.test.ts) |
+| Action dispatch, worker control, notices, and exit status | [cli.ts](../src/cli.ts) | [runtime.test.ts](../test/runtime.test.ts), opt-in [herdr-live.test.ts](../test/herdr-live.test.ts) |
 
-## Technical Layers
+Read [naming flow](architecture/naming-flow.md) for the call sequence and [ownership and concurrency](architecture/ownership-and-concurrency.md) before changing locks, request gates, or event handling.
 
-```mermaid
-flowchart TB
-    E[CLI, configure pane, worker] --> S[AutoNameService]
-    S --> D[Domain policy]
-    S --> H[Herdr adapter]
-    S --> P[AI provider]
-    S --> ST[State and locks]
-    H --> PI[Optional Pi context]
-    D --> T[Text sanitization]
-    H --> T
-    P --> T
-```
+## Inference and configuration
 
-| Layer | Files | Responsibility |
+| Behavior | Source | Regression evidence |
 | --- | --- | --- |
-| Entrypoints | `cli.ts`, `configure.ts`, `worker.ts` | Translate Herdr actions and events into service calls while filtering owned activity events |
-| Orchestration | `service.ts` | Reconcile ownership, collect context, wrap model calls with optional activity, and apply safe writes |
-| Domain | `domain.ts` | Hold pure naming, ownership, validation, context, and churn rules |
-| Herdr integration | `herdr.ts` | Run Herdr commands, validate snapshots, inspect panes, manage guarded progress labels, and frame socket events |
-| Pi context | `pi-context.ts` | Read bounded user requests from allowed Pi session files |
-| Provider | `provider.ts` | Merge exposed defaults and overrides, reload the naming prompt, call one OpenAI-compatible model, and validate its answer |
-| Persistence | `storage.ts` | Validate state, write atomically, serialize processes, and verify the singleton worker |
-| Text safety | `text.ts` | Strip terminal controls, redact secrets, normalize paths, and bound text |
+| Model-source contracts and typed failures | [model-source.ts](../src/model-source.ts) | Adapter tests below |
+| Selection parsing, precedence, private atomic saves | [model-selection.ts](../src/model-selection.ts) | [model-selection.test.ts](../test/model-selection.test.ts) |
+| Source routing, serialization, selection changes, no fallback | [model-namer.ts](../src/model-namer.ts), [source loader](../src/model-sources/index.ts) | [model-namer.test.ts](../test/model-namer.test.ts) |
+| Direct discovery and validation | [direct.ts](../src/model-sources/direct.ts) | [setup.test.ts](../test/setup.test.ts), [model-namer.test.ts](../test/model-namer.test.ts) |
+| Direct defaults, configuration, prompt loading, completion transport | [provider-registry.ts](../src/provider-registry.ts), [provider.ts](../src/provider.ts) | [provider-registry.test.ts](../test/provider-registry.test.ts), [provider.test.ts](../test/provider.test.ts) |
+| Common response decoding and label validation | [model-output.ts](../src/effect/model-output.ts), [errors.ts](../src/effect/errors.ts), [domain.ts](../src/domain.ts) | [provider.test.ts](../test/provider.test.ts), [model-namer.test.ts](../test/model-namer.test.ts) |
+| Pi authenticated discovery and completion | [pi.ts](../src/model-sources/pi.ts) | [pi-model-source.test.ts](../test/pi-model-source.test.ts) |
+| OpenCode discovery, denied tools, cancellation, cleanup | [opencode.ts](../src/model-sources/opencode.ts) | [opencode-model-source.test.ts](../test/opencode-model-source.test.ts) |
+| Real Pi and OpenCode requests through a local fake provider | Same adapters | Opt-in [harness-runtime.test.ts](../test/harness-runtime.test.ts) |
 
-## Cross-Cutting Concerns
+[Model sources and setup](architecture/model-sources-and-setup.md) explains adapter lifetime and credential ownership. [Contracts and boundaries](architecture/contracts-and-boundaries.md) records what may cross each interface.
 
-- Manual ownership protects the named label. A manual pane label does not block its tab from using pane context.
-- Bounded data: terminal output, process fields, session windows, provider files, prompts, errors, and notifications all have limits.
-- Secret safety: `strip-ansi` and `secret-sniff` handle common terminal and credential forms before data leaves the machine.
-- Runtime validation: Zod validates Herdr JSON, Pi records, provider configuration, model output, state, locks, and worker metadata.
-- Concurrency: short cross-process state transactions cover reconciliation, request gates, and writes. Model calls run outside the lock. Decision IDs reject superseded results.
-- Resilience: the worker handles events separately from model-backed evaluations, debounces tab events, sweeps every 60 seconds, and reconnects after socket closure.
-- Provider independence: Pi supplies optional context only. Model authentication comes from Smart Rename's private provider file.
-- User customization: provider and prompt files reload per request; fixed schemas still reject unsafe or malformed output.
-- Feedback: explicit actions emit start, success, no-change, and sanitized failure notifications.
-- Activity ownership: temporary labels carry an invisible marker, rotate only for `rename-now`, stop on external changes, and restore only the plugin's exact last write.
+## Setup and distribution
 
-## Data Flow Paths
+| Behavior | Source | Regression evidence |
+| --- | --- | --- |
+| Wizard choices, cancellation, review, validation, and startup | [setup.ts](../src/setup.ts), [setup-plan.ts](../src/setup-plan.ts) | [setup.test.ts](../test/setup.test.ts) |
+| Configuration rollback and commit boundary | [setup-transaction.ts](../src/setup-transaction.ts) | [setup-transaction.test.ts](../test/setup-transaction.test.ts) |
+| Direct configuration saves and prompt editor | [configure.ts](../src/configure.ts) | [configure-setup.test.ts](../test/configure-setup.test.ts), [provider.test.ts](../test/provider.test.ts) |
+| Keybinding inspection without user-config edits | [setup-keybindings.ts](../src/setup-keybindings.ts) | [setup-keybindings.test.ts](../test/setup-keybindings.test.ts) |
+| Herdr preflight and action-log receipts | [herdr-plugin-client.ts](../src/herdr-plugin-client.ts) | [herdr-plugin-client.test.ts](../test/herdr-plugin-client.test.ts) |
+| Registered actions and runtime commands | [herdr-plugin.toml](../herdr-plugin.toml) | [manifest.test.ts](../test/manifest.test.ts), [runtime.test.ts](../test/runtime.test.ts) |
+| Release-bound installer and version checks | [install.sh](../installer/install.sh), [render-installer.ts](../scripts/render-installer.ts), [check-release-version.ts](../scripts/check-release-version.ts) | [installer.test.ts](../test/installer.test.ts), [release-assets.test.ts](../test/release-assets.test.ts), [release.test.ts](../test/release.test.ts) |
 
-### Explicit rename
+## Validation tools
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant C as CLI action
-    participant S as AutoNameService
-    participant H as Herdr
-    participant N as Namer
-    participant F as State file
+[CI](../.github/workflows/ci.yml) runs typecheck, lint, and tests on Linux with minimum and latest Bun, and Windows with latest Bun. [test-contained.ts](../scripts/test-contained.ts) provides macOS containment. [The lint policy](../tools/oxlint/anti-slop/UPSTREAM.md) records vendored exceptions, tested by [anti-slop-policy.test.ts](../test/anti-slop-policy.test.ts).
 
-    U->>C: rename-now or rename-all
-    C->>S: evaluate with reclaim and refresh
-    S->>F: lock, reconcile, reserve request, unlock
-    S->>H: snapshot and pane evidence
-    alt deterministic process
-        S->>S: choose fixed label
-    else ambiguous task
-        opt progress marker
-            S->>H: guarded ◆ marker
-        end
-        S->>N: bounded NamingContext
-        N-->>S: NameSuggestion
-        opt progress marker
-            S->>H: restore original label
-        end
-    end
-    S->>F: lock, recheck ownership and request, persist expected label
-    S->>H: rename workspace or tab
-    S->>F: unlock
-    H-->>S: rename event
-    S->>F: confirm automatic ownership
-    C-->>U: result notification
-```
-
-### Background naming
-
-1. `worker.ts` subscribes to Herdr lifecycle events.
-2. It resolves the affected tab and debounces evaluation by 400 milliseconds.
-3. Evaluations use one worker queue. Events use a separate queue. `AutoNameService` holds the state lock only for short snapshot and write operations.
-4. A 60-second sweep catches task changes without lifecycle events.
-5. Fingerprints and cooldowns suppress unchanged model work.
-
-### Provider configuration
-
-1. `provider.env.example` supplies the tracked OpenAI Luna defaults.
-2. `configure-ai` copies that template to private `provider.env` on first use and opens it in Herdr's overlay pane.
-3. Process values override private-file values; private-file values override the tracked defaults.
-4. `provider.ts` reads at most 16 KiB and validates the merged configuration with Zod.
-5. It loads an explicit prompt path, private `naming-prompt.md`, or bundled `docs/naming-policy.md` in that order.
-6. The AI SDK sends one non-streaming OpenAI-compatible request.
-
-### Prompt customization
-
-1. `configure-prompt` copies the bundled naming policy to private `naming-prompt.md` on first use.
-2. `SMART_RENAME_PROMPT_PATH` may select another absolute or config-relative file.
-3. The selected prompt is limited to 32 KiB and reloaded before every request.
-4. The model response must still pass JSON, Zod, and label-policy validation.
-
-## Data Boundaries and Transformations
-
-| Boundary | Input | Transformation | Output |
-| --- | --- | --- | --- |
-| Herdr snapshot | CLI JSON | JSON parse and Zod validation | `HerdrSnapshot` |
-| Herdr event socket | LF-delimited envelopes | framing, JSON parse, normalization, Zod validation | `HerdrEvent` |
-| Pane process | Herdr process-info JSON | field selection, sanitization, length limits | `ProcessInfo` |
-| Pane output | recent terminal text | ANSI removal, secret redaction, whitespace normalization, 1,000-character cap | safe output evidence |
-| Pi session | path-backed JSONL | root check, regular-file check, bounded head/middle/tail windows, user-message validation | `SessionTimeline` |
-| Provider files | tracked and private dotenv text | 16 KiB bounds, dotenv parse, precedence merge, provider-specific key selection, Zod validation | `ProviderConfig` |
-| Naming prompt | bundled policy, private copy, or configured path | precedence selection, 32 KiB bound, non-empty check | system instruction text |
-| Model context | pane evidence | dominant-pane selection, sanitization, timeline weighting, 4,500-character hard cap | `NamingContext` |
-| Model response | provider text | JSON fence removal, JSON parse, Zod validation, title policy | `NameSuggestion` |
-| State file | JSON on disk | lock, Zod validation, reconciliation, atomic temporary-file rename | `SmartRenameState` |
-| Progress label | current tab label | invisible marker, one-cell diamond frame, exact-label guard | transient prefixed label or original label |
-| Herdr rename | candidate label | expected-write persistence before command | confirmed automatic ownership or rollback |
-
-Updated: 2026-09-05, rename reliability repair
+This map identifies relevant test files, not proof that every branch of each module is covered. Safe commands and opt-in integration modes belong in the [development guide](../docs/development.md).
