@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { appendFile, chmod } from "node:fs/promises";
 import { type Socket } from "node:net";
+import { z } from "zod";
 import {
   paneLabelUpdate,
   progressBase,
@@ -103,7 +104,12 @@ export async function runWorker(
       running.add(tabId);
 
       const task = evaluate(tabId)
-        .catch((error: unknown) => log(`task failed: ${errorMessage(error)}`))
+        .catch((error: unknown) => {
+          const parsed = z.instanceof(Error).safeParse(error);
+          const message = parsed.success ? parsed.data.message : String(error);
+
+          return log(`task failed: ${message}`);
+        })
         .finally(() => {
           running.delete(tabId);
           tasks.delete(task);
@@ -146,7 +152,12 @@ export async function runWorker(
       .then((current) => {
         for (const tab of current.tabs) request(tab.tab_id);
       })
-      .catch((error: unknown) => log(`sweep failed: ${errorMessage(error)}`))
+      .catch((error: unknown) => {
+        const parsed = z.instanceof(Error).safeParse(error);
+        const message = parsed.success ? parsed.data.message : String(error);
+
+        return log(`sweep failed: ${message}`);
+      })
       .finally(() => {
         sweepQueued = false;
       });
@@ -246,14 +257,24 @@ export async function runWorker(
     const connection = subscribe(socketPath, (event) => {
       events = events
         .then(() => handleEvent(event))
-        .catch((error: unknown) => log(`event failed: ${errorMessage(error)}`));
+        .catch((error: unknown) => {
+          const parsed = z.instanceof(Error).safeParse(error);
+          const message = parsed.success ? parsed.data.message : String(error);
+
+          return log(`event failed: ${message}`);
+        });
     });
 
     socket = connection;
     connection.once("connect", () => {
       void markWorkerReady(paths.pid, process.pid, socketPath)
         .then((marked) => log(marked ? `ready socket=${socketPath}` : "ready metadata was not owned"))
-        .catch((error: unknown) => log(`could not mark ready: ${errorMessage(error)}`));
+        .catch((error: unknown) => {
+          const parsed = z.instanceof(Error).safeParse(error);
+          const message = parsed.success ? parsed.data.message : String(error);
+
+          return log(`could not mark ready: ${message}`);
+        });
     });
     connection.on(
       "error",
@@ -302,7 +323,9 @@ export async function runWorker(
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const parsed = z.instanceof(Error).safeParse(error);
+
+  return parsed.success ? parsed.data.message : String(error);
 }
 
 if (import.meta.main) await runWorker();

@@ -197,18 +197,18 @@ export async function run(
   }
 }
 
-async function herdrJson(
+async function herdrJson<T extends z.ZodType>(
   args: string[],
+  schema: T,
   env: NodeJS.ProcessEnv = process.env,
-): Promise<unknown> {
-  return JSON.parse(await run(env.HERDR_BIN_PATH || "herdr", args, { env }));
+): Promise<z.output<T>> {
+  return schema.parse(JSON.parse(await run(env.HERDR_BIN_PATH || "herdr", args, { env })));
 }
 
 export async function snapshot(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<HerdrSnapshot> {
-  return SnapshotResponseSchema.parse(await herdrJson(["api", "snapshot"], env))
-    .result.snapshot;
+  return (await herdrJson(["api", "snapshot"], SnapshotResponseSchema, env)).result.snapshot;
 }
 
 export async function rename(
@@ -311,9 +311,7 @@ async function paneProcess(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<PaneContext["process"]> {
   try {
-    const data = ProcessResponseSchema.parse(
-      await herdrJson(["pane", "process-info", "--pane", paneId], env),
-    );
+    const data = await herdrJson(["pane", "process-info", "--pane", paneId], ProcessResponseSchema, env);
 
     const item = data.result.process_info.foreground_processes?.[0];
 

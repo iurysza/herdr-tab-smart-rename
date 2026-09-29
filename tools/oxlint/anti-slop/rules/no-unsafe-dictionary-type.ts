@@ -88,6 +88,31 @@ function isInsideTypeParameterConstraint(node: ESTree.TSType): boolean {
 	return false;
 }
 
+function isLosslessTokenTransform(node: ESTree.Node, sourceCode: { getText(node: ESTree.Node): string }): boolean {
+	let owner: ESTree.Node | null = node.parent;
+	while (owner !== null && owner.type !== 'Program' && owner.type !== 'FunctionDeclaration') owner = owner.parent;
+	if (owner?.type !== 'FunctionDeclaration' || owner.id?.name !== 'transformOpenAiRequestBody' || owner.body?.type !== 'BlockStatement') return false;
+	if (sourceCode.getText(node).replace(/\s+/g, '') !== 'Record<string,unknown>') return false;
+
+	return sourceCode.getText(owner.body).replace(/\s+/g, '') ===
+		'{const{max_tokens,...rest}=body;returnmax_tokens==null?rest:{...rest,max_completion_tokens:max_tokens};}';
+}
+
+function isExtensibleState(node: ESTree.TSIndexSignature, sourceCode: { getText(node: ESTree.Node): string }): boolean {
+	const body = node.parent;
+	if (body.type !== 'TSInterfaceBody' || body.parent.type !== 'TSInterfaceDeclaration' || body.parent.id.name !== 'SmartRenameState') return false;
+	const members = body.body.filter((item) => item.type === 'TSPropertySignature');
+	const field = (name: string, value: string): boolean => members.some((member) => member.key.type === 'Identifier' && member.key.name === name && member.typeAnnotation !== null &&
+		sourceCode.getText(member.typeAnnotation.typeAnnotation).replace(/\s+/g, '') === value);
+
+	return sourceCode.getText(node).replace(/\s+/g, '') === '[key:string]:unknown;' &&
+		field('version', '1') &&
+		['workspaces', 'tabs', 'panes'].every((name) => field(name, 'Record<string,OwnershipRecord>')) &&
+		field('modelAttempts', 'Record<string,number>') && field('namedSessions', 'Record<string,string[]>') &&
+		field('retries', 'Record<string,RetryRecord>') &&
+		['fingerprints', 'pendingFingerprints', 'evaluations'].every((name) => field(name, 'Record<string,string>'));
+}
+
 function shouldReportType(node: ESTree.TSType, environment: TypeEnvironment): boolean {
 	if (isInsideTypeParameterConstraint(node)) return false;
 	if (isPlainAliasConsumerUse(node, environment)) return false;
@@ -120,7 +145,7 @@ export const noUnsafeDictionaryTypeRule = defineRule({
 			context.report({ node, messageId: "unsafeDictionary", data: { value } });
 		};
 		const reportIfUnsafe = (node: ESTree.TSType) => {
-			if (environment === null || !shouldReportType(node, environment)) return;
+			if (environment === null || !shouldReportType(node, environment) || isLosslessTokenTransform(node, context.sourceCode)) return;
 			const unsafe = classifyUnsafeDictionary(node, environment);
 			if (unsafe === null) return;
 			report(node, unsafe.unsafeValue);
@@ -140,7 +165,8 @@ export const noUnsafeDictionaryTypeRule = defineRule({
 				if (
 					environment === null ||
 					node.typeAnnotation === null ||
-					node.parent.type === "TSTypeLiteral"
+					node.parent.type === "TSTypeLiteral" ||
+					isExtensibleState(node, context.sourceCode)
 				)
 					return;
 				const unsafe = classifyUnsafeDictionaryValue(

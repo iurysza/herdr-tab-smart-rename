@@ -139,8 +139,7 @@ export class HerdrPluginClient {
   }
 
   async preflightServer(): Promise<ServerTarget> {
-    const value = await this.#json("status server", ["status", "server", "--json"]);
-    const server = ServerSchema.safeParse(value);
+    const server = await this.#json("status server", ["status", "server", "--json"], ServerSchema);
 
     if (!server.success) throw new Error("Herdr server status returned invalid JSON");
 
@@ -160,15 +159,13 @@ export class HerdrPluginClient {
   }
 
   async installedPlugin(): Promise<InstalledPlugin | null> {
-    const value = await this.#json("plugin list", [
+    const list = await this.#json("plugin list", [
       "plugin",
       "list",
       "--plugin",
       this.#pluginId,
       "--json",
-    ]);
-
-    const list = PluginListSchema.safeParse(value);
+    ], PluginListSchema);
 
     if (!list.success) throw new Error("Herdr plugin list returned invalid JSON");
 
@@ -218,16 +215,14 @@ export class HerdrPluginClient {
   }
 
   async invoke(action: string): Promise<string> {
-    const value = await this.#json(`plugin action ${action}`, [
+    const invocation = await this.#json(`plugin action ${action}`, [
       "plugin",
       "action",
       "invoke",
       action,
       "--plugin",
       this.#pluginId,
-    ]);
-
-    const invocation = InvocationSchema.safeParse(value);
+    ], InvocationSchema);
 
     if (!invocation.success) {
       throw new Error(`Herdr did not return an action log id for ${action}`);
@@ -268,7 +263,7 @@ export class HerdrPluginClient {
   }
 
   async #logs(): Promise<readonly PluginLog[]> {
-    const value = await this.#json("plugin log list", [
+    const logs = await this.#json("plugin log list", [
       "plugin",
       "log",
       "list",
@@ -276,9 +271,7 @@ export class HerdrPluginClient {
       this.#pluginId,
       "--limit",
       String(HERDR_PLUGIN_LOG_LIMIT),
-    ]);
-
-    const logs = LogListSchema.safeParse(value);
+    ], LogListSchema);
 
     if (!logs.success) throw new Error("Herdr plugin log list returned invalid JSON");
 
@@ -300,14 +293,21 @@ export class HerdrPluginClient {
     return new Error(`Smart Rename ${action} action log ${logId} failed: ${message}`);
   }
 
-  async #json(label: string, args: readonly string[]): Promise<unknown> {
+  async #json<T extends z.ZodType>(
+    label: string,
+    args: readonly string[],
+    schema: T,
+  ): Promise<z.ZodSafeParseResult<z.output<T>>> {
     const result = await this.#command(label, args);
+    let value: unknown;
 
     try {
-      return JSON.parse(result.stdout);
+      value = JSON.parse(result.stdout);
     } catch {
       throw new Error(`${label} returned invalid JSON`);
     }
+
+    return schema.safeParse(value);
   }
 
   async #command(label: string, args: readonly string[]): Promise<CommandResult> {
