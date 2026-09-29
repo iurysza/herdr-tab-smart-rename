@@ -34,9 +34,9 @@ For Windows, use the [Herdr installation commands](./docs/install.md#windows). F
 
 ## Choose a model
 
-Using the install wizzard:
+The setup wizard lets you choose a model:
 
-![Install Wizzard](https://github.com/user-attachments/assets/9b5a1bf4-48d8-4544-a65e-9fc01f65daca)
+![Setup wizard](https://github.com/user-attachments/assets/9b5a1bf4-48d8-4544-a65e-9fc01f65daca)
 
 Setup offers three sources:
 
@@ -84,6 +84,7 @@ Model-backed naming sends bounded terminal context to your selected provider. Pi
 - [Installation](./docs/install.md): platforms, upgrades, and migration from a local checkout.
 - [Configuration and controls](./docs/configuration.md): actions, shortcuts, model sources, and troubleshooting.
 - [Naming policy](./docs/naming-policy.md): the default instructions used to generate labels.
+- [Architecture](./ai-artifacts/ARCHITECTURE.md): worker lifecycle, naming decisions, model sources, and stale-result guards.
 - [Release process](./docs/releasing.md) and [changelog](./CHANGELOG.md).
 
 ## Development
