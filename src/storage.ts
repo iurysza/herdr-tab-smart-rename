@@ -151,8 +151,10 @@ export async function loadState(
 
   try {
     const value: unknown = JSON.parse(await readFile(file, "utf8"));
+    const record = UnknownRecordSchema.safeParse(value);
+    const fields = record.success ? record.data : {};
 
-    return StateSchema.parse({ ...emptyState(), ...asRecord(value) });
+    return StateSchema.parse({ ...emptyState(), ...fields });
   } catch (error) {
     if (errorCode(error) === "ENOENT") return emptyState();
     throw error;
@@ -195,21 +197,19 @@ export async function withStateTransaction<T>(
   }
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  const parsed = UnknownRecordSchema.safeParse(value);
+const ErrorCodeSchema = z.object({ code: z.string() });
 
-  return parsed.success ? parsed.data : {};
+function errorCode(cause: unknown): string | undefined {
+  const parsed = ErrorCodeSchema.safeParse(cause);
+
+  return parsed.success ? parsed.data.code : undefined;
 }
 
-function errorCode(error: unknown): string | undefined {
-  return error && typeof error === "object" && "code" in error
-    ? String(error.code)
-    : undefined;
-}
+function lockContended(cause: unknown): boolean {
+  const code = errorCode(cause);
 
-function lockContended(error: unknown): boolean {
-  const code = errorCode(error);
   if (code === "EEXIST") return true;
+
   // Windows exclusive-create races (`open(..., "wx")`) can throw EPERM or
   // EACCES instead of EEXIST. Treat those as contention; other errors fail closed.
   return process.platform === "win32" && (code === "EPERM" || code === "EACCES");
