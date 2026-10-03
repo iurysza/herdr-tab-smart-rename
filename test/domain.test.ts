@@ -44,6 +44,32 @@ test("ownership transitions preserve manual names and expected writes", () => {
   });
 });
 
+test("default label resets release ownership instead of locking it", () => {
+  const named = { autoLabel: "Build API", observedLabel: "Build API" };
+
+  assert.deepEqual(acknowledgeRename(named, "1"), {
+    manual: false,
+    observedLabel: "1",
+  });
+  assert.deepEqual(reconcileItem({ ...named, manual: true }, "1", true), {
+    manual: false,
+    observedLabel: "1",
+  });
+  // Empty pane labels are the unnamed pane state, not a reclaimed tab
+  // number; a manual pane name must survive them.
+  assert.deepEqual(
+    reconcileItem({ manual: true, observedLabel: "My Pane" }, "", true),
+    { manual: true, observedLabel: "" },
+  );
+
+  // A transient default label must not cancel an in-flight automatic write.
+  const pending = {
+    ...prepareRename({}, "Fix Socket Reconnect"),
+    observedLabel: "1",
+  };
+  assert.deepEqual(acknowledgeRename(pending, "1"), pending);
+});
+
 test("label, workspace, and process policy stays deterministic", () => {
   for (const [label, valid] of [
     ["Fix Socket Reconnect", true],
