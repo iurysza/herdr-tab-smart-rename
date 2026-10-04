@@ -265,9 +265,11 @@ export async function beginProgress(
       try {
         const current = liveLabel(await snapshot(env), target);
 
-        // Restore only our own marker. Anything else is a newer name, a
-        // manual edit, or another process's marker.
-        if (current === marked) await rename(target.kind, target.id, base, env);
+        // Restore only our own marker. Herdr may trim its trailing space on
+        // an empty label. Anything else is a newer name, a manual edit, or
+        // another process's marker.
+        if (current === marked || current === marked.trimEnd())
+          await rename(target.kind, target.id, base, env);
       } catch {
         // Progress cleanup must not hide the naming result.
       }

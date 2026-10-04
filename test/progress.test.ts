@@ -31,7 +31,7 @@ if (args[0] === "api" && args[1] === "snapshot") {
   } } }));
 } else if (args[1] === "rename") {
   appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(args) + "\\n");
-  const label = args[3] === "--clear" ? undefined : args.slice(3).join(" ");
+  const label = args[3] === "--clear" ? undefined : args.slice(3).join(" ").trimEnd(); // Herdr trims trailing spaces
   labels[args[0]] = label;
   writeFileSync(${JSON.stringify(stateFile)}, JSON.stringify(labels));
 } else process.exit(9);
