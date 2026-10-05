@@ -10,7 +10,7 @@ const ModelOutput = Schema.Struct({
 });
 
 /** Decodes the model's JSON string and validates the contained tab label. */
-const ModelOutputFromJson = Schema.parseJson(ModelOutput);
+const ModelOutputFromJson = Schema.fromJsonString(ModelOutput);
 
 /**
  * Parse a raw model response into a validated {@link NameSuggestion}.
@@ -27,7 +27,7 @@ export function decodeSuggestion(
   const cleaned = (fenced?.[1] ?? text).trim();
 
   return Effect.gen(function* () {
-    const output = yield* Schema.decodeUnknown(ModelOutputFromJson)(cleaned).pipe(
+    const output = yield* Schema.decodeUnknownEffect(ModelOutputFromJson)(cleaned).pipe(
       Effect.mapError(
         (error) => new ModelOutputError({ detail: `invalid model output: ${error.message}` }),
       ),
