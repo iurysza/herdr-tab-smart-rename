@@ -19,7 +19,7 @@
     "@ai-sdk/openai-compatible": "3.0.55",
     "@clack/prompts": "1.8.1",
     "@earendil-works/pi-ai": "0.87.1",
-    "@earendil-works/pi-coding-agent": "0.87.1",
+    "@earendil-works/pi-coding-agent": "1.0.0",
     "@opencode-ai/sdk": "1.18.32",
     "ai": "7.0.114",
     "dotenv": "18.0.3",
