@@ -23,7 +23,7 @@
     "@opencode-ai/sdk": "1.18.32",
     "ai": "7.0.114",
     "dotenv": "18.0.3",
-    "effect": "^3.22.2",
+    "effect": "^4.0.0",
     "secret-sniff": "0.2.1",
     "strip-ansi": "7.2.0",
     "zod": "4.6.5"
