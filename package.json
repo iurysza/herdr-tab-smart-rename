@@ -16,22 +16,22 @@
     "bun": ">=1.2.23"
   },
   "dependencies": {
-    "@ai-sdk/openai-compatible": "3.0.55",
+    "@ai-sdk/openai-compatible": "3.0.62",
     "@clack/prompts": "1.8.1",
     "@earendil-works/pi-ai": "0.87.1",
     "@earendil-works/pi-coding-agent": "1.0.0",
-    "@opencode-ai/sdk": "1.18.32",
-    "ai": "7.0.114",
-    "dotenv": "18.0.3",
+    "@opencode-ai/sdk": "1.18.34",
+    "ai": "7.0.127",
+    "dotenv": "18.0.5",
     "effect": "^4.0.0",
     "secret-sniff": "0.2.1",
     "strip-ansi": "7.2.0",
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@oxlint/plugins": "1.85.0",
+    "@oxlint/plugins": "1.86.0",
     "@types/bun": "1.4.2",
-    "oxlint": "1.85.0",
+    "oxlint": "1.86.0",
     "typescript": "7.0.2"
   }
 }
