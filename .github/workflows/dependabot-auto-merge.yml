@@ -1,0 +1,112 @@
+name: Dependabot auto-merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  checks: read
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  auto-merge:
+    name: Squash-merge
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Leave semver-major updates for review
+        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        run: echo "Semver-major update; leaving this pull request for review."
+
+      - name: Squash-merge after CI is green
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major' && steps.metadata.outputs.update-type != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # main does not require status checks, so `gh pr merge --auto` would
+          # not wait for CI. Poll the CI jobs, then squash-merge.
+          deadline=$((SECONDS + 2400))
+          ci_names='["Bun 1.2.23","Bun latest","Windows"]'
+
+          while (( SECONDS < deadline )); do
+            view="$(gh pr view "$PR_URL" --json headRefOid,state --jq '[.headRefOid,.state] | @tsv')"
+            current_sha="${view%%$'\t'*}"
+            pr_state="${view#*$'\t'}"
+
+            if [[ "$pr_state" == "MERGED" ]]; then
+              echo "Pull request is already merged."
+              exit 0
+            fi
+            if [[ "$current_sha" != "$HEAD_SHA" ]]; then
+              echo "Head moved from $HEAD_SHA to $current_sha; a newer run will decide."
+              exit 0
+            fi
+
+            err_file="$(mktemp)"
+            set +e
+            checks="$(gh pr checks "$PR_URL" --json name,workflow,bucket 2>"$err_file")"
+            status=$?
+            set -e
+
+            if [[ "$status" -ne 0 && "$status" -ne 1 && "$status" -ne 8 ]]; then
+              cat "$err_file" >&2
+              rm -f "$err_file"
+              exit "$status"
+            fi
+            if [[ "$status" -eq 1 && -z "${checks}" ]]; then
+              if ! grep -q "no checks reported" "$err_file"; then
+                cat "$err_file" >&2
+                rm -f "$err_file"
+                exit 1
+              fi
+            fi
+            rm -f "$err_file"
+            if [[ -z "${checks}" ]]; then
+              checks='[]'
+            fi
+
+            gate="$(jq -r --argjson names "$ci_names" '
+              . as $checks
+              | [
+                  $names[] as $name
+                  | ($checks | map(select(.workflow == "CI" and .name == $name)) | .[0].bucket // "missing")
+                ] as $found
+              | if any($found[]; . == "fail" or . == "skipping") then "failed"
+                elif all($found[]; . == "pass") then "success"
+                else "waiting"
+                end
+            ' <<<"$checks")"
+
+            echo "CI gate for $HEAD_SHA: $gate"
+            if [[ "$gate" == "success" ]]; then
+              gh pr merge "$PR_URL" --squash --match-head-commit "$HEAD_SHA"
+              exit 0
+            fi
+            if [[ "$gate" == "failed" ]]; then
+              echo "CI failed; not merging." >&2
+              jq -c --argjson names "$ci_names" '
+                map(select(.workflow == "CI" and (.name as $n | $names | index($n))))
+              ' <<<"$checks" >&2
+              exit 1
+            fi
+            sleep 20
+          done
+
+          echo "Timed out waiting for CI jobs Bun 1.2.23, Bun latest, and Windows." >&2
+          exit 1
