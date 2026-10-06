@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.6.0...v0.6.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **progress:** clear marker when Herdr trims the empty-label marker ([ac58796](https://github.com/iurysza/herdr-tab-smart-rename/commit/ac58796e950adab5ecf562a754f06e62a090aa77))
+* **progress:** clear marker when Herdr trims the empty-label marker ([4d2b607](https://github.com/iurysza/herdr-tab-smart-rename/commit/4d2b60737c451048e2bdc9cc4d3b44933f61fe3a))
+
 ## [0.6.0](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.5.2...v0.6.0) (2026-09-28)
 
 
