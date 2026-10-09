@@ -62,12 +62,35 @@ test("default label resets release ownership instead of locking it", () => {
     { manual: true, observedLabel: "" },
   );
 
-  // A transient default label must not cancel an in-flight automatic write.
-  const pending = {
-    ...prepareRename({}, "Fix Socket Reconnect"),
-    observedLabel: "1",
-  };
-  assert.deepEqual(acknowledgeRename(pending, "1"), pending);
+  // All-digit renames read as numbered defaults, matching first-seen
+  // numeric labels: ownership is released rather than locked manual.
+  assert.deepEqual(acknowledgeRename(named, "42"), {
+    manual: false,
+    observedLabel: "42",
+  });
+  assert.deepEqual(acknowledgeRename(named, "01"), {
+    manual: false,
+    observedLabel: "01",
+  });
+
+  // A reset that supersedes an in-flight write still locks on acknowledge
+  // (the pending write is cleared, not kept); the next reconcile of the
+  // still-numbered label is what releases it.
+  const pending = prepareRename(
+    { autoLabel: "Build API", observedLabel: "Build API" },
+    "Fix Socket Reconnect",
+  );
+
+  const superseded = acknowledgeRename(pending, "2");
+  assert.deepEqual(superseded, {
+    autoLabel: "Build API",
+    manual: true,
+    observedLabel: "2",
+  });
+  assert.deepEqual(reconcileItem(superseded, "2", true), {
+    manual: false,
+    observedLabel: "2",
+  });
 });
 
 test("label, workspace, and process policy stays deterministic", () => {

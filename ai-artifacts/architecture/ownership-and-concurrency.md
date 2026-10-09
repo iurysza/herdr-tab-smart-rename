@@ -18,11 +18,15 @@ stateDiagram-v2
     ExpectedWrite --> Manual: Different label observed
     Automatic --> Manual: External label change observed
     Manual --> Automatic: Explicit action reclaims this target
+    Automatic --> Unseen: External change is a numbered default
+    Manual --> Unseen: External change is a numbered default
     ExpectedWrite --> PriorRecord: Rename command fails
     PriorRecord --> Automatic: Restore previous automatic record
 ```
 
 `reconcileItem` compares the current snapshot with the stored record. `acknowledgeRename` recognizes a matching expected write and ignores unchanged older events that must not consume it. `AutoNameService.acknowledge` first checks the live snapshot, so a delayed label event cannot overwrite newer knowledge.
+
+A numbered default observed after a named label is Herdr resetting an unnamed target (renumbering or a cleared name), not a manual edit: `reconcileItem` and `acknowledgeRename` release ownership so automatic naming resumes. The release skips empty pane labels, which are the unnamed pane state, and pending `expectedLabel` writes: a reset that supersedes an in-flight write locks manual on acknowledge, and the next reconcile of the still-numbered label releases it. `resetOwnership` also drops `autoLabel`, so a later snapshot that shows the previous automatic name instead of the number reads as a manual rename and re-locks it.
 
 An explicit action resets ownership only for its target scope. A manually named pane remains available as evidence for tab naming. `reconcileSnapshot` removes ownership and request records for closed items.
 

@@ -144,8 +144,8 @@ export function isDefaultLabel(label: unknown, number?: unknown): boolean {
 // Numbered defaults are what Herdr assigns to unnamed tabs and workspaces.
 // An empty label is excluded: unnamed panes legitimately read as empty, and
 // a manual pane name must survive a transient empty label.
-export function isNumberedDefaultLabel(label: unknown): boolean {
-  return /^\d+$/.test(String(label ?? "").trim());
+export function isNumberedDefaultLabel(label: string): boolean {
+  return /^\d+$/.test(label.trim());
 }
 
 export function reconcileItem(
@@ -168,7 +168,10 @@ export function reconcileItem(
   } else if (eligible && isNumberedDefaultLabel(currentLabel)) {
     // A numbered default after a named label is Herdr reclaiming an unnamed
     // target (renumbering or clearing a name), not a manual edit. Return
-    // to the unnamed state so automatic naming resumes.
+    // to the unnamed state so automatic naming resumes. resetOwnership
+    // drops autoLabel, so a later snapshot that shows the previous
+    // automatic name instead of the number reads as a manual rename and
+    // re-locks it; only a sticky numbered default stays released.
     return { ...resetOwnership(record), observedLabel: currentLabel };
   } else if (next.autoLabel && currentLabel !== next.autoLabel) {
     next.manual = true;
@@ -199,11 +202,15 @@ export function acknowledgeRename(
     return { ...record };
   }
 
-  // A numbered default label after a non-default one is Herdr resetting
-  // the name (renumbering or clearing), not a manual edit. Fall back to the
-  // unnamed state instead of locking manual ownership, but never cancel an
-  // expected automatic write that has not landed yet. Empty labels are
+  // A numbered default label after a named one is Herdr resetting the
+  // target (renumbering or clearing a name), not a manual edit: return to
+  // the unnamed state so automatic naming resumes. Empty labels are
   // excluded so manual pane names survive transient empty reads.
+  // The release only applies without a pending write: when expectedLabel is
+  // set and the label changed, the arm below clears the write and locks
+  // manual. AutoNameService.acknowledge runs reconcileSnapshot first, so
+  // the mismatch is cleared there and the next reconcileItem of a
+  // still-numbered label is what releases ownership.
   if (!record.expectedLabel && isNumberedDefaultLabel(label)) {
     return { ...resetOwnership(record), observedLabel: label };
   }
