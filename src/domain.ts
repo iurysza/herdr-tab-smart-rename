@@ -142,8 +142,8 @@ export function isDefaultLabel(label: unknown, number?: unknown): boolean {
 }
 
 // Numbered defaults are what Herdr assigns to unnamed tabs and workspaces.
-// An empty label is excluded: unnamed panes legitimately read as empty, and
-// a manual pane name must survive a transient empty label.
+// Panes are excluded: an unnamed pane reads as empty, never numbered, so a
+// numeric pane label is a manual name that must survive reconciliation.
 export function isNumberedDefaultLabel(label: string): boolean {
   return /^\d+$/.test(label.trim());
 }
@@ -152,6 +152,7 @@ export function reconcileItem(
   record: OwnershipRecord | undefined,
   currentLabel: string,
   eligible = false,
+  numberedDefaults = false,
 ): OwnershipRecord {
   const next = { ...record };
   const previousObserved = next.observedLabel;
@@ -165,13 +166,11 @@ export function reconcileItem(
       delete next.expectedLabel;
       next.manual = true;
     }
-  } else if (eligible && isNumberedDefaultLabel(currentLabel)) {
+  } else if (numberedDefaults && isNumberedDefaultLabel(currentLabel)) {
     // A numbered default after a named label is Herdr reclaiming an unnamed
-    // target (renumbering or clearing a name), not a manual edit. Return
-    // to the unnamed state so automatic naming resumes. resetOwnership
-    // drops autoLabel, so a later snapshot that shows the previous
-    // automatic name instead of the number reads as a manual rename and
-    // re-locks it; only a sticky numbered default stays released.
+    // tab or workspace (renumbering or clearing a name), not a manual edit.
+    // Return to the unnamed state so automatic naming resumes. Panes never
+    // pass numberedDefaults: their unnamed state is an empty label.
     return { ...resetOwnership(record), observedLabel: currentLabel };
   } else if (next.autoLabel && currentLabel !== next.autoLabel) {
     next.manual = true;
@@ -193,6 +192,7 @@ export function reconcileItem(
 export function acknowledgeRename(
   record: OwnershipRecord | undefined,
   label: string,
+  numberedDefaults = false,
 ): OwnershipRecord {
   if (!record) return reconcileItem(undefined, label, isDefaultLabel(label));
 
@@ -202,16 +202,22 @@ export function acknowledgeRename(
     return { ...record };
   }
 
-  // A numbered default label after a named one is Herdr resetting the
-  // target (renumbering or clearing a name), not a manual edit: return to
-  // the unnamed state so automatic naming resumes. Empty labels are
-  // excluded so manual pane names survive transient empty reads.
-  // The release only applies without a pending write: when expectedLabel is
-  // set and the label changed, the arm below clears the write and locks
-  // manual. AutoNameService.acknowledge runs reconcileSnapshot first, so
-  // the mismatch is cleared there and the next reconcileItem of a
-  // still-numbered label is what releases ownership.
-  if (!record.expectedLabel && isNumberedDefaultLabel(label)) {
+  // A numbered default label after a non-default one is Herdr resetting
+  // the tab or workspace (renumbering or clearing), not a manual edit: fall
+  // back to the unnamed state instead of locking manual ownership. Panes
+  // never pass numberedDefaults, and empty labels are already excluded, so
+  // manual pane names survive transient empty reads.
+  //
+  // A pending automatic write is not cancelled by this branch: it clears as
+  // manual below, and the next numbered reconcile releases it, so a landed
+  // write still completes while a failed one converges to unnamed within a
+  // snapshot. A one-snapshot blip back to the previous automatic name
+  // re-locks manual the same way — the reset must be sticky to unlock.
+  if (
+    !record.expectedLabel &&
+    numberedDefaults &&
+    isNumberedDefaultLabel(label)
+  ) {
     return { ...resetOwnership(record), observedLabel: label };
   }
 

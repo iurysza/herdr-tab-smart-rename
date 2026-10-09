@@ -47,47 +47,44 @@ test("ownership transitions preserve manual names and expected writes", () => {
 test("default label resets release ownership instead of locking it", () => {
   const named = { autoLabel: "Build API", observedLabel: "Build API" };
 
-  assert.deepEqual(acknowledgeRename(named, "1"), {
+  assert.deepEqual(acknowledgeRename(named, "1", true), {
     manual: false,
     observedLabel: "1",
   });
-  assert.deepEqual(reconcileItem({ ...named, manual: true }, "1", true), {
+  assert.deepEqual(reconcileItem({ ...named, manual: true }, "1", true, true), {
     manual: false,
     observedLabel: "1",
   });
-  // Empty pane labels are the unnamed pane state, not a reclaimed tab
-  // number; a manual pane name must survive them.
+  // Panes never reclaim numbered labels — their unnamed state is empty —
+  // so both numeric and empty labels preserve a manual pane name.
   assert.deepEqual(
     reconcileItem({ manual: true, observedLabel: "My Pane" }, "", true),
     { manual: true, observedLabel: "" },
   );
-
-  // All-digit renames read as numbered defaults, matching first-seen
-  // numeric labels: ownership is released rather than locked manual.
-  assert.deepEqual(acknowledgeRename(named, "42"), {
-    manual: false,
-    observedLabel: "42",
-  });
-  assert.deepEqual(acknowledgeRename(named, "01"), {
-    manual: false,
-    observedLabel: "01",
-  });
-
-  // A reset that supersedes an in-flight write still locks on acknowledge
-  // (the pending write is cleared, not kept); the next reconcile of the
-  // still-numbered label is what releases it.
-  const pending = prepareRename(
-    { autoLabel: "Build API", observedLabel: "Build API" },
-    "Fix Socket Reconnect",
+  assert.deepEqual(
+    acknowledgeRename({ manual: true, observedLabel: "42" }, "42", false),
+    { manual: true, observedLabel: "42" },
   );
 
-  const superseded = acknowledgeRename(pending, "2");
-  assert.deepEqual(superseded, {
-    autoLabel: "Build API",
-    manual: true,
-    observedLabel: "2",
-  });
-  assert.deepEqual(reconcileItem(superseded, "2", true), {
+  // Intentional all-digit tab renames match first-seen numbered defaults
+  // and are reclaimed as unnamed (pinned tradeoff, same as "1" above).
+  assert.deepEqual(
+    acknowledgeRename({ ...named, manual: true }, "42", true),
+    { manual: false, observedLabel: "42" },
+  );
+
+  // A pending write acknowledged as a numbered default clears as manual
+  // for one snapshot; the next numbered reconcile then releases ownership,
+  // so a failed write converges to unnamed instead of locking forever.
+  const pending = {
+    ...prepareRename({}, "Fix Socket Reconnect"),
+    observedLabel: "Build API",
+  };
+
+  const acknowledged = acknowledgeRename(pending, "2", true);
+  assert.equal(acknowledged.manual, true);
+  assert.equal(acknowledged.expectedLabel, undefined);
+  assert.deepEqual(reconcileItem(acknowledged, "2", true, true), {
     manual: false,
     observedLabel: "2",
   });

@@ -193,6 +193,7 @@ export function reconcileSnapshot(
       state.workspaces[workspace.workspace_id],
       workspace.label,
       isDefaultLabel(workspace.label, workspace.number),
+      true,
     );
   }
 
@@ -202,6 +203,7 @@ export function reconcileSnapshot(
       state.tabs[tab.tab_id],
       label,
       isDefaultLabel(label, tab.number),
+      true,
     );
   }
 
@@ -309,7 +311,7 @@ export class AutoNameService {
         // Events can wait behind earlier writes. Never replay an obsolete label.
         if (targetLabel({ kind, id }, current) !== label) return;
         const collection = records(state, kind);
-        collection[id] = acknowledgeRename(collection[id], label);
+        collection[id] = acknowledgeRename(collection[id], label, kind !== "pane");
       },
     );
   }
