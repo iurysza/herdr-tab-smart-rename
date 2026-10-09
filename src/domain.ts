@@ -141,10 +141,18 @@ export function isDefaultLabel(label: unknown, number?: unknown): boolean {
   return !value || /^\d+$/.test(value) || value === String(number ?? "");
 }
 
+// Numbered defaults are what Herdr assigns to unnamed tabs and workspaces.
+// Panes are excluded: an unnamed pane reads as empty, never numbered, so a
+// numeric pane label is a manual name that must survive reconciliation.
+export function isNumberedDefaultLabel(label: string): boolean {
+  return /^\d+$/.test(label.trim());
+}
+
 export function reconcileItem(
   record: OwnershipRecord | undefined,
   currentLabel: string,
   eligible = false,
+  numberedDefaults = false,
 ): OwnershipRecord {
   const next = { ...record };
   const previousObserved = next.observedLabel;
@@ -158,6 +166,12 @@ export function reconcileItem(
       delete next.expectedLabel;
       next.manual = true;
     }
+  } else if (numberedDefaults && isNumberedDefaultLabel(currentLabel)) {
+    // A numbered default after a named label is Herdr reclaiming an unnamed
+    // tab or workspace (renumbering or clearing a name), not a manual edit.
+    // Return to the unnamed state so automatic naming resumes. Panes never
+    // pass numberedDefaults: their unnamed state is an empty label.
+    return { ...resetOwnership(record), observedLabel: currentLabel };
   } else if (next.autoLabel && currentLabel !== next.autoLabel) {
     next.manual = true;
   } else if (
@@ -178,6 +192,7 @@ export function reconcileItem(
 export function acknowledgeRename(
   record: OwnershipRecord | undefined,
   label: string,
+  numberedDefaults = false,
 ): OwnershipRecord {
   if (!record) return reconcileItem(undefined, label, isDefaultLabel(label));
 
@@ -185,6 +200,25 @@ export function acknowledgeRename(
   // An older unchanged event must not consume a pending automatic write.
   if (record.observedLabel === label && record.expectedLabel !== label) {
     return { ...record };
+  }
+
+  // A numbered default label after a non-default one is Herdr resetting
+  // the tab or workspace (renumbering or clearing), not a manual edit: fall
+  // back to the unnamed state instead of locking manual ownership. Panes
+  // never pass numberedDefaults, and empty labels are already excluded, so
+  // manual pane names survive transient empty reads.
+  //
+  // A pending automatic write is not cancelled by this branch: it clears as
+  // manual below, and the next numbered reconcile releases it, so a landed
+  // write still completes while a failed one converges to unnamed within a
+  // snapshot. A one-snapshot blip back to the previous automatic name
+  // re-locks manual the same way — the reset must be sticky to unlock.
+  if (
+    !record.expectedLabel &&
+    numberedDefaults &&
+    isNumberedDefaultLabel(label)
+  ) {
+    return { ...resetOwnership(record), observedLabel: label };
   }
 
   const next = { ...record };

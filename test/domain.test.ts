@@ -44,6 +44,52 @@ test("ownership transitions preserve manual names and expected writes", () => {
   });
 });
 
+test("default label resets release ownership instead of locking it", () => {
+  const named = { autoLabel: "Build API", observedLabel: "Build API" };
+
+  assert.deepEqual(acknowledgeRename(named, "1", true), {
+    manual: false,
+    observedLabel: "1",
+  });
+  assert.deepEqual(reconcileItem({ ...named, manual: true }, "1", true, true), {
+    manual: false,
+    observedLabel: "1",
+  });
+  // Panes never reclaim numbered labels — their unnamed state is empty —
+  // so both numeric and empty labels preserve a manual pane name.
+  assert.deepEqual(
+    reconcileItem({ manual: true, observedLabel: "My Pane" }, "", true),
+    { manual: true, observedLabel: "" },
+  );
+  assert.deepEqual(
+    acknowledgeRename({ manual: true, observedLabel: "42" }, "42", false),
+    { manual: true, observedLabel: "42" },
+  );
+
+  // Intentional all-digit tab renames match first-seen numbered defaults
+  // and are reclaimed as unnamed (pinned tradeoff, same as "1" above).
+  assert.deepEqual(
+    acknowledgeRename({ ...named, manual: true }, "42", true),
+    { manual: false, observedLabel: "42" },
+  );
+
+  // A pending write acknowledged as a numbered default clears as manual
+  // for one snapshot; the next numbered reconcile then releases ownership,
+  // so a failed write converges to unnamed instead of locking forever.
+  const pending = {
+    ...prepareRename({}, "Fix Socket Reconnect"),
+    observedLabel: "Build API",
+  };
+
+  const acknowledged = acknowledgeRename(pending, "2", true);
+  assert.equal(acknowledged.manual, true);
+  assert.equal(acknowledged.expectedLabel, undefined);
+  assert.deepEqual(reconcileItem(acknowledged, "2", true, true), {
+    manual: false,
+    observedLabel: "2",
+  });
+});
+
 test("label, workspace, and process policy stays deterministic", () => {
   for (const [label, valid] of [
     ["Fix Socket Reconnect", true],

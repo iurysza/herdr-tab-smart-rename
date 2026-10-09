@@ -17,12 +17,15 @@ stateDiagram-v2
     ExpectedWrite --> Automatic: Snapshot or event matches expected label
     ExpectedWrite --> Manual: Different label observed
     Automatic --> Manual: External label change observed
+    Automatic --> Unseen: Herdr resets a tab/workspace to a numbered default
     Manual --> Automatic: Explicit action reclaims this target
     ExpectedWrite --> PriorRecord: Rename command fails
     PriorRecord --> Automatic: Restore previous automatic record
 ```
 
 `reconcileItem` compares the current snapshot with the stored record. `acknowledgeRename` recognizes a matching expected write and ignores unchanged older events that must not consume it. `AutoNameService.acknowledge` first checks the live snapshot, so a delayed label event cannot overwrite newer knowledge.
+
+Not every external label change acquires manual ownership: when Herdr itself resets a tab or workspace label back to a numbered default (renumbering after a close, or a cleared name), reconciliation releases the record to the unnamed state and automatic naming resumes. This automatic release applies to tabs and workspaces only — pane labels are never numbered defaults, so a numeric or empty pane label keeps its manual ownership. An intentional all-digit tab rename ("42") is indistinguishable from a reset and is released the same way, matching how first-seen numbered labels are treated.
 
 An explicit action resets ownership only for its target scope. A manually named pane remains available as evidence for tab naming. `reconcileSnapshot` removes ownership and request records for closed items.
 
