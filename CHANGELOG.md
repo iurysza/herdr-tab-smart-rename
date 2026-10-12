@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.6.1...v0.6.2) (2026-10-12)
+
+
+### Bug Fixes
+
+* reclaim numbered-default labels instead of locking manual ownership ([#45](https://github.com/iurysza/herdr-tab-smart-rename/issues/45)) ([fdbab4c](https://github.com/iurysza/herdr-tab-smart-rename/commit/fdbab4c4f9e4780471c7253a6f1e088ea1f83453))
+
 ## [0.6.1](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.6.0...v0.6.1) (2026-10-06)
 
 
