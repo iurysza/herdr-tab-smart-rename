@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.6.2...v0.6.3) (2026-10-15)
+
+
+### Bug Fixes
+
+* send per-process session id with pi standalone completions ([#55](https://github.com/iurysza/herdr-tab-smart-rename/issues/55)) ([4e57c07](https://github.com/iurysza/herdr-tab-smart-rename/commit/4e57c073083f42cda01599fe65b9b470fca03c62))
+
 ## [0.6.2](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.6.1...v0.6.2) (2026-10-12)
 
 
