@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Api, Context, Model } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import {
@@ -23,6 +24,9 @@ export interface PiAssistantMessage {
   errorMessage?: string;
 }
 
+// One id per process: session-routed providers require it, others ignore it.
+const standaloneSessionId = randomUUID();
+
 export interface PiRuntime {
   getAvailable(providerId?: string): Promise<readonly PiModel[]>;
   getModel(providerId: string, modelId: string): PiModel | undefined;
@@ -34,6 +38,7 @@ export interface PiRuntime {
       maxTokens: number;
       maxRetries: number;
       signal: AbortSignal;
+      sessionId: string;
     },
   ): Promise<PiAssistantMessage>;
 }
@@ -116,8 +121,8 @@ export class PiModelSource implements ModelSource {
           ],
         },
         request.selection.profile && request.selection.profile !== "off"
-          ? { reasoning: request.selection.profile, maxTokens: request.maxOutputTokens, maxRetries: request.maxRetries, signal: request.abortSignal }
-          : { maxTokens: request.maxOutputTokens, maxRetries: request.maxRetries, signal: request.abortSignal },
+          ? { reasoning: request.selection.profile, maxTokens: request.maxOutputTokens, maxRetries: request.maxRetries, signal: request.abortSignal, sessionId: standaloneSessionId }
+          : { maxTokens: request.maxOutputTokens, maxRetries: request.maxRetries, signal: request.abortSignal, sessionId: standaloneSessionId },
       );
 
       if (response.stopReason === "error" || response.stopReason === "aborted") {
@@ -199,6 +204,7 @@ async function createPiRuntime(): Promise<PiRuntimeResources> {
           maxTokens: options.maxTokens,
           maxRetries: options.maxRetries,
           signal: options.signal,
+          sessionId: options.sessionId,
         };
 
         if (options.reasoning) Object.assign(runtimeOptions, {

@@ -90,7 +90,10 @@ test("Pi completion uses Pi-owned model and thinking configuration", async () =>
   const call = calls[0];
 
   assert.ok(call);
-  assert.deepEqual(call.options, {
+  const { sessionId, ...rest } = call.options;
+
+  assert.ok(z.string().min(1).parse(sessionId).length > 0);
+  assert.deepEqual(rest, {
     reasoning: "high",
     maxTokens: 123,
     maxRetries: 1,
@@ -109,6 +112,44 @@ test("Pi completion uses Pi-owned model and thinking configuration", async () =>
       },
     ],
   });
+});
+
+test("Pi forwards a stable per-process session id for session-routed providers", async () => {
+  const seen: Array<string | undefined> = [];
+
+  const adapter = source({
+    ...runtimeWithModel(),
+    completeSimple: async (_selected, _context, options) => {
+      seen.push(options.sessionId);
+
+      return {
+        content: [{ type: "text", text: '{"tab":"Repair Socket Reconnect","reason":"task"}' }],
+        stopReason: "stop",
+      };
+    },
+  });
+
+  const request = {
+    selection: {
+      version: 1 as const,
+      source: "pi" as const,
+      provider: "anthropic",
+      model: "claude-sonnet",
+    },
+    context: { project: "Plugin", userRequests: ["Fix reconnect"] },
+    system: "JSON only",
+    prompt: "Name this task",
+    maxOutputTokens: 123,
+    maxRetries: 1,
+    abortSignal: AbortSignal.timeout(1_000),
+  };
+
+  await adapter.complete({ ...request });
+  await adapter.complete({ ...request });
+
+  assert.equal(seen.length, 2);
+  assert.ok(seen[0]);
+  assert.equal(seen[0], seen[1]);
 });
 
 test("Pi failures are fail-closed and secret-free", async () => {
