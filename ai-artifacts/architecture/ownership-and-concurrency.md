@@ -93,7 +93,9 @@ Progress is cosmetic. A failed marker write or restoration does not hide the nam
 
 ## Startup, reconnect, and shutdown
 
-`start` in [cli.ts](../../src/cli.ts) holds `start.lock`, verifies the recorded worker's process and script, and checks socket ownership. A live worker for another socket blocks startup. A newly spawned worker records readiness after connecting to its target socket; `start` waits for that record rather than treating a PID as readiness.
+`start` in [cli.ts](../../src/cli.ts) holds `start.lock`, verifies the recorded worker's process and script, and checks socket ownership. A live worker for another socket blocks a manual start. A newly spawned worker records readiness after connecting to its target socket; `start` waits for that record rather than treating a PID as readiness.
+
+The manifest `[[startup]]` hook runs `start --autostart` when the Herdr server starts. Autostart continues only when `model-selection.json` or `provider.env` exists in the plugin config directory. Setup writes those files there. The state directory holds the worker record, not the saved setup. With neither file, autostart logs one line and exits 0, so `--install-only` and a setup cancelled before apply do not start the worker. When a live worker serves another socket, autostart exits 0 and leaves that worker in place. A manual `start` still reports the conflict and exits 1.
 
 On socket closure, the worker schedules reconnect after one second. Its 60-second sweep can discover changes without a matching event. Shutdown stops scheduling, clears timers, destroys the socket, waits for event handling and active evaluations, closes the namer, and removes only its own worker record. Waiting evaluations are not all executed during shutdown.
 

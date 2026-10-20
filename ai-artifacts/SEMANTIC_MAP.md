@@ -14,7 +14,7 @@ Use this reference to locate the implementation and tests for a change. Start wi
 | ANSI removal and best-effort redaction | [text.ts](../src/text.ts) | [domain.test.ts](../test/domain.test.ts) |
 | State transactions, atomic files, locks, worker identity | [storage.ts](../src/storage.ts) | [runtime.test.ts](../test/runtime.test.ts), [service.test.ts](../test/service.test.ts) |
 | Debounce, concurrent tab scheduling, event handling, reconnect, shutdown | [worker.ts](../src/worker.ts) | [worker-readiness.integration.test.ts](../test/worker-readiness.integration.test.ts), opt-in [herdr-live.test.ts](../test/herdr-live.test.ts) |
-| Action dispatch, worker control, notices, and exit status | [cli.ts](../src/cli.ts) | [runtime.test.ts](../test/runtime.test.ts), opt-in [herdr-live.test.ts](../test/herdr-live.test.ts) |
+| Action dispatch, worker control, notices, and exit status | [cli.ts](../src/cli.ts) | [runtime.test.ts](../test/runtime.test.ts), [autostart tests](../test/autostart.integration.test.ts), opt-in [herdr-live.test.ts](../test/herdr-live.test.ts) |
 
 Read [naming flow](architecture/naming-flow.md) for the call sequence and [ownership and concurrency](architecture/ownership-and-concurrency.md) before changing locks, request gates, or event handling.
 

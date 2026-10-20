@@ -120,7 +120,7 @@ A manual name protects the label, not its pane content from use as tab context. 
 
 | Problem | Next step |
 | --- | --- |
-| Worker stopped | Run `start` |
+| Worker stopped | Run `start`. After setup saves `model-selection.json` or `provider.env`, the worker also starts when the Herdr server starts. An install with `--install-only`, or a setup cancelled before apply, does not start it. |
 | Model configuration invalid | Run `setup` |
 | Pi or OpenCode provider missing | Connect it in that tool, then rerun setup |
 | Direct authentication fails | Check the endpoint and key; `check-ai` does not test a completion |

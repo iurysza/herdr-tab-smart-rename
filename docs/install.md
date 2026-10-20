@@ -1,6 +1,6 @@
 # Install or upgrade Smart Rename
 
-Use a terminal inside Herdr. Install Herdr 0.7.0+ and Bun 1.2.23+ first. The installer checks these tools; it does not install them.
+Use a terminal inside Herdr. Install Herdr 0.7.5+ and Bun 1.2.23+ first. The installer checks these tools; it does not install them.
 
 ## macOS and Linux
 
@@ -20,7 +20,7 @@ To install without opening setup:
 sh install.sh --install-only --yes
 ```
 
-This leaves configuration and worker startup to you. Rerunning the same installer is safe: it recognizes its installed release and offers setup again.
+This leaves configuration and worker startup to you. Herdr starts the worker on server start only after setup saves `model-selection.json` or `provider.env`. Rerunning the same installer is safe: it recognizes its installed release and offers setup again.
 
 ## Windows
 
@@ -43,7 +43,7 @@ This also works on macOS and Linux. To choose a specific release, add `--ref` wi
 
 Setup validates configuration without making a model completion. Normal naming uses the selected provider after the worker starts.
 
-Cancel before applying to leave configuration and worker state unchanged. A failed save or validation restores the old configuration. If only startup fails, setup keeps the valid settings and prints a retry command.
+Cancel before applying to leave configuration and worker state unchanged. A cancelled setup does not start the worker when the server starts. A failed save or validation restores the old configuration. If only startup fails, setup keeps the valid settings and prints a retry command.
 
 ## Upgrade an existing install
 

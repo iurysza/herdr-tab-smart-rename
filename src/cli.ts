@@ -1,19 +1,19 @@
 #!/usr/bin/env bun
 import { chmod, closeSync, openSync } from "node:fs";
-import { chmod as chmodAsync, rm, writeFile } from "node:fs/promises";
+import { access, chmod as chmodAsync, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Match } from "effect";
 import { z } from "zod";
 import { type RenameResult } from "./domain.ts";
 import { run, snapshot } from "./herdr.ts";
-import { loadModelSelection } from "./model-selection.ts";
+import { loadModelSelection, modelSelectionPath } from "./model-selection.ts";
 import {
   selectionLabel,
   type ModelSelection,
   type ModelSource,
 } from "./model-source.ts";
 import { loadModelSource } from "./model-sources/index.ts";
-import { loadNamingPrompt, loadProviderConfig } from "./provider.ts";
+import { loadNamingPrompt, loadProviderConfig, providerEnvPath } from "./provider.ts";
 import { createService, type EvaluateOptions } from "./service.ts";
 import {
   acquireLock,
@@ -22,6 +22,7 @@ import {
   workerInfo,
   workerIsReady,
   workerOwnership,
+  type WorkerOwnership,
 } from "./storage.ts";
 import { sanitizeText } from "./text.ts";
 
@@ -185,7 +186,80 @@ export async function waitForWorkerReadiness(
   }
 }
 
+type StartTrigger = "manual" | "autostart";
+
+interface SavedSetup {
+  readonly modelSelection: boolean;
+  readonly providerEnv: boolean;
+}
+
+type StartPlan = "run" | "skip-unconfigured" | "skip-other-socket";
+
+function autostartPlan(
+  trigger: StartTrigger,
+  facts: {
+    readonly savedSetup?: SavedSetup;
+    readonly ownership?: WorkerOwnership;
+  },
+): StartPlan {
+  if (trigger === "manual") return "run";
+
+  if (
+    facts.savedSetup !== undefined &&
+    !facts.savedSetup.modelSelection &&
+    !facts.savedSetup.providerEnv
+  ) {
+    return "skip-unconfigured";
+  }
+
+  if (facts.ownership === "other-target") return "skip-other-socket";
+
+  return "run";
+}
+
+async function fileExists(file: string): Promise<boolean> {
+  try {
+    await access(file);
+
+    return true;
+  } catch (error) {
+    if (z.object({ code: z.literal("ENOENT") }).safeParse(error).success) return false;
+
+    throw error;
+  }
+}
+
+async function readSavedSetup(env: NodeJS.ProcessEnv): Promise<SavedSetup> {
+  const configDir = env.HERDR_PLUGIN_CONFIG_DIR;
+  const providerFile = providerEnvPath(env);
+
+  if (!configDir || !providerFile) return { modelSelection: false, providerEnv: false };
+
+  const [modelSelection, providerEnv] = await Promise.all([
+    fileExists(modelSelectionPath(configDir)),
+    fileExists(providerFile),
+  ]);
+
+  return { modelSelection, providerEnv };
+}
+
 async function start(): Promise<void> {
+  const startTrigger: StartTrigger = process.argv.includes("--autostart")
+    ? "autostart"
+    : "manual";
+
+  if (startTrigger === "autostart") {
+    const plan = autostartPlan(startTrigger, {
+      savedSetup: await readSavedSetup(process.env),
+    });
+
+    if (plan === "skip-unconfigured") {
+      console.log("Smart Rename has no saved setup; autostart skipped.");
+
+      return;
+    }
+  }
+
   const stateDir = requireStateDir();
   await ensurePrivateDir(stateDir);
   const paths = statePaths(stateDir);
@@ -216,6 +290,8 @@ async function start(): Promise<void> {
       }
 
       if (ownership === "other-target") {
+        if (autostartPlan(startTrigger, { ownership }) === "skip-other-socket") return;
+
         throw new Error(
           `Smart Rename is already serving another Herdr session. Stop it there, then retry here:\n${otherSocketRecovery(existing.socket!)}`,
         );

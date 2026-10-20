@@ -37,6 +37,26 @@ function manifestCliCommands(source: string): string[] {
   return commands;
 }
 
+test("startup hook autostarts through start --autostart on Herdr 0.7.5", async () => {
+  const manifest = await readFile(new URL("../herdr-plugin.toml", import.meta.url), "utf8");
+  assert.match(manifest, /^min_herdr_version = "0\.7\.5"$/m);
+
+  const startup = manifest
+    .split(/\n(?=\[\[)/)
+    .find((block) => block.startsWith("[[startup]]"));
+
+  assert.ok(startup, "startup hook missing");
+
+  const encoded = startup.match(/^command = \[(.*)\]$/m)?.[1];
+  assert.ok(encoded, "startup command missing");
+  assert.deepEqual(z.array(z.string()).parse(JSON.parse(`[${encoded}]`)), [
+    "bun",
+    "src/cli.ts",
+    "start",
+    "--autostart",
+  ]);
+});
+
 test("documented CLI actions are registered in the Herdr manifest", async () => {
   const [cli, manifest] = await Promise.all([
     readFile(new URL("../src/cli.ts", import.meta.url), "utf8"),
