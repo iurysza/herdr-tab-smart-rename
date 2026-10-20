@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.5](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.6.4...v0.6.5) (2026-10-20)
+
+
+### Bug Fixes
+
+* autostart the worker on server start only after setup ([#60](https://github.com/iurysza/herdr-tab-smart-rename/issues/60)) ([74fc3a5](https://github.com/iurysza/herdr-tab-smart-rename/commit/74fc3a5659632320005bfae0c4589ece9d7bf43c))
+
 ## [0.6.4](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.6.3...v0.6.4) (2026-10-15)
 
 
