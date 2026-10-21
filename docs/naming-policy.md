@@ -26,7 +26,7 @@ Keep `reason` short. Never expose hidden reasoning or quote sensitive context. I
 A label must:
 
 - describe the task, not its actor or incidental tool;
-- match the primary language of the user requests: use concise Chinese (2–12 characters) if requests are in Chinese, or 2–4 Title Case English words if in English;
+- match the primary language of the user requests: use concise Chinese (2–12 characters) if requests are in Chinese, otherwise 2–4 Title Case words in that language; short lowercase connectors (`e`, `de`, `para`, `and`, `of`) may join them and do not count toward the four;
 - stay under 30 characters;
 - omit project, app, agent, model, and provider prefixes;
 - prefer concrete verbs and nouns without invented specificity.
@@ -35,6 +35,7 @@ Include a project or tool name only when it is the task object and omission woul
 
 Good (Chinese): `修复认证问题`, `修复 MCP 故障`, `同步代码分支`, `清理系统进程`.
 Good (English): `Review Auth Changes`, `Repair Tab Ownership`, `Run Tests`, `View API Logs`.
+Good (Portuguese): `Revisar Ação do Usuário`, `Configurar Sessão`, `Apagar Forks e Ligar Worker`.
 
 Bad: `Kimi Auth Review`, `Pi Coding Agent`, a project name alone, a one-word label, or specificity unsupported by evidence.
 
