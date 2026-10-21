@@ -26,7 +26,8 @@ Keep `reason` short. Never expose hidden reasoning or quote sensitive context. I
 A label must:
 
 - describe the task, not its actor or incidental tool;
-- match the primary language of the user requests: use concise Chinese (2–12 characters) if requests are in Chinese, otherwise 2–4 Title Case words in that language; short lowercase connectors (`e`, `de`, `para`, `and`, `of`) may join them and do not count toward the four;
+- match the primary language of the user requests: use concise Chinese (2–12 characters) if requests are in Chinese; 2–4 Title Case words in that language if it is written with letter case (Latin, Cyrillic, Greek); otherwise 2–4 Title Case English words;
+- capitalize every word except these lowercase connectors, which do not count toward the four: <!-- connectors -->a, an, and, for, in, of, on, to, with, e, ou, o, um, uma, de, do, da, dos, das, em, no, na, nos, nas, ao, pelo, pela, para, por, com, sem, sobre, y, un, una, del, el, la, los, las, en, al, con, sin, et, à, du, des, le, les, au, aux, dans, pour, avec, sur, und, der, die, dem, den, von, mit, zu, im, auf, bei, für, über, ed, di, il, su, per, nel, della<!-- /connectors -->;
 - stay under 30 characters;
 - omit project, app, agent, model, and provider prefixes;
 - prefer concrete verbs and nouns without invented specificity.

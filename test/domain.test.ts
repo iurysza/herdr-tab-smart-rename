@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   acknowledgeRename,
   buildModelContext,
@@ -17,6 +18,7 @@ import {
   shouldCallModel,
   validateTabLabel,
   workspaceCandidate,
+  LABEL_CONNECTORS,
   MAX_CONTEXT_CHARS,
   MODEL_RATE_MS,
   MODEL_RETRY_MS,
@@ -109,6 +111,15 @@ test("label, workspace, and process policy stays deterministic", () => {
     ["e Ligar Worker", false],
     ["configurar sessão", false],
     ["Ver Log API App Bug", false],
+    ["Ver Log de API App Bug", false],
+    ["Revisar Ação do Usuário na Sessão", false],
+    ["Éditer la Connexion", true],
+    ["Configurar Sessão", true],
+    ["Prüfen der Änderungen", true],
+    ["Verbindung mit dem Server", true],
+    ["ǅungla Test", true],
+    ["Исправить Сессию", true],
+    ["로그인 수정", false],
     ["修复认证问题", true],
     ["同步主分支", true],
     ["清理系统进程", true],
@@ -120,6 +131,10 @@ test("label, workspace, and process policy stays deterministic", () => {
   ] as const) {
     assert.equal(validateTabLabel(label), valid, label);
   }
+
+  const policy = readFileSync(new URL("../docs/naming-policy.md", import.meta.url), "utf8");
+  const listed = policy.match(/<!-- connectors -->(.*?)<!-- \/connectors -->/)?.[1];
+  assert.deepEqual(listed?.split(", "), [...LABEL_CONNECTORS]);
 
   assert.equal(
     workspaceCandidate(

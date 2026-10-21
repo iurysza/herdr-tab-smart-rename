@@ -296,25 +296,27 @@ export function validateTabLabel(label: unknown): label is string {
 
   return words.every(
     (word, index) =>
-      /^[\p{Lu}\p{N}][\p{L}\p{M}\p{N}+.#/'-]*$/u.test(word) ||
+      /^[\p{Lu}\p{Lt}\p{N}][\p{L}\p{M}\p{N}+.#/'-]*$/u.test(word) ||
       (index > 0 && LABEL_CONNECTORS.has(word)),
   );
 }
 
 // Lowercase words a Title Case label may contain after its first word.
-const LABEL_CONNECTORS = new Set([
+// docs/naming-policy.md lists the same words for the model; keep them in sync.
+export const LABEL_CONNECTORS: ReadonlySet<string> = new Set([
   // English
   "a", "an", "and", "for", "in", "of", "on", "to", "with",
   // Portuguese
-  "e", "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas", "ao", "para", "por", "com", "sem",
+  "e", "ou", "o", "um", "uma", "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas",
+  "ao", "pelo", "pela", "para", "por", "com", "sem", "sobre",
   // Spanish
-  "y", "del", "el", "la", "los", "las", "en", "al", "con", "sin",
+  "y", "un", "una", "del", "el", "la", "los", "las", "en", "al", "con", "sin",
   // French
-  "et", "du", "des", "le", "les", "au", "aux", "pour", "avec", "sur",
+  "et", "à", "du", "des", "le", "les", "au", "aux", "dans", "pour", "avec", "sur",
   // German
-  "und", "der", "die", "von", "mit", "zu", "im", "für",
+  "und", "der", "die", "dem", "den", "von", "mit", "zu", "im", "auf", "bei", "für", "über",
   // Italian
-  "di", "il", "per", "nel", "della",
+  "ed", "di", "il", "su", "per", "nel", "della",
 ]);
 
 interface WorkspaceIdentity {

@@ -224,6 +224,25 @@ test("namer sends one bounded completion and validates model output", async () =
   );
 
   await assert.rejects(invalid.suggest(context), /invalid model tab label/);
+
+  for (const [response, tab] of [
+    ['{"tab":"Revisar Ação do Usuário","reason":"tarefa"}', "Revisar Ação do Usuário"],
+    ['{"tab":"Revis\\u00e3o de Sess\\u00e3o","reason":"tarefa"}', "Revisão de Sessão"],
+  ] as const) {
+    const portuguese = new AiSdkNamer(
+      { SMART_RENAME_API_KEY: "standalone-key" },
+      async () => response,
+    );
+
+    assert.deepEqual(await portuguese.suggest(context), { tab, reason: "tarefa" });
+  }
+
+  const lowercasePortuguese = new AiSdkNamer(
+    { SMART_RENAME_API_KEY: "standalone-key" },
+    async () => '{"tab":"Revisar ação do Usuário","reason":"tarefa"}',
+  );
+
+  await assert.rejects(lowercasePortuguese.suggest(context), /invalid model tab label/);
 });
 
 test("provider transport uses the provider-compatible output-token parameter", async () => {
