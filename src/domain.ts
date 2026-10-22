@@ -287,17 +287,37 @@ export function validateTabLabel(label: unknown): label is string {
   }
 
   const words = value.split(/\s+/);
+  // Connectors do not count toward the four-word cap: Romance and Germanic
+  // labels need more of them than English does, and MAX_TAB_LENGTH still
+  // bounds the total.
+  const titled = words.filter((word) => !LABEL_CONNECTORS.has(word));
 
-  if (words.length < 2 || words.length > 4) return false;
-
-  const connectors = new Set(["a", "an", "and", "for", "in", "of", "on", "to", "with"]);
+  if (words.length < 2 || titled.length > 4) return false;
 
   return words.every(
     (word, index) =>
-      /^[A-Z0-9][A-Za-z0-9+.#/'-]*$/.test(word) ||
-      (index > 0 && connectors.has(word)),
+      /^[\p{Lu}\p{Lt}\p{N}][\p{L}\p{M}\p{N}+.#/'-]*$/u.test(word) ||
+      (index > 0 && LABEL_CONNECTORS.has(word)),
   );
 }
+
+// Lowercase words a Title Case label may contain after its first word.
+// docs/naming-policy.md lists the same words for the model; keep them in sync.
+export const LABEL_CONNECTORS: ReadonlySet<string> = new Set([
+  // English
+  "a", "an", "and", "for", "in", "of", "on", "to", "with",
+  // Portuguese
+  "e", "ou", "o", "um", "uma", "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas",
+  "ao", "pelo", "pela", "para", "por", "com", "sem", "sobre",
+  // Spanish
+  "y", "un", "una", "del", "el", "la", "los", "las", "en", "al", "con", "sin",
+  // French
+  "et", "à", "du", "des", "le", "les", "au", "aux", "dans", "pour", "avec", "sur",
+  // German
+  "und", "der", "die", "dem", "den", "von", "mit", "zu", "im", "auf", "bei", "für", "über",
+  // Italian
+  "ed", "di", "il", "su", "per", "nel", "della",
+]);
 
 interface WorkspaceIdentity {
   label?: unknown;
