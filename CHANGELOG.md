@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.6](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.6.5...v0.6.6) (2026-10-22)
+
+
+### Bug Fixes
+
+* accept title case labels in other cased languages ([#62](https://github.com/iurysza/herdr-tab-smart-rename/issues/62)) ([aca549a](https://github.com/iurysza/herdr-tab-smart-rename/commit/aca549a13e17b32bf3e82490a72124e0cdfb225e))
+
 ## [0.6.5](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.6.4...v0.6.5) (2026-10-20)
 
 
