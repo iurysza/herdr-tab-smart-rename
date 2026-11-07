@@ -9,6 +9,8 @@ Use this reference to locate the implementation and tests for a change. Start wi
 | Ownership transitions, label policy, workspace identity, context bounds, model gates | [domain.ts](../src/domain.ts) | [domain.test.ts](../test/domain.test.ts) |
 | Target scope, source-pane choice, context caching, decision IDs, guarded writes | [service.ts](../src/service.ts) | [service.test.ts](../test/service.test.ts), [reliability.test.ts](../test/reliability.test.ts) |
 | First-request wait for Pi and Claude Code | [service.ts](../src/service.ts) | [agent-startup.test.ts](../test/agent-startup.test.ts) |
+| Native tab lookup, raw-name ownership, terminal context, explicit tab-only writes | [herdr-app.ts](../src/herdr-app.ts) | [herdr-app.test.ts](../test/herdr-app.test.ts), opt-in [herdr-app-live.test.ts](../test/herdr-app-live.test.ts) |
+| Native CLI, event watcher, duplicate ownership and cancellation | [herdr-app-cli.ts](../src/herdr-app-cli.ts) | [herdr-app.test.ts](../test/herdr-app.test.ts), opt-in [herdr-app-live.test.ts](../test/herdr-app-live.test.ts) |
 | Snapshots, socket framing, process info, rename commands, progress markers | [herdr.ts](../src/herdr.ts) | [herdr.test.ts](../test/herdr.test.ts), [progress.test.ts](../test/progress.test.ts), [context.test.ts](../test/context.test.ts) |
 | Bounded Pi and Claude Code session reads | [pi-context.ts](../src/pi-context.ts) | [context.test.ts](../test/context.test.ts) |
 | ANSI removal and best-effort redaction | [text.ts](../src/text.ts) | [domain.test.ts](../test/domain.test.ts) |

@@ -1,0 +1,38 @@
+{
+  "machine": "work-herdr",
+  "scope": "owned scratch only; no provider or terminal screen reads",
+  "tab": "work-herdr/tb8bad00b6b1acf2cd82e1103ecc336dcd",
+  "terminal": "work-herdr/t4",
+  "eventSnapshotKeys": [
+    "channel",
+    "seq",
+    "terminals"
+  ],
+  "remoteRawNameVerified": true,
+  "renameConfirmationMs": 25,
+  "nameObservations": [
+    {
+      "ms": 25,
+      "version": 8,
+      "name": "Remote Route Verified"
+    }
+  ],
+  "documentEventReceived": true,
+  "eventFilter": "none",
+  "scratchTerminalFinished": true,
+  "otherTabNamesUnchanged": true,
+  "originalSelectionRestored": true,
+  "docEvent": {
+    "jsonrpc": "2.0",
+    "method": "event",
+    "params": {
+      "data": {
+        "name": "herdr-app",
+        "version": 7
+      },
+      "machine": "work-herdr",
+      "seq": 264,
+      "type": "doc"
+    }
+  }
+}
