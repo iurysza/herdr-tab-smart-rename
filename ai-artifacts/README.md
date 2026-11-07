@@ -11,6 +11,7 @@ Start with the [architecture overview](ARCHITECTURE.md) to see the running proce
 | How manual labels survive events, concurrent requests, and late results | [Ownership and concurrency](architecture/ownership-and-concurrency.md) |
 | How Direct, Pi, and OpenCode differ, and when setup saves configuration | [Model sources and setup](architecture/model-sources-and-setup.md) |
 | What crosses a trust boundary, which types carry it, and what happens on failure | [Contracts and boundaries](architecture/contracts-and-boundaries.md) |
+| How the native herdr app differs from the daemon plugin | [Native-app backend](architecture/native-herdr-app.md) |
 | Which source file or test to change | [Code and test map](SEMANTIC_MAP.md) |
 
 For a first read, follow the overview, naming flow, then ownership and concurrency. Use the glossary and contract reference for lookup.

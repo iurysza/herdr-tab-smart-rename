@@ -18,7 +18,29 @@ An agent reviewing authentication can show `Review Auth Changes`. A test run can
 https://github.com/user-attachments/assets/0c9d1ff9-58c5-4b87-a505-74fcb62e29b1
 
 
-## Install on macOS or Linux
+## Use the native herdr app
+
+The native herdr app uses `herdr-app` and `hc`, not the older `herdr` daemon. The native app and the Sheprd companion can both be named `Herdr.app`. Check `herdr-app --version` and `hc --version` rather than inferring the product from its bundle name.
+
+From a checkout with dependencies installed, find a local native tab ID with `herdr-app ls`. Pass that ID explicitly:
+
+```sh
+bun src/herdr-app-cli.ts rename-now --tab "$TAB_ID" --config-dir "$CONFIG_DIR"
+```
+
+`CONFIG_DIR` is your existing Smart Rename private model configuration directory. The native entry point reads that selection and prompt without rewriting them. You can also configure Direct through the documented `SMART_RENAME_*` environment variables.
+
+`rename-now` deliberately reclaims a manual tab name. Use `once` to preserve manual names, or `dry-run` to preview eligible changes without writing labels or state. `watch` runs in the foreground until Ctrl+C and preserves manual names:
+
+```sh
+bun src/herdr-app-cli.ts watch --tab "$TAB_ID" --config-dir "$CONFIG_DIR"
+```
+
+The native backend changes only the selected local tab. It leaves space names, pane titles, remote tabs and the daemon worker alone. It uses bounded terminal context, not daemon-owned Pi or Claude transcripts. A model request sends that context to your selected provider. No background service or layout mod is installed.
+
+See [native-app architecture and limits](./ai-artifacts/architecture/native-herdr-app.md) for ownership, state isolation and the remaining manual-edit race.
+
+## Install the daemon plugin on macOS or Linux
 
 You need Herdr 0.7.5+ and Bun 1.2.23+ installed. Pi and OpenCode are optional.
 

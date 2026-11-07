@@ -4,6 +4,12 @@ Smart Rename is a local Herdr plugin executed directly by Bun. A background work
 
 [Knowledge base](README.md) · [Naming glossary](CONTEXT.md) · [Code and test map](SEMANTIC_MAP.md)
 
+## Native herdr app
+
+The native backend is opt-in through [herdr-app-cli.ts](../src/herdr-app-cli.ts). It uses the same naming service with tab-only capabilities and a separate state directory. [herdr-app.ts](../src/herdr-app.ts) discovers native tabs, reads core terminal context and writes names with `herdr-app do tab.rename`. It never sends native IDs to the older daemon.
+
+[Native-app architecture](architecture/native-herdr-app.md) explains explicit targeting, manual names, the event watcher and the live verification. The existing daemon plugin remains the default path described below.
+
 ## Running processes and external systems
 
 ```mermaid

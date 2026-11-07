@@ -1,0 +1,383 @@
+{
+  "slug": "native-tab-rename-design",
+  "title": "Smart Rename reaches the native app",
+  "description": "Native tab naming is implemented and live-tested. Existing installations and layouts are unchanged.",
+  "artifactType": "report",
+  "topics": [
+    "herdr-app",
+    "tab-naming",
+    "runtime-integration",
+    "live-verification"
+  ],
+  "layout": {
+    "type": "default"
+  },
+  "nodes": [
+    {
+      "type": "chapter",
+      "metadata": {
+        "id": "live-result"
+      },
+      "props": {
+        "title": "The tab changes in the real app",
+        "deck": "The actual CLI renamed a native tab through a localhost-only provider.",
+        "takeaway": "The native app needs native IDs and its own rename API."
+      },
+      "children": [
+        {
+          "type": "image",
+          "props": {
+            "src": "before-after.png",
+            "alt": "Real native app, before: Tab Rename Scratch. After: Native Library Works.",
+            "caption": "Top: before the library ran. Bottom: after its native backend completed the rename.",
+            "zoom": true,
+            "aspect": "auto"
+          }
+        },
+        {
+          "type": "callout",
+          "props": {
+            "tone": "note",
+            "title": "The path in the brief named the other app",
+            "body": "The target is `~/Applications/Herdr.app`, bundle `dev.herdr.app` 0.1.13. `/Applications/Herdr.app` is Sheprd, the separate GPUI companion."
+          }
+        },
+        {
+          "type": "prose",
+          "props": {
+            "content": "Phase 1 found the missing connection. Phase 2 adds it on `feat/herdr-app`. These are live screenshots, not UI mockups."
+          }
+        }
+      ]
+    },
+    {
+      "type": "chapter",
+      "metadata": {
+        "id": "runtime-boundary"
+      },
+      "props": {
+        "title": "Two apps, two sets of tab IDs",
+        "deck": "The old plugin was working, but it was talking to a different runtime."
+      },
+      "children": [
+        {
+          "type": "compare",
+          "props": {
+            "mode": "before-after",
+            "left": {
+              "label": "Before: daemon-only",
+              "body": "`src/herdr.ts` asks `herdr api snapshot` for daemon IDs, then sends `herdr tab rename`. A native `tb\u2026` ID returns `tab_not_found`."
+            },
+            "right": {
+              "label": "After: native backend",
+              "body": "`src/herdr-app.ts` reads app topology and core facts. The naming service writes through `herdr-app do tab.rename` with the selected native ID."
+            }
+          }
+        },
+        {
+          "type": "story",
+          "props": {
+            "caption": "One naming policy, with a native read path and native write path. The model suggests text; the service decides whether to use it.",
+            "diagram": {
+              "nodes": [
+                {
+                  "id": "terminal",
+                  "label": "Terminal facts",
+                  "sub": "Read through hc"
+                },
+                {
+                  "id": "backend",
+                  "label": "Native backend",
+                  "sub": "Existing naming policy",
+                  "signal": "new"
+                },
+                {
+                  "id": "provider",
+                  "label": "Provider",
+                  "sub": "Suggest text only"
+                },
+                {
+                  "id": "api",
+                  "label": "Native tab API",
+                  "sub": "Write one selected name",
+                  "signal": "new"
+                }
+              ],
+              "edges": [
+                "terminal -> backend : bounded context",
+                "backend -> provider : request",
+                "provider --> backend : candidate",
+                "backend -> api : guarded rename"
+              ],
+              "layout": "row"
+            },
+            "beats": [
+              {
+                "text": "**Read the right world.** The native client combines app topology, focus and a read-only core document. It collects context from the selected tab only.",
+                "show": [
+                  "terminal",
+                  "backend"
+                ]
+              },
+              {
+                "text": "**Reuse the policy.** The existing naming service asks the selected provider for a candidate. The live test used localhost, not a real provider account.",
+                "show": [
+                  "terminal",
+                  "backend",
+                  "provider"
+                ]
+              },
+              {
+                "text": "**Check again.** After inference, the service rechecks manual ownership and source identity. A changed tab or program invalidates the result.",
+                "show": [
+                  "terminal",
+                  "backend",
+                  "provider"
+                ]
+              },
+              {
+                "text": "**Write through the app.** Only the selected local native tab can change. Spaces, panes and unrelated tabs remain outside the write scope.",
+                "show": [
+                  "terminal",
+                  "backend",
+                  "provider",
+                  "api"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "details",
+          "props": {
+            "summary": "Why OSC titles and Luau mods were not the fix"
+          },
+          "children": [
+            {
+              "type": "prose",
+              "props": {
+                "content": "The current `herdr-t3` layout displays a meaningful terminal title for an unnamed tab. An explicit tab name wins. The stock layout differs, so emitting OSC 0/2 is not a dependable tab-naming API.\n\nSheprd's Luau mods and automations belong to the other app. Native mods are JavaScript, but this implementation needs no mod or layout edits."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "chapter",
+      "metadata": {
+        "id": "manual-ownership"
+      },
+      "props": {
+        "title": "Your later edit wins",
+        "deck": "The live test held the provider response, changed the name, then released the outdated result.",
+        "takeaway": "A candidate is not permission to overwrite a newer choice."
+      },
+      "children": [
+        {
+          "type": "image",
+          "props": {
+            "src": "manual-preserved.png",
+            "alt": "Native tab displaying Keep My Manual Title after a delayed response was discarded",
+            "caption": "The delayed model result did not replace Keep My Manual Title.",
+            "zoom": true,
+            "aspect": "auto"
+          }
+        },
+        {
+          "type": "ledger",
+          "props": {
+            "groups": [
+              {
+                "label": "Verified protections",
+                "signal": "done",
+                "rows": [
+                  {
+                    "title": "Numeric manual names remain manual",
+                    "body": "The live tab named `123` made no provider request during ordinary naming. Raw core names remove the ambiguity of displayed tab numbers."
+                  },
+                  {
+                    "title": "Only the selected tab changes",
+                    "body": "Native writes reject daemon IDs, remote spaces, pane targets and unrelated tabs. The live test compared every other tab name before and after."
+                  },
+                  {
+                    "title": "Changed sources invalidate inference",
+                    "body": "Contained tests cover closed tabs, changed sessions and replaced foreground programs. The service discards their pending results."
+                  },
+                  {
+                    "title": "Provider failure leaves the label alone",
+                    "body": "Invalid local provider output returned exit 1 with no rename. Dry-run tests also confirm no label or state writes."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "chapter",
+      "metadata": {
+        "id": "implementation"
+      },
+      "props": {
+        "title": "The implementation stays narrow",
+        "deck": "Native integration adds a client and an entry point, rather than another naming engine."
+      },
+      "children": [
+        {
+          "type": "steps",
+          "props": {
+            "direction": "column",
+            "caption": "Completed implementation slices on the feature branch.",
+            "items": [
+              {
+                "title": "Native lookup",
+                "body": "App topology plus read-only core names and terminal facts.",
+                "key": true
+              },
+              {
+                "title": "Scoped naming service",
+                "body": "Existing policy, with native tab-only write capabilities."
+              },
+              {
+                "title": "Explicit commands",
+                "body": "once, rename-now, dry-run and a foreground watch command."
+              },
+              {
+                "title": "Separate worker ownership",
+                "body": "Per-target state, a duplicate-watcher lock and clean event shutdown."
+              },
+              {
+                "title": "Live proof",
+                "body": "Actual CLI, native screenshots and a localhost-only provider."
+              }
+            ]
+          }
+        },
+        {
+          "type": "code",
+          "props": {
+            "title": "Use the native entry point from the checkout",
+            "language": "bash",
+            "code": "herdr-app ls\nbun src/herdr-app-cli.ts rename-now \\\n  --tab \"$TAB_ID\" --config-dir \"$CONFIG_DIR\"\nbun src/herdr-app-cli.ts watch \\\n  --tab \"$TAB_ID\" --config-dir \"$CONFIG_DIR\"",
+            "annotations": [
+              {
+                "line": 1,
+                "title": "Choose a native ID",
+                "body": "The target must be a local tb\u2026 ID from herdr-app, never an older w\u2026:t\u2026 daemon ID."
+              },
+              {
+                "line": 2,
+                "end": 3,
+                "title": "Explicitly reclaim this tab",
+                "body": "rename-now can replace a manual name. once preserves it. The configuration directory supplies your existing model selection."
+              },
+              {
+                "line": 4,
+                "end": 5,
+                "title": "Opt-in background behaviour",
+                "body": "watch stays in this foreground process. Ctrl+C releases its lock and event subscription. It installs no login service."
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "chapter",
+      "metadata": {
+        "id": "verification"
+      },
+      "props": {
+        "title": "Verified locally, not rolled out",
+        "deck": "The branch is ready for review; the existing installation has not been repointed.",
+        "takeaway": "The adapter is tested. Enabling it for daily use is a separate step."
+      },
+      "children": [
+        {
+          "type": "ledger",
+          "props": {
+            "groups": [
+              {
+                "label": "Known limits",
+                "signal": "risk",
+                "rows": [
+                  {
+                    "title": "The final write is not atomic",
+                    "body": "The app has no conditional rename argument. A manual edit between the last read and the command can still race. The adapter does not rewrite the whole layout to bypass this."
+                  },
+                  {
+                    "title": "Local tabs only",
+                    "body": "Remote native spaces and native pane-label writes are deliberately unsupported. Native context does not include daemon-owned transcript excerpts."
+                  },
+                  {
+                    "title": "Existing credential scanner self-matches",
+                    "body": "The unchanged main-branch scanner flags its own placeholder URL at byte 964. Required type, lint and contained-test gates pass; this extra scanner check is not reported as passing."
+                  }
+                ]
+              },
+              {
+                "label": "Verified",
+                "signal": "done",
+                "rows": [
+                  {
+                    "title": "171 contained tests pass",
+                    "body": "The isolated suite includes 21 native regressions. Seven separately enabled live integrations remain skipped in that run."
+                  },
+                  {
+                    "title": "Native and daemon live checks pass",
+                    "body": "The native CLI test covers naming, late manual edits, numeric titles, failure cleanup and real watcher startup. The separate daemon manual-label regression also passes."
+                  },
+                  {
+                    "title": "Cleanup is checked, not assumed",
+                    "body": "The scratch tab is closed, its terminal is finished, neighbouring names are unchanged and the original native selection is restored."
+                  }
+                ]
+              },
+              {
+                "label": "Not enabled",
+                "signal": "wait",
+                "rows": [
+                  {
+                    "title": "No global rollout",
+                    "body": "No plugin relink, app mod, login service or agents2 pin changed. The feature requires explicit use of the checkout's native entry point.",
+                    "next": "Any installation or automatic startup needs a separate decision."
+                  },
+                  {
+                    "title": "No real provider-account test",
+                    "body": "The live request path used three localhost fixture responses. No billed request or external terminal-context transfer was made.",
+                    "next": "Choose an approved real-provider smoke test before routine use."
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "details",
+          "props": {
+            "summary": "Exact live receipt and source files"
+          },
+          "children": [
+            {
+              "type": "code",
+              "props": {
+                "title": "Final native live-test receipt",
+                "language": "json",
+                "code": "{\n  \"tab\": \"tbd5f76a57493484a725f35b35e22ab7d0\",\n  \"terminal\": \"t1n\",\n  \"requests\": 3,\n  \"originalTab\": \"tb6028ace04eb84c7bc8d828595e00c04e\",\n  \"restoredTab\": \"tb6028ace04eb84c7bc8d828595e00c04e\",\n  \"scratchClosed\": true,\n  \"scratchTerminalState\": \"finished\",\n  \"otherTabNamesUnchanged\": true,\n  \"provider\": \"localhost fixture only\",\n  \"watcherReady\": true\n}",
+                "lineNumbers": false
+              }
+            },
+            {
+              "type": "prose",
+              "props": {
+                "content": "Source and regression tests:\n\n- [Native client](https://github.com/iurysza/herdr-tab-smart-rename/blob/feat/herdr-app/src/herdr-app.ts)\n- [Native commands and watcher](https://github.com/iurysza/herdr-tab-smart-rename/blob/feat/herdr-app/src/herdr-app-cli.ts)\n- [Contained native tests](https://github.com/iurysza/herdr-tab-smart-rename/blob/feat/herdr-app/test/herdr-app.test.ts)\n- [Opt-in live test](https://github.com/iurysza/herdr-tab-smart-rename/blob/feat/herdr-app/test/herdr-app-live.test.ts)\n- [Runtime contracts and limits](https://github.com/iurysza/herdr-tab-smart-rename/blob/feat/herdr-app/ai-artifacts/architecture/native-herdr-app.md)\n\nWorktree: `~/dev/worktrees/herdr-tab-smart-rename/herdr-app`. Branch: `feat/herdr-app`. Base: fresh main at `d93f0f6`. No PR or merge is part of this work."
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
