@@ -17,7 +17,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.2.23
-      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile --ignore-scripts
       - name: Render the matching installer
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -25,12 +25,13 @@ jobs:
           commit="$(git rev-parse HEAD)"
           bun scripts/check-release-version.ts "$RELEASE_TAG" "$commit"
           mkdir download
-          bun scripts/render-installer.ts "$RELEASE_TAG" "$commit" download/install.sh
+          bun scripts/package-native.ts "$RELEASE_TAG" "$commit" download
+          bun scripts/render-installer.ts "$RELEASE_TAG" "$commit" download/install.sh download/smart-rename-native.tar.gz
           sh -n download/install.sh
-          (cd download && sha256sum install.sh > SHA256SUMS)
-      - name: Attach installer and checksum
+          (cd download && sha256sum install.sh smart-rename-native.tar.gz > SHA256SUMS)
+      - name: Attach installer, native source payload and checksums
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" download/install.sh download/SHA256SUMS
+        run: gh release upload "$RELEASE_TAG" download/install.sh download/SHA256SUMS download/smart-rename-native.tar.gz
