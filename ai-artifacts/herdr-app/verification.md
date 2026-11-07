@@ -1,4 +1,6 @@
-# Native-app verification
+# Phase 2 local native-app verification
+
+This is the local-only checkpoint at `c9ad49f`, not the current remote support matrix. See [remote verification](remote/verification.md) for the extension and current checks.
 
 Verified on 7 November 2026 in `feat/herdr-app`, based on fresh main `d93f0f6`. The native app was version 0.1.13, core was 0.1.18 and Bun was 1.4.2.
 
@@ -52,7 +54,7 @@ Checked the rendered report at 1512 by 945 and 390 by 844. The diagram and scree
 
 ## Checks that are not green
 
-The extra `bun scripts/scan-secrets.ts` check flags `scripts/scan-secrets.ts` itself, at byte 964. Its hard-coded `https://user:password@example.com/path` placeholder matches the scanner. Scanning the unchanged main-branch source reproduces the same finding, and the scanner file matches HEAD byte for byte. No other finding appeared. This pre-existing false positive was not hidden or changed as part of native integration.
+The extra `bun scripts/scan-secrets.ts` check flags `scripts/scan-secrets.ts` itself, at byte 964. Its hard-coded basic-auth example URL matches the scanner. Scanning the unchanged main-branch source reproduces the same finding, and the scanner file matches HEAD byte for byte. No other finding appeared. This pre-existing false positive was not hidden or changed as part of native integration.
 
 The existing report viewer emits React hydration error 418 on reload. The report content, diagram and images render afterward. This is a renderer warning outside the native backend; browser verification is not claimed to have a clean error console.
 

@@ -1,7 +1,7 @@
 {
   "slug": "native-tab-rename-design",
-  "title": "Smart Rename reaches the native app",
-  "description": "Native tab naming is implemented and live-tested. Existing installations and layouts are unchanged.",
+  "title": "Native tab naming: phase 2 local checkpoint",
+  "description": "Historical local-only evidence at c9ad49f. Remote support is verified separately in ai-artifacts/herdr-app/remote/.",
   "artifactType": "report",
   "topics": [
     "herdr-app",

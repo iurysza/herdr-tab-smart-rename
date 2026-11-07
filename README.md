@@ -22,7 +22,7 @@ https://github.com/user-attachments/assets/0c9d1ff9-58c5-4b87-a505-74fcb62e29b1
 
 The native herdr app uses `herdr-app` and `hc`, not the older `herdr` daemon. The native app and the Sheprd companion can both be named `Herdr.app`. Check `herdr-app --version` and `hc --version` rather than inferring the product from its bundle name.
 
-From a checkout with dependencies installed, find a local native tab ID with `herdr-app ls`. Pass that ID explicitly:
+From a checkout with dependencies installed, find a native tab ID with `herdr-app ls`. Pass that ID explicitly. Local IDs look like `tb…`; remote IDs include their machine prefix, such as `workstation/tb…`.
 
 ```sh
 bun src/herdr-app-cli.ts rename-now --tab "$TAB_ID" --config-dir "$CONFIG_DIR"
@@ -36,7 +36,11 @@ bun src/herdr-app-cli.ts rename-now --tab "$TAB_ID" --config-dir "$CONFIG_DIR"
 bun src/herdr-app-cli.ts watch --tab "$TAB_ID" --config-dir "$CONFIG_DIR"
 ```
 
-The native backend changes only the selected local tab. It leaves space names, pane titles, remote tabs and the daemon worker alone. It uses bounded terminal context, not daemon-owned Pi or Claude transcripts. A model request sends that context to your selected provider. No background service or layout mod is installed.
+The native backend changes only the selected tab, locally or on an already-connected remote machine. Keep the full machine prefix for remote targets. Other tabs, space names, pane titles and the daemon worker stay unchanged.
+
+The naming process and provider configuration stay on this computer. Remote targets use the local core's existing connection, not a second Smart Rename installation. A model request sends the selected tab's bounded context to your configured provider. No daemon transcripts, remote credentials, background service or layout mod are installed or copied.
+
+Remote state and locks use the target core's permanent identity. For remote targets, `--state-dir` selects a base directory containing a private `remote/<hash>` subdirectory. Offline targets keep their ownership state; `watch` retries through the existing event subscription and recovery sweep. An alias pointing to a different core requires a restart.
 
 See [native-app architecture and limits](./ai-artifacts/architecture/native-herdr-app.md) for ownership, state isolation and the remaining manual-edit race.
 

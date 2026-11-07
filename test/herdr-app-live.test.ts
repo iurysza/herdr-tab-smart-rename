@@ -1,17 +1,21 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { run } from "../src/herdr.ts";
-import { HerdrAppClient } from "../src/herdr-app.ts";
+import { HerdrAppClient, nativeCommand } from "../src/herdr-app.ts";
 import { watchNative } from "../src/herdr-app-cli.ts";
 
-const live = process.env.SMART_RENAME_NATIVE_LIVE_TEST === "1";
+const remoteLive = process.env.SMART_RENAME_NATIVE_REMOTE_LIVE_TEST === "1";
+
+const live = process.env.SMART_RENAME_NATIVE_LIVE_TEST === "1" || remoteLive;
+
+const machine = remoteLive ? process.env.SMART_RENAME_NATIVE_REMOTE_MACHINE : undefined;
 
 const Topology = z.object({ spaces: z.array(z.object({
-  id: z.string(), tabs: z.array(z.object({
+  id: z.string(), machine: z.string().nullable(), tabs: z.array(z.object({
     id: z.string(), name: z.string(),
     terminals: z.array(z.object({ terminal: z.string(), pane: z.string() })),
   })),
@@ -19,7 +23,8 @@ const Topology = z.object({ spaces: z.array(z.object({
 
 // Opt-in only: creates and closes one native-app tab; no daemon writes,
 // agent launch, real provider request, user config edits or core record deletion.
-test.skipIf(!live)("native CLI renames a real app tab and preserves newer manual edits", async () => {
+test.skipIf(!live)(`native ${remoteLive ? "remote " : ""}CLI renames a real app tab and preserves newer manual edits`, async () => {
+  if (remoteLive && !machine) throw new Error("SMART_RENAME_NATIVE_REMOTE_MACHINE must explicitly select the approved remote machine");
   const directory = await mkdtemp(path.join(os.tmpdir(), "smart-rename-native-live-"));
   const evidence = process.env.SMART_RENAME_NATIVE_EVIDENCE_DIR ?? directory;
 
@@ -27,10 +32,27 @@ test.skipIf(!live)("native CLI renames a real app tab and preserves newer manual
   const app = process.env.HERDR_APP_BIN_PATH || "herdr-app";
   const core = process.env.HC_BIN_PATH || "hc";
 
-  const original = z.object({ space: z.string(), tab: z.string() })
+  const original = z.object({ space: z.string(), tab: z.string(), focused_pane: z.string().nullable().optional() })
     .parse(JSON.parse(await run(app, ["status"])));
 
   const before = Topology.parse(JSON.parse(await run(app, ["ls"])));
+
+  const selectedSpace = machine
+    ? before.spaces.find((space) => space.machine === machine)?.id
+    : (before.spaces.find((space) => space.id === original.space && space.machine === null)
+      ?? before.spaces.find((space) => space.machine === null))?.id;
+
+  assert.ok(selectedSpace, "Approved machine must already have a native-app space");
+
+  if (machine) {
+    const inventory = z.object({ machines: z.array(z.object({ name: z.string(), state: z.string(), temporary: z.boolean().optional() })) })
+      .parse(JSON.parse(await run(core, ["machine", "ls", "--json"])));
+
+    const selected = inventory.machines.find((entry) => entry.name === machine);
+
+    assert.equal(selected?.state, "connected", "Live test must not establish or replace a remote connection");
+    assert.equal(selected?.temporary ?? false, false);
+  }
 
   const names = (topology: z.infer<typeof Topology>, exclude?: string) =>
     topology.spaces.flatMap((space) => space.tabs.flatMap((tab) => tab.id === exclude ? [] : [[tab.id, tab.name]]))
@@ -41,9 +63,38 @@ test.skipIf(!live)("native CLI renames a real app tab and preserves newer manual
   let mode = "success";
   let requests = 0;
   let watcherReady = false;
+  let watcherRenamed = false;
+  let watcherSuggestions = 0;
   const requested = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
   const records: string[] = [];
+  const stopCliChildren: Array<() => Promise<number>> = [];
+
+  const waitForName = async (expected: string) => {
+    const ownedTab = tab;
+
+    assert.ok(ownedTab);
+    const deadline = performance.now() + 10_000;
+    const localId = machine ? ownedTab.slice(machine.length + 1) : ownedTab;
+
+    for (;;) {
+      const response = z.object({ result: z.object({ value: z.object({ spaces: z.array(z.object({
+        tabs: z.array(z.object({ id: z.string(), name: z.string() })),
+      })) }) }) }).parse(JSON.parse(await nativeCommand(process.env)(core, ["connect"], `${JSON.stringify({
+        jsonrpc: "2.0", id: "native-live-name-confirmation", method: "doc.get",
+        params: machine ? { name: "herdr-app", on: machine } : { name: "herdr-app" },
+      })}\n`)));
+
+      const raw = response.result.value.spaces.flatMap((space) => space.tabs).find((item) => item.id === localId)?.name;
+      const topology = Topology.parse(JSON.parse(await run(app, ["ls"])));
+      const shown = topology.spaces.flatMap((space) => space.tabs).find((item) => item.id === ownedTab);
+
+      if (raw === expected && shown && (expected === "" || shown.name === expected)) return;
+
+      if (performance.now() >= deadline) throw new Error("Owned native name did not settle within 10000ms");
+      await Bun.sleep(50);
+    }
+  };
 
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -86,6 +137,12 @@ test.skipIf(!live)("native CLI renames a real app tab and preserves newer manual
       stdout: "pipe", stderr: "pipe",
     });
 
+    stopCliChildren.push(async () => {
+      if (child.exitCode === null) child.kill();
+
+      return child.exited;
+    });
+
     return Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
       .then(([stdout, stderr, exit]) => {
         records.push(JSON.stringify({ action, exit, stdout, stderr }));
@@ -96,11 +153,17 @@ test.skipIf(!live)("native CLI renames a real app tab and preserves newer manual
 
   try {
     const created = z.object({ tab: z.string(), terminal: z.string() }).parse(JSON.parse(await run(app, [
-      "do", "tab.new", JSON.stringify({ name: "Tab Rename Scratch", space: original.space, folder: directory }),
+      "do", "tab.new", JSON.stringify({ name: "Tab Rename Scratch", space: selectedSpace, folder: machine ? "/tmp" : directory }),
     ])));
 
     tab = created.tab;
     terminal = created.terminal;
+
+    if (machine) {
+      assert.ok(tab.startsWith(`${machine}/`));
+      assert.ok(terminal.startsWith(`${machine}/`));
+    }
+
     records.push(JSON.stringify({ created }));
     await run(core, ["send", terminal, "printf 'Native fixture ready\\n'; /bin/cat"]);
     const deadline = performance.now() + 10_000;
@@ -115,6 +178,7 @@ test.skipIf(!live)("native CLI renames a real app tab and preserves newer manual
       if (performance.now() >= deadline) throw new Error("Scratch shell did not reach cat within 10000ms");
     }
 
+    await waitForName("Tab Rename Scratch");
     const initial = await new HerdrAppClient(tab).snapshot();
 
     assert.equal(initial.tabs[0]?.label, "Tab Rename Scratch");
@@ -135,6 +199,7 @@ test.skipIf(!live)("native CLI renames a real app tab and preserves newer manual
     await run(app, ["shot", path.join(evidence, "native-live-after.png")]);
 
     await run(app, ["do", "tab.rename", JSON.stringify({ id: tab, name: "123" })]);
+    await waitForName("123");
     const manual = await launch("once");
 
     assert.equal(manual.exit, 0, manual.stderr);
@@ -148,6 +213,7 @@ test.skipIf(!live)("native CLI renames a real app tab and preserves newer manual
       throw new Error(`Rename exited before the delayed fixture request: ${result.stdout} ${result.stderr}`);
     })]);
     await run(app, ["do", "tab.rename", JSON.stringify({ id: tab, name: "Keep My Manual Title" })]);
+    await waitForName("Keep My Manual Title");
     release.resolve();
     const stale = await pending;
 
@@ -169,15 +235,64 @@ test.skipIf(!live)("native CLI renames a real app tab and preserves newer manual
     const controller = new AbortController();
     const watchState = path.join(directory, "watch-state");
 
-    await watchNative({ tab, stateDir: watchState,
-      namer: { suggest: async () => { throw new Error("Manual native tab must not request inference"); } },
-      onReady: () => { watcherReady = true; controller.abort(); },
-    }, controller.signal);
+    if (machine) {
+      const ready = Promise.withResolvers<void>();
+
+      const watching = watchNative({ tab, stateDir: watchState,
+        namer: { suggest: async () => {
+          watcherSuggestions++;
+
+          return { tab: "Remote Watcher Works", reason: "owned remote fixture only" };
+        } },
+        onReady: () => { watcherReady = true; ready.resolve(); },
+      }, controller.signal);
+
+      try {
+        await Promise.race([ready.promise, watching.then(() => { throw new Error("Remote watcher stopped before readiness"); })]);
+        await run(app, ["do", "tab.rename", JSON.stringify({ id: tab, name: "" })]);
+        await waitForName("");
+        const watchDeadline = performance.now() + 10_000;
+        let label = "";
+        let attempt = 0;
+
+        // Each label change belongs to this scratch terminal and drives a real remote
+        // broker event. Space attempts beyond the watcher's existing 400ms debounce
+        // so the shared two-observation stability gate can settle without a 60s sweep.
+        while (label !== "Remote Watcher Works") {
+          if (performance.now() >= watchDeadline) throw new Error("Remote watcher did not rename the owned tab within 10000ms");
+          await run(core, ["label", terminal, `smart-rename.fixture=watch-${attempt++}`]);
+          await Bun.sleep(500);
+          const current = Topology.parse(JSON.parse(await run(app, ["ls"])));
+
+          label = current.spaces.flatMap((space) => space.tabs).find((item) => item.id === tab)?.name ?? "";
+        }
+
+        await waitForName("Remote Watcher Works");
+        await run(app, ["shot", path.join(evidence, "native-live-watcher.png")]);
+        watcherRenamed = true;
+      } finally {
+        controller.abort();
+        await watching;
+      }
+
+      assert.equal(watcherSuggestions, 1);
+    } else {
+      await watchNative({ tab, stateDir: watchState,
+        namer: { suggest: async () => { throw new Error("Manual native tab must not request inference"); } },
+        onReady: () => { watcherReady = true; controller.abort(); },
+      }, controller.signal);
+    }
+
     assert.equal(watcherReady, true);
-    await assert.rejects(readFile(path.join(watchState, "watch.lock")), /ENOENT/);
-    records.push(JSON.stringify({ nativeWatcher: "ready, cancelled, lock released", watcherReady }));
+    const locks: string[] = [];
+
+    for await (const lock of new Bun.Glob("**/watch.lock").scan({ cwd: watchState, dot: true })) locks.push(lock);
+
+    assert.deepEqual(locks, []);
+    records.push(JSON.stringify({ nativeWatcher: "ready, cancelled, lock released", watcherReady, watcherRenamed, watcherSuggestions }));
   } finally {
     release.resolve();
+    await Promise.all(stopCliChildren.map((stop) => stop()));
     server.stop(true);
 
     await writeFile(path.join(evidence, "native-live-commands.log"), `${records.join("\n")}\n`);
@@ -186,18 +301,28 @@ test.skipIf(!live)("native CLI renames a real app tab and preserves newer manual
 
     // The app acknowledges structural removal before the core finishes killing its shell.
     if (terminal) await run(core, ["wait", terminal, "--timeout", "5", "--json"]);
+    await run(app, ["do", "space.select", JSON.stringify({ id: original.space })]);
+    await run(app, ["do", "tab.select", JSON.stringify({ id: original.tab })]);
+
+    if (original.focused_pane) await run(app, ["do", "pane.focus", JSON.stringify({ pane: original.focused_pane })]);
     const afterCleanup = Topology.parse(JSON.parse(await run(app, ["ls"])));
 
     assert.deepEqual(names(afterCleanup), names(before));
-    const selected = z.object({ tab: z.string() }).parse(JSON.parse(await run(app, ["status"])));
 
+    const selected = z.object({ space: z.string(), tab: z.string(), focused_pane: z.string().nullable().optional() })
+      .parse(JSON.parse(await run(app, ["status"])));
+
+    assert.equal(selected.space, original.space);
     assert.equal(selected.tab, original.tab);
+
+    if (original.focused_pane) assert.equal(selected.focused_pane, original.focused_pane);
     const finished = terminal ? z.object({ state: z.string() }).parse(JSON.parse(await run(core, ["get", terminal, "--json"]))) : undefined;
 
     if (finished) assert.equal(finished.state, "finished");
 
-    const proof = { tab, terminal, requests, originalTab: original.tab, restoredTab: selected.tab,
+    const proof = { machine: machine ?? null, tab, terminal, requests, watcherRenamed, watcherSuggestions, originalTab: original.tab, restoredTab: selected.tab,
       scratchClosed: true, scratchTerminalState: finished?.state, otherTabNamesUnchanged: true,
+      originalPane: original.focused_pane, restoredPane: selected.focused_pane,
       provider: "localhost fixture only", watcherReady, evidence };
 
     await writeFile(path.join(evidence, "native-live-proof.json"), `${JSON.stringify(proof, null, 2)}\n`);

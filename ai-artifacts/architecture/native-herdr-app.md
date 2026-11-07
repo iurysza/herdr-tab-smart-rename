@@ -2,38 +2,58 @@
 
 The native backend connects Smart Rename to `herdr-app` and `hc`. It does not use the older `herdr` daemon or Sheprd. The native app and Sheprd can both be installed as `Herdr.app`, so executable identity matters more than the bundle filename.
 
-## Naming flow
+## Target and machine routing
 
-`src/herdr-app-cli.ts` requires an explicit local native tab ID. It never falls back to inherited daemon IDs or whichever tab the user has focused. The client in `src/herdr-app.ts` combines the app's topology and focus with a read-only `doc.get` RPC through `hc connect`.
+`src/herdr-app-cli.ts` requires an explicit native tab ID. Local targets use a bare ID such as `tb…`. Remote targets use the full app ID, such as `workstation/tb…`. The CLI never falls back to inherited daemon IDs or the focused tab.
 
-The app's public tab list reports a number for an unnamed tab but omits its `named` flag. The versioned core document provides the raw name. An empty raw name means unnamed. A nonempty raw name is explicit, even when it is numeric. If the app's topology and core document disagree, lookup fails without writing anything.
+`HerdrAppClient` combines app topology and focus with a read-only `doc.get` RPC through `hc connect`. For a remote target, the request includes `params.on` with the machine name. Each machine owns its own `herdr-app` layout document. Smart Rename never calls `doc.set`.
 
-Only the selected tab's terminals supply context. Foreground process facts come from `hc get`. The focused terminal contributes its last 12 screen lines, bounded and sanitized using the existing context policy. Sibling terminals contribute process facts without screen reads. Native naming does not read daemon transcript references or change terminal titles.
+App IDs and core terminal addresses retain their machine prefix. Raw layout IDs and terminal ownership labels are bare. The client removes only the verified machine prefix for those comparisons. It rejects placements that belong to another machine.
 
-`AutoNameService` keeps the existing model sources, context rules, ownership records, retry limits and stale-result checks. Native composition permits only tab targets and disables waiting for unavailable daemon transcript context. The client writes with explicit-ID `herdr-app do tab.rename` arguments. It rejects pane, space, remote and unrelated-tab writes.
+The public app list displays a number for an unnamed tab and omits its `named` flag. The core document provides the raw name. An empty name means unnamed. Every nonempty name is explicit, including a numeric name. A remote app/document mismatch is temporarily unavailable, not a closed tab.
 
-## State and manual names
+## Context and naming
 
-Default state lives below `$XDG_STATE_HOME/herdr-tab-smart-rename/native`, or `~/.local/state/herdr-tab-smart-rename/native`. The directory key includes the app home, core session and selected tab ID. It does not reuse the daemon plugin's state directory. `--state-dir` can select another private directory for this target. Do not share an override between unrelated targets.
+Only the selected tab's terminals supply context. `hc get` provides foreground process facts. The chosen terminal contributes its last 12 screen lines, bounded and sanitized with the existing policy. Sibling terminals contribute process facts without screen reads.
 
-`once` and `watch` preserve explicit manual names. An explicitly cleared native name releases manual ownership. `rename-now` deliberately reclaims only its selected tab. `dry-run` previews eligible changes without persisting state or writing names.
+Remote context uses qualified terminal addresses through the local core broker. Remote folders are never passed to local Git. Native context does not resolve daemon transcript references, load local transcripts for remote paths or change terminal titles.
 
-A native terminal's identity includes its address, creation time, Pi session label and foreground command. Results from closed tabs, replaced programs or changed sessions are discarded. Manual edits observed after inference win over late results.
+The naming process and provider configuration remain local. Remote terminal context reaches the provider selected here, not an account configured on the remote machine. `AutoNameService` keeps the existing context rules, ownership records, retry limits and stale-result checks. Native composition permits only the selected tab target.
 
-The native rename API has no conditional-write argument. An edit between the final snapshot and rename command can still race, as with the daemon backend. The adapter does not bypass that limitation by rewriting the native layout document.
+## State and core identity
+
+Default state lives below `$XDG_STATE_HOME/herdr-tab-smart-rename/native`, or `~/.local/state/herdr-tab-smart-rename/native`. The base directory key includes app home, local core session and selected tab ID. Local targets keep that directory unchanged.
+
+For remote targets, `createNativeService` resolves the machine's permanent core ID and remote session before choosing state paths. State and locks live in `<base>/remote/<hash>`. The hash also includes app home, local core session and the full tab ID. An explicit `--state-dir` is a base directory for remote targets. Do not share a local override between unrelated local targets.
+
+`createNativeService` is asynchronous and returns `{ service, target, stateDir }`. Both one-shot and watcher composition use the resolved directory. Direct callers must await composition and use its returned service.
+
+A known paired machine can bind while offline. Every usable snapshot verifies that the alias still points to the bound core and session. A replacement core stops the service rather than inheriting ownership. Restarting resolves a separate namespace. Terminal identity hashes also include creation time, Pi session and foreground arguments; raw command arguments are not stored as identity.
+
+`once` and `watch` preserve manual names. Clearing a native name releases manual ownership. `rename-now` deliberately reclaims only its selected tab. `dry-run` previews eligible changes without persisting state or names.
+
+## Write confirmation
+
+The client writes with explicit-ID `herdr-app do tab.rename`. The app can acknowledge before the owning core persists the name, so the client confirms the raw name on the bound core. It sends one write, never a blind retry. A different name during confirmation wins over the pending suggestion.
+
+Confirmation uses the existing 10-second command tripwire. A late write after that deadline can appear manual on the next run because failure restores prior ownership. This favours preserving names over reclaiming uncertain writes.
+
+The API has no conditional rename. A manual edit or alias change between the last verification and the app command can still race. The adapter does not rewrite the whole layout to work around that limit.
 
 ## Foreground watcher
 
-`watch` owns one lock in the selected target's private state directory. A second watcher using the same state directory fails instead of becoming another writer. The process reports readiness after receiving a complete core snapshot.
+`watch` owns a lock beside its resolved state. A second watcher for the same namespace fails. Readiness follows the initial core snapshot.
 
-Core events trigger a debounced reevaluation of that tab. A 60-second sweep covers quiet command context and missed changes, matching the existing daemon worker cadence. The naming service still applies rate and retry rules. Closing the tab stops the watcher with an explicit unavailable-target error. Ctrl+C or SIGTERM closes its event subscription, releases its lock and leaves the app and core running.
+The existing unfiltered `hc events --json` subscription carries local and remote changes. Remote document notifications include `params.machine`. A terminal filter omits document events, so the watcher does not use one. Events trigger debounced reevaluation; a 60-second sweep covers quiet context and missed changes.
 
-The watcher is a foreground command, not an installed login service. There is no global rollout, auto-registration or native layout change. Remote native spaces are not supported by this first backend.
+A reported remote outage preserves state and keeps the broker subscription alive. This includes a confirmed disconnect between snapshot verification and terminal lookup. Unknown machines, unsupported core versions and changed core identities are explicit failures. A broken local broker event stream remains fatal; the CLI is not a service supervisor.
+
+Closing the target stops its watcher. Ctrl+C or SIGTERM closes the subscription and releases the lock. No login service, global rollout, native layout change or remote agent installation is part of this backend.
 
 ## Verification
 
-`test/herdr-app.test.ts` covers routing, explicit names including numeric names, stale inference, focused-agent selection in split tabs, bounded context, unavailable runtimes, provider errors, dry runs, event reevaluation, duplicate watcher ownership and cancellation. Its command runner is injected, so contained tests cannot reach the real app.
+`test/herdr-app.test.ts` mocks command boundaries. It covers machine routing, raw-name ownership, identity replacement, transient outages, write confirmation, state isolation, bounded context, local Git exclusion and watcher lifecycle.
 
-The opt-in `test/herdr-app-live.test.ts` runs the real native CLI with a localhost fake provider. It checks a visible rename, manual numeric protection, a manual edit during inference, invalid provider output, unchanged neighbouring names, restored focus and completed scratch-terminal shutdown. It captures actual app frames with `herdr-app shot`.
+`test/herdr-app-live.test.ts` is opt-in. Local mode checks the real CLI with a localhost fake provider. Remote mode additionally selects an already-connected machine and proves a watcher rename after real remote events. Both modes preserve other names, restore selection and wait for scratch-terminal shutdown.
 
-A local fixture proves the integration path without testing a real provider account. The phase 2 screenshots and sanitized command results live in `ai-artifacts/herdr-app/`. The designed web report is generated from the report spec there. No native app deployment, external provider request or service installation is implied by these checks.
+The local-only phase 2 receipts remain in `ai-artifacts/herdr-app/`. Current remote receipts and verification live in `ai-artifacts/herdr-app/remote/`. Real provider accounts and deliberate shared-connection outages are outside these tests.

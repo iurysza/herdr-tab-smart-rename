@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { createNativeService, type NativeServiceOptions } from "./herdr-app.ts";
+import { createNativeService, isTransientNativeError, nativeAppHome, parseNativeTarget, type NativeServiceOptions } from "./herdr-app.ts";
 import { acquireLock, ensurePrivateDir } from "./storage.ts";
 import { sanitizeText } from "./text.ts";
 
@@ -22,12 +22,16 @@ export function nativeOptions(args: string[], env: NodeJS.ProcessEnv = process.e
   const tab = values.tab;
 
   if (!command || positionals.length !== 1 || !["once", "rename-now", "dry-run", "watch"].includes(command) || !tab)
-    throw new Error("usage: herdr-app-cli.ts once|rename-now|dry-run|watch --tab <local-native-tab-id> [--state-dir PATH] [--config-dir PATH]");
+    throw new Error("usage: herdr-app-cli.ts once|rename-now|dry-run|watch --tab <tbN|machine/tbN> [--state-dir PATH] [--config-dir PATH]");
 
-  if (!/^tb[\da-f]+$/.test(tab)) throw new Error("--tab must name a local native tab, not a daemon or remote tab");
+  try {
+    parseNativeTarget(tab);
+  } catch {
+    throw new Error("--tab must name a native tab (tbN or machine/tbN), not a daemon tab");
+  }
 
   const identity = createHash("sha256")
-    .update(JSON.stringify([env.HERDR_APP_HOME ?? path.join(env.HOME ?? os.homedir(), ".config/herdr-app"), env.HC_SESSION ?? "default", tab]))
+    .update(JSON.stringify([nativeAppHome(env), env.HC_SESSION ?? "default", tab]))
     .digest("hex").slice(0, 16);
 
   const stateDir = values["state-dir"] ?? path.join(
@@ -43,8 +47,7 @@ export function nativeOptions(args: string[], env: NodeJS.ProcessEnv = process.e
 }
 
 export async function runNativeOnce(options: NativeServiceOptions, reclaim = false) {
-  if (!options.dryRun) await ensurePrivateDir(options.stateDir);
-  const service = createNativeService(options);
+  const { service } = await createNativeService(options);
 
   try {
     const result = await service.evaluate(options.tab, reclaim
@@ -64,9 +67,11 @@ export interface NativeWatchOptions extends NativeServiceOptions {
 }
 
 export async function watchNative(options: NativeWatchOptions, signal: AbortSignal): Promise<void> {
-  await ensurePrivateDir(options.stateDir);
-  const release = await acquireLock(path.join(options.stateDir, "watch.lock"), { timeoutMs: 0 });
-  const service = createNativeService(options);
+  // Binding resolves the core-scoped namespace, so the watch lock lives beside its state.
+  const { service, stateDir } = await createNativeService(options);
+
+  let release = async () => {};
+
   let stopEvents = () => {};
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -79,7 +84,17 @@ export async function watchNative(options: NativeWatchOptions, signal: AbortSign
     work = work.then(async () => {
       if (!pending || signal.aborted) return;
       pending = false;
-      const result = await service.evaluate(options.tab);
+      let result;
+
+      try {
+        result = await service.evaluate(options.tab);
+      } catch (error) {
+        if (!(error instanceof Error) || !isTransientNativeError(error)) throw error;
+        // Offline remote: keep state, wait for the next event or recovery sweep.
+        console.error(`Smart Rename native watcher: ${sanitizeText(error.message)}`);
+
+        return;
+      }
 
       if (!result) throw new Error(`Native tab ${options.tab} is closed or unavailable`);
 
@@ -104,7 +119,11 @@ export async function watchNative(options: NativeWatchOptions, signal: AbortSign
   };
 
   try {
-    await service.initialize();
+    await ensurePrivateDir(stateDir);
+    release = await acquireLock(path.join(stateDir, "watch.lock"), { timeoutMs: 0 });
+    await service.initialize().catch((error: Error) => {
+      if (!isTransientNativeError(error)) throw error;
+    });
     evaluate();
     await work;
 
