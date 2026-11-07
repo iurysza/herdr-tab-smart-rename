@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import { z } from "zod";
 import { runNativeSetup, runSetup, type SetupPrompts } from "../src/setup.ts";
 import { renderKeybindingGuidance } from "../src/setup-plan.ts";
@@ -388,6 +389,7 @@ test("Direct wizard derives DeepSeek suggestions from its provider profile", asy
 test("native wizard resolves private config and skips daemon keybindings and start hooks", async () => {
   const ui = scriptedPrompts(["pi", "anthropic", "claude", "high", true]);
   const saved: string[] = [];
+  const configDirectory = path.join("/native-config", "herdr-tab-smart-rename", "native");
 
   const result = await runNativeSetup({ HOME: "/test-home", XDG_CONFIG_HOME: "/native-config", HERDR_BIN_PATH: "/never-run-daemon" }, {
     prompts: ui.prompts,
@@ -396,14 +398,14 @@ test("native wizard resolves private config and skips daemon keybindings and sta
     saveSelection: async (directory) => { saved.push(directory); },
     inspectKeybindings: async () => { throw new Error("native setup must not inspect daemon keybindings"); },
     validate: async (env) => {
-      assert.equal(env.HERDR_PLUGIN_CONFIG_DIR, "/native-config/herdr-tab-smart-rename/native");
+      assert.equal(env.HERDR_PLUGIN_CONFIG_DIR, configDirectory);
 
       return "validated";
     },
   });
 
   assert.equal(result.saved, true);
-  assert.deepEqual(saved, ["/native-config/herdr-tab-smart-rename/native"]);
+  assert.deepEqual(saved, [configDirectory]);
   assert.equal(ui.calls.filter((call) => call.kind === "confirm").length, 1);
   assert.ok(ui.summaries.every((summary) => !summary.includes("Keybinding")));
 });

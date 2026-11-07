@@ -231,7 +231,11 @@ test("one supervisor discovers local, remote and new tabs while preserving manua
     assert.equal(health.pid, process.pid);
     assert.equal(health.managedTabs, 4);
     assert.ok(Number.isFinite(Date.parse(health.updatedAt)));
-    assert.equal((await stat(path.join(f.options.runtimeDir, "status.json"))).mode & 0o777, 0o600);
+
+    if (process.platform !== "win32") {
+      assert.equal((await stat(path.join(f.options.runtimeDir, "status.json"))).mode & 0o777, 0o600);
+    }
+
     assert.equal(f.subscriptions, 1);
     assert.equal(f.maximumStreams, 1);
     await assert.rejects(readFile(path.join(f.options.runtimeDir, "state.json")), /ENOENT/);

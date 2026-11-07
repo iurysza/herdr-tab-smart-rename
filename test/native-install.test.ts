@@ -1,4 +1,8 @@
-import { test } from "bun:test";
+import { test as bunTest } from "bun:test";
+
+// LaunchAgents, POSIX artifact modes and the shell wrapper are macOS contracts.
+const test = process.platform === "win32" ? bunTest.skip : bunTest;
+
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, readlink, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -493,7 +497,7 @@ test("redirected config and runtime directories are refused without touching the
   }
 });
 
-test.skipIf(process.platform === "win32")("installed wrapper dispatches status through the runner with a clean environment", async () => {
+test("installed wrapper dispatches status through the runner with a clean environment", async () => {
   const f = await fixture();
   const configDir = path.join(f.root, "private config 'quoted'");
 

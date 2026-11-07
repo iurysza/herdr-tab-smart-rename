@@ -69,7 +69,10 @@ test("native installer rendering embeds the archive checksum and a trusted extra
     assert.match(text, /unsafe or unsupported archive entry/);
     assert.match(text, /release identity mismatch/);
     assert.doesNotMatch(text, /__NATIVE_PAYLOAD_/);
-    const syntax = Bun.spawn(["/bin/sh", "-n", installer], { stdout: "pipe", stderr: "pipe" });
-    assert.equal(await syntax.exited, 0, await new Response(syntax.stderr).text());
+
+    if (process.platform !== "win32") {
+      const syntax = Bun.spawn(["/bin/sh", "-n", installer], { stdout: "pipe", stderr: "pipe" });
+      assert.equal(await syntax.exited, 0, await new Response(syntax.stderr).text());
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -103,7 +103,10 @@ test("native payload allowlists source and required assets, excluding credential
     assert.equal(again.sha256, packaged.sha256);
     const verified = await verify(f.root, archive);
     assert.equal(verified.exitCode, 0, verified.stderr);
-    assert.equal((await stat(path.join(verified.destination, "src/run-bun.sh"))).mode & 0o777, 0o755);
+
+    if (process.platform !== "win32") {
+      assert.equal((await stat(path.join(verified.destination, "src/run-bun.sh"))).mode & 0o777, 0o755);
+    }
   } finally { await f.cleanup(); }
 });
 
