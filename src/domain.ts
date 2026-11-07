@@ -75,10 +75,10 @@ export type NamingContext =
       siblingPanes?: SiblingEvidence[];
     };
 
-export interface NameSuggestion {
-  tab: string | null;
-  reason: string;
-}
+// Discarded answers are not abstentions and must not consume a model attempt.
+export type NameSuggestion =
+  | { tab: string | null; reason: string; discarded?: false }
+  | { tab: null; reason: string; discarded: true };
 
 export interface RenameChange {
   kind: "workspace" | "tab" | "pane";
@@ -272,19 +272,17 @@ export function titleCase(input: unknown): string {
     .join(" ");
 }
 
+// Script extensions retain combining accents used with Latin letters.
+// The label grammar separately restricts ASCII punctuation and word shape.
+export function usesLatinScript(label: string): boolean {
+  return /^[\p{Script_Extensions=Latin}\p{ASCII}]*$/u.test(label);
+}
+
 export function validateTabLabel(label: unknown): label is string {
   if (/[\r\n]/.test(String(label ?? ""))) return false;
   const value = sanitizeText(label);
 
-  if (!value || value.length > MAX_TAB_LENGTH) return false;
-
-  if (/\p{Script=Han}/u.test(value)) {
-    if (value.length < 2) return false;
-
-    return /^[\p{Script=Han}A-Za-z0-9][\p{Script=Han}A-Za-z0-9\s+.#/'-_&·]*[\p{Script=Han}A-Za-z0-9+]$/u.test(
-      value,
-    );
-  }
+  if (!value || value.length > MAX_TAB_LENGTH || !usesLatinScript(value)) return false;
 
   const words = value.split(/\s+/);
   // Connectors do not count toward the four-word cap: Romance and Germanic

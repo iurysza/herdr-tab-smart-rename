@@ -8,6 +8,7 @@ import { nativeOptions, runNativeOnce, watchNative } from "../src/herdr-app-cli.
 import { gitRoot } from "../src/herdr.ts";
 import { type Namer } from "../src/provider.ts";
 import { type NamingContext } from "../src/domain.ts";
+import { loadState, statePaths } from "../src/storage.ts";
 
 interface FixtureState {
   name: string;
@@ -226,6 +227,57 @@ for (const change of ["manual", "closed", "program", "session"] as const) {
       if (change === "manual") assert.equal(f.state.name, "New Manual Choice");
     } finally { await service.close(); await f.cleanup(); }
   });
+}
+
+for (const remote of [null, "work"]) {
+  for (const change of ["manual", "numeric", "closed"] as const) {
+    test(`${remote ?? "local"} refuses ${change} changes during the final document read`, async () => {
+      const f = await fixture("", remote);
+      let answered = false;
+      let readsAfterAnswer = 0;
+      f.state.beforeSuggestion = async () => { answered = true; };
+
+      const command: NativeCommand = async (program, args, input) => {
+        if (args[0] === "connect" && answered && ++readsAfterAnswer === 2) {
+          if (change === "closed") f.state.closed = true;
+          else f.state.name = change === "numeric" ? "1" : "My Manual Name";
+        }
+
+        return f.command(program, args, input);
+      };
+
+      const native = await createNativeService({ ...f.options, command });
+      const paths = statePaths(native.stateDir);
+
+      try {
+        const result = await native.service.evaluate(f.q("tb1"), { forceModel: true });
+        const state = await loadState(paths.state);
+
+        assert.equal(f.state.writes, 0);
+        assert.equal(readsAfterAnswer, 2);
+        assert.deepEqual(result?.changes, []);
+        assert.equal(result?.candidate.tab, null);
+        assert.equal(result?.outcomes?.[0]?.status, "skipped");
+        assert.match(result?.reason ?? "", /changed|closed/);
+        assert.equal(state.modelAttempts[f.q("tb1")], undefined);
+        assert.equal(state.retries[f.q("tb1")], undefined);
+        assert.equal(state.fingerprints[f.q("tb1")], undefined);
+        assert.equal(state.tabs[f.q("tb1")]?.expectedLabel, undefined);
+
+        const next = await native.service.evaluate(f.q("tb1"));
+        assert.equal(f.state.providerCalls, 1);
+        assert.equal(f.state.writes, 0);
+
+        if (change === "closed") {
+          assert.equal(next, null);
+        } else {
+          assert.equal(f.state.name, change === "numeric" ? "1" : "My Manual Name");
+          assert.equal(next?.reason, "manual tab ownership");
+          assert.equal((await loadState(paths.state)).tabs[f.q("tb1")]?.manual, true);
+        }
+      } finally { await native.service.close(); await f.cleanup(); }
+    });
+  }
 }
 
 test("a cleared native name releases manual ownership", async () => {

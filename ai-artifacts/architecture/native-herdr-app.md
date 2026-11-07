@@ -36,11 +36,13 @@ A known paired machine can bind while offline. Every usable snapshot verifies th
 
 ## Write confirmation
 
-The client writes with explicit-ID `herdr-app do tab.rename`. The app can acknowledge before the owning core persists the name, so the client confirms the raw name on the bound core. It sends one write, never a blind retry. A different name during confirmation wins over the pending suggestion.
+The service passes the raw tab name from its final ownership snapshot into the native rename adapter. The adapter compares its fresh document read with that exact name, including an empty cleared name rather than its displayed tab number. A changed name or missing tab produces a typed skipped result without issuing a write. The service restores prior ownership, releases the model attempt, and leaves reconciliation to protect the newer manual name on the next evaluation.
+
+If the name still matches, the client writes with explicit-ID `herdr-app do tab.rename`. The app can acknowledge before the owning core persists the name, so the client confirms the raw name on the bound core. It sends one write, never a blind retry. A different name during confirmation wins over the pending suggestion. Local and remote final-read races, numeric manual names, closure, and existing confirmation checks are covered in [native tests](../../test/herdr-app.test.ts).
 
 Confirmation uses the existing 10-second command tripwire. A late write after that deadline can appear manual on the next run because failure restores prior ownership. This favours preserving names over reclaiming uncertain writes.
 
-The API has no conditional rename. A manual edit or alias change between the last verification and the app command can still race. The adapter does not rewrite the whole layout to work around that limit.
+The command inventory exposes only `id` and `name` for `tab.rename`, with no conditional rename. A manual edit or alias change after the final read and verification but before the app command can still race. The adapter does not rewrite the whole layout to work around that limit.
 
 ## Foreground watcher
 

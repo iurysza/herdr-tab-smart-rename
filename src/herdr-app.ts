@@ -429,7 +429,7 @@ export class HerdrAppClient {
     };
   }
 
-  async rename(kind: "workspace" | "tab" | "pane", id: string, label: string): Promise<void> {
+  async rename(kind: "workspace" | "tab" | "pane", id: string, label: string, expectedName?: string): ReturnType<ServiceDependencies["rename"]> {
     if (kind !== "tab" || id !== this.target.id)
       throw new Error("Native naming can only write its explicitly selected tab");
     const binding = await this.bind();
@@ -439,6 +439,12 @@ export class HerdrAppClient {
     const before = this.storedTab(await this.document(binding))?.name;
 
     await this.verify(binding);
+
+    if (before === undefined) return { status: "skipped", reason: "native tab closed before write" };
+
+    if (expectedName === undefined || before !== expectedName)
+      return { status: "skipped", reason: "native tab name changed before write" };
+
     z.object({ ok: z.literal(true) }).parse(JSON.parse(
       await this.#command(this.#app, ["do", "tab.rename", JSON.stringify({ id, name: label })]),
     ));
@@ -471,7 +477,7 @@ export class HerdrAppClient {
       gitRoot: this.target.machine === null ? gitRoot : async () => null,
       focusedPaneContext: (pane) => this.context(pane, true),
       siblingPaneContext: (pane) => this.context(pane, false),
-      rename: (kind, id, label) => this.rename(kind, id, label),
+      rename: (kind, id, label, _env, expectedName) => this.rename(kind, id, label, expectedName),
     };
   }
 }

@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { type NameSuggestion, validateTabLabel } from "../domain.ts";
+import { type NameSuggestion, usesLatinScript, validateTabLabel } from "../domain.ts";
 import { sanitizeText } from "../text.ts";
 import { ModelOutputError } from "./errors.ts";
 
@@ -16,9 +16,9 @@ const ModelOutputFromJson = Schema.fromJsonString(ModelOutput);
  * Parse a raw model response into a validated {@link NameSuggestion}.
  *
  * Strips an optional Markdown JSON fence, decodes the JSON with Schema at the
- * untrusted boundary, and enforces the label policy. Failures are surfaced as a
- * tagged {@link ModelOutputError} rather than thrown, so callers compose them
- * with Effect's error channel.
+ * untrusted boundary, and enforces the label policy. Non-Latin labels produce
+ * discarded suggestions. Other failures use a tagged {@link ModelOutputError}
+ * so callers compose them with Effect's error channel.
  */
 export function decodeSuggestion(
   text: string,
@@ -37,6 +37,12 @@ export function decodeSuggestion(
       return { tab: null, reason: sanitizeText(output.reason) };
     }
 
+    const label = sanitizeText(output.tab);
+
+    if (!usesLatinScript(label)) {
+      return { tab: null, reason: "non-Latin characters in model label", discarded: true };
+    }
+
     if (!validateTabLabel(output.tab)) {
       return yield* Effect.fail(
         new ModelOutputError({
@@ -45,6 +51,6 @@ export function decodeSuggestion(
       );
     }
 
-    return { tab: sanitizeText(output.tab), reason: sanitizeText(output.reason) };
+    return { tab: label, reason: sanitizeText(output.reason) };
   });
 }

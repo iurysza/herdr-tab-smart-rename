@@ -54,7 +54,8 @@ flowchart TD
     Model --> Decode["Decode and validate suggestion"]
     Decode -->|label| Candidate
     Decode -->|null label| Decline["Record abstention, retain label"]
-    Decode -->|invalid response| Failure["Record failure and retry delay"]
+    Decode -->|non-Latin label| Script["Discard label and release attempt"]
+    Decode -->|other invalid response| Failure["Record failure and retry delay"]
     Candidate --> Recheck["Final stale-result checks"]
     Recheck -->|still current| Write["Apply candidate or report unchanged"]
     Recheck -->|stale| Discard["Discard result"]
@@ -73,6 +74,8 @@ For non-agent process context, `observeStableContext` requires the same context 
 | Valid abstention | Only after the context changes; process context also needs its cooldown |
 | Failed call for the same session | At the recorded retry time; exponential delay starts at 30 seconds and caps at ten minutes |
 | Explicit refresh or `forceModel` | Bypasses these gates, but not final ownership and stale-result checks |
+
+The bundled naming prompt requests English labels. A custom naming prompt still replaces it. The shared decoder accepts Latin-script letters and combining accents with the existing ASCII punctuation and word rules, so valid accented labels remain possible under a custom policy. Non-Latin output is discarded before it can become an abstention or request failure. The service restores the previous attempt timestamp, or removes the new one, without adding a cooldown or retry record. [Language regressions](../../test/language.test.ts) exercise Direct, Pi, and OpenCode through real parsing with fake completions.
 
 A successful model label records the context fingerprint and the named session. Unchanged successful context normally produces no new call. State tracks the last eight named sessions per target. Workspace and deterministic labels do not consume model attempts.
 

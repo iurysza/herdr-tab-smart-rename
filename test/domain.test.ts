@@ -118,14 +118,20 @@ test("label, workspace, and process policy stays deterministic", () => {
     ["Prüfen der Änderungen", true],
     ["Verbindung mit dem Server", true],
     ["ǅungla Test", true],
-    ["Исправить Сессию", true],
+    ["Café Ação", true],
+    ["Fix C++ API", true],
+    ["Исправить Сессию", false],
+    ["Διόρθωση Σύνδεσης", false],
+    ["Fix Аuth", false],
+    ["Review A\u093e", false],
     ["로그인 수정", false],
-    ["修复认证问题", true],
-    ["同步主分支", true],
-    ["清理系统进程", true],
-    ["修复 MCP 故障", true],
-    ["构建 C++ 模块", true],
-    ["测试", true],
+    ["修复认证问题", false],
+    ["同步主分支", false],
+    ["清理系统进程", false],
+    ["修复 MCP 故障", false],
+    ["构建 C++ 模块", false],
+    ["测试", false],
+    ["ログイン 修正", false],
     ["测", false],
     ["这是一串超级超级长长长长长长长长长长长长长长长长长长长长长的标题", false],
   ] as const) {
@@ -133,6 +139,7 @@ test("label, workspace, and process policy stays deterministic", () => {
   }
 
   const policy = readFileSync(new URL("../docs/naming-policy.md", import.meta.url), "utf8");
+  assert.match(policy, /write the label in English/i);
   const listed = policy.match(/<!-- connectors -->(.*?)<!-- \/connectors -->/)?.[1];
   assert.deepEqual(listed?.split(", "), [...LABEL_CONNECTORS]);
 

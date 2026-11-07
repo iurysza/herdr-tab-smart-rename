@@ -18,10 +18,9 @@ export type NamingContext =
 		siblingPanes?: SiblingEvidence[];
 	};
 
-export interface NameSuggestion {
-	tab: string | null;
-	reason: string;
-}
+export type NameSuggestion =
+	| { tab: string | null; reason: string; discarded?: false }
+	| { tab: null; reason: string; discarded: true };
 
 export interface RenameOutcome {
 	kind: RenameChange["kind"];
@@ -44,7 +43,7 @@ export interface Namer {
 }
 ```
 
-Rejected promises represent inference failures. `{ tab: null, reason }` represents an abstention. The service converts target-level failures into `RenameOutcome` records and continues with other targets.
+Rejected promises represent inference failures. `{ tab: null, reason }` represents an abstention. A non-Latin model label instead produces `{ tab: null, reason, discarded: true }`. The service skips it and releases the claimed attempt without recording an abstention or failure backoff. The decoder sets this flag; it is not part of the model's JSON contract. The service converts target-level failures into `RenameOutcome` records and continues with other targets.
 
 ## Model adapter contract
 
@@ -93,11 +92,11 @@ Direct implements the discovery interface for setup, but the naming router deleg
 | Session path or Claude session ID | Resolve a unique permitted file, canonicalize path, require a regular file under allowed roots | Missing, ambiguous, or disallowed paths yield no session evidence | [pi-context.ts](../../src/pi-context.ts), [context tests](../../test/context.test.ts) |
 | Session JSONL | Bounded head, middle, and tail reads; user-record schemas; wrapper filtering | Invalid individual records are skipped | [pi-context.ts](../../src/pi-context.ts) |
 | Model context | `buildModelContext`, `boundedText`, hard serialized-size check | Throws if reduced context still exceeds the hard cap | [domain.ts](../../src/domain.ts), [domain tests](../../test/domain.test.ts) |
-| Model response | Optional fence extraction, Effect Schema JSON decoding, label validation | `ModelOutputError`, projected as request failure by callers | [model-output.ts](../../src/effect/model-output.ts), [provider tests](../../test/provider.test.ts) |
+| Model response | Optional fence extraction, Effect Schema JSON decoding, Latin-script guard, label validation | Non-Latin labels are discarded without cooldown; other invalid output becomes `ModelOutputError`, projected as request failure by callers | [model-output.ts](../../src/effect/model-output.ts), [provider tests](../../test/provider.test.ts) |
 | Saved selection | Strict, versioned Zod schema and validated environment overrides | Missing file uses Direct; malformed selection fails | [model-selection.ts](../../src/model-selection.ts), [selection tests](../../test/model-selection.test.ts) |
 | Direct settings and prompt | Bounded file reads, precedence resolution, configuration schema | Invalid configuration or prompt fails the request | [provider.ts](../../src/provider.ts), [configuration](../../docs/configuration.md) |
 | Naming state | Merge defaults and validate known fields; retain extra top-level fields | Missing file starts empty; read, JSON, or field-validation errors propagate | [storage.ts](../../src/storage.ts) |
-| Herdr rename | Final snapshot checks, expected-write persistence, command execution | Command failure restores prior ownership record; does not roll back other successful targets | [service.ts](../../src/service.ts), [reliability tests](../../test/reliability.test.ts) |
+| Herdr rename | Final snapshot checks, expected-write persistence, command execution; native adapter also compares the final raw tab name | Command failure restores prior ownership; native changed-name or closed-tab refusal skips the write and releases its attempt; other successful targets remain | [service.ts](../../src/service.ts), [reliability tests](../../test/reliability.test.ts) |
 
 The lint policy recognizes some intentional unknown-valued boundaries, including extensible state and the AI SDK body transform. Those exceptions do not replace runtime parsing. [Vendored rule notes](../../tools/oxlint/anti-slop/UPSTREAM.md) and [policy regression tests](../../test/anti-slop-policy.test.ts) describe their limits.
 

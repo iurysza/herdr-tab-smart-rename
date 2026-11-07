@@ -54,12 +54,14 @@ export interface ServiceDependencies {
     pane: HerdrPane,
     env?: NodeJS.ProcessEnv,
   ): Promise<PaneContext>;
+  // Native adapters compare expectedLabel with the raw tab name before writing.
   rename(
     kind: "workspace" | "tab" | "pane",
     id: string,
     label: string,
     env?: NodeJS.ProcessEnv,
-  ): Promise<void>;
+    expectedLabel?: string,
+  ): Promise<void | { status: "skipped"; reason: string }>;
 }
 
 export interface EvaluateOptions {
@@ -769,6 +771,13 @@ export class AutoNameService {
           }
 
           const suggestion = await pending;
+
+          if (suggestion.discarded) {
+            outcome.reason = suggestion.reason;
+            await transaction(releaseAttempt);
+            continue;
+          }
+
           label = suggestion.tab;
           outcome.reason = suggestion.reason;
           modelAnswered = true;
@@ -826,12 +835,29 @@ export class AutoNameService {
               await persist();
 
               try {
-                await this.#dependencies.rename(
+                const refused = await this.#dependencies.rename(
                   target.kind,
                   target.id,
                   label,
                   this.#env,
+                  target.kind === "tab"
+                    ? latest.tabs.find((tab) => tab.tab_id === target.id)?.label
+                    : current,
                 );
+
+                if (refused) {
+                  if (previous) collection[target.id] = previous;
+                  else delete collection[target.id];
+                  releaseAttempt(state);
+                  outcome.status = refused.status;
+                  outcome.reason = refused.reason;
+
+                  if (target.kind === "workspace") result.candidate.workspace = null;
+                  else if (target.kind === "tab") result.candidate.tab = null;
+                  else result.candidate.panes![target.id] = null;
+
+                  return;
+                }
               } catch (error) {
                 if (previous) collection[target.id] = previous;
                 else delete collection[target.id];
