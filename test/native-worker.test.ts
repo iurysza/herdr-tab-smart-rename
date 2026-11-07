@@ -178,6 +178,13 @@ async function fixture(ids = ["tb1", "work/tb2"]) {
 
   const options = { runtimeDir, configDir, env, command, namer, events };
   const status = async (): Promise<NativeWorkerStatus> => JSON.parse(await readFile(path.join(runtimeDir, "status.json"), "utf8"));
+
+  const allTargetsActive = async () => {
+    const health = await status();
+
+    return health.state === "ready" && health.targets.active === tabs.size;
+  };
+
   const emit = () => { assert.ok(eventSink); eventSink.enqueue({ type: "doc.changed" }); };
 
   const disconnected = () => { assert.ok(eventSink); eventSink.close(); };
@@ -185,7 +192,7 @@ async function fixture(ids = ["tb1", "work/tb2"]) {
   const stateDir = async (id: string) => (await createNativeService({ ...nativeOptions(["watch", "--tab", id], env), command, namer: { suggest: namer.suggest } })).stateDir;
 
   return {
-    root, tabs, controller, calls, writes, options, status, emit, disconnected, stateDir,
+    root, tabs, controller, calls, writes, options, status, allTargetsActive, emit, disconnected, stateDir,
     get closes() { return closes; }, get suggestions() { return suggestions; },
     get maximumSuggestions() { return maximumSuggestions; }, get subscriptions() { return subscriptions; },
     get maximumStreams() { return maximumStreams; },
@@ -213,7 +220,7 @@ test("one supervisor discovers local, remote and new tabs while preserving manua
   const worker = runNativeWorker(f.options, f.controller.signal);
 
   try {
-    await until(async () => (await f.status()).state === "ready", "initial discovery");
+    await until(f.allTargetsActive, "initial discovery");
     assert.deepEqual([...f.writes].sort(), ["tb1", "work/tb2"]);
     assert.equal(f.tabs.get("tb3")!.name, "My Manual Name");
     f.tabs.set("work/tb4", { id: "work/tb4", name: "", created: 1 });
@@ -243,7 +250,7 @@ test("closed targets retire without closing the model source used by surviving a
   const worker = runNativeWorker(f.options, f.controller.signal);
 
   try {
-    await until(async () => (await f.status()).state === "ready", "initial tabs ready");
+    await until(f.allTargetsActive, "initial tabs ready");
     const localState = await f.stateDir("tb1");
     f.tabs.delete("tb1");
     f.emit();
@@ -265,7 +272,7 @@ test("app/core downtime preserves target locks and resumes without replacement o
   const worker = runNativeWorker(f.options, f.controller.signal);
 
   try {
-    await until(async () => (await f.status()).state === "ready", "initial tabs ready");
+    await until(f.allTargetsActive, "initial tabs ready");
     const localState = await f.stateDir("tb1");
     f.appDown = true;
     f.emit();
@@ -278,10 +285,11 @@ test("app/core downtime preserves target locks and resumes without replacement o
     f.emit();
     await Bun.sleep(600);
     assert.equal((await f.status()).managedTabs, 2);
-    assert.equal((await f.status()).state, "waiting");
+    assert.equal((await f.status()).state, "ready");
+    assert.equal((await f.status()).targets.waiting, 2);
     f.coreDown = false;
     f.emit();
-    await until(async () => (await f.status()).state === "ready", "core recovery");
+    await until(f.allTargetsActive, "core recovery");
     assert.equal(f.subscriptions, 1);
     assert.equal(f.closes, 0);
   } finally { f.controller.abort(); await worker; await f.cleanup(); }
@@ -293,7 +301,7 @@ for (const replacement of ["core", "session"] as const) {
     const worker = runNativeWorker(f.options, f.controller.signal);
 
     try {
-      await until(async () => (await f.status()).state === "ready", "initial tabs ready");
+      await until(f.allTargetsActive, "initial tabs ready");
       const remoteState = await f.stateDir("work/tb2");
       f.tabs.get("work/tb2")!.name = "";
       f.tabs.get("work/tb2")!.created++;
@@ -303,7 +311,8 @@ for (const replacement of ["core", "session"] as const) {
       f.tabs.set("tb3", { id: "tb3", name: "", created: 1 });
       f.emit();
       await until(() => f.writes.includes("tb3"), "unrelated local target continues");
-      assert.equal((await f.status()).state, "waiting");
+      await until(async () => (await f.status()).targets.blocked === 1, "replaced target is blocked");
+      assert.equal((await f.status()).state, "ready");
       await stat(path.join(remoteState, "watch.lock"));
       f.emit();
       await Bun.sleep(600);
@@ -327,7 +336,7 @@ test("scheduler bounds concurrent tab work and deduplicates event bursts", async
     await Bun.sleep(600);
     assert.equal(f.suggestions, MAX_CONCURRENT_TABS);
     gate.resolve();
-    await until(async () => (await f.status()).state === "ready", "queued work drains");
+    await until(f.allTargetsActive, "queued work drains");
     assert.equal(f.maximumSuggestions, MAX_CONCURRENT_TABS);
     assert.equal(f.suggestions, 6);
     assert.equal(f.writes.length, 6);
@@ -340,7 +349,7 @@ test("supervisor and explicit watch share per-target locks; duplicate supervisor
   const worker = runNativeWorker(f.options, f.controller.signal);
 
   try {
-    await until(async () => (await f.status()).state === "ready", "initial target ready");
+    await until(f.allTargetsActive, "initial target ready");
     const health = await readFile(path.join(f.options.runtimeDir, "status.json"), "utf8");
     await assert.rejects(runNativeWorker(f.options, new AbortController().signal), /timed out waiting for lock/);
     assert.equal(await readFile(path.join(f.options.runtimeDir, "status.json"), "utf8"), health);
@@ -360,7 +369,7 @@ test("transport downtime reconnects one unfiltered subscription and discovers ta
   const worker = runNativeWorker(f.options, f.controller.signal);
 
   try {
-    await until(async () => (await f.status()).state === "ready", "empty runtime ready");
+    await until(f.allTargetsActive, "empty runtime ready");
     f.disconnected();
     await until(async () => (await f.status()).state === "waiting", "transport loss");
     f.tabs.set("tb1", { id: "tb1", name: "", created: 1 });
@@ -379,10 +388,12 @@ test("supervised screen-read failures preserve supervision and recover on events
   try {
     await until(async () => (await f.status()).managedTabs === 2 && f.calls.some((call) => call[1] === "read"), "failed screen reads");
     assert.equal(f.writes.length, 0);
-    assert.equal((await f.status()).state, "waiting");
+    await until(async () => (await f.status()).targets.waiting === 2, "read failures remain per-target");
+    assert.equal((await f.status()).state, "ready");
+    assert.match((await f.status()).lastError?.reason ?? "", /context read failed/);
     f.readFailure = false;
     f.emit();
-    await until(async () => (await f.status()).state === "ready", "screen recovery");
+    await until(f.allTargetsActive, "screen recovery");
     assert.equal(f.writes.length, 2);
     assert.equal(f.subscriptions, 1);
   } finally { f.controller.abort(); await worker; await f.cleanup(); }
@@ -426,7 +437,8 @@ test("remote binding survives watch-lock contention instead of adopting a replac
     f.emit();
     await Bun.sleep(600);
     assert.equal(f.writes.length, 0);
-    assert.equal((await f.status()).state, "waiting");
+    assert.equal((await f.status()).state, "ready");
+    assert.equal((await f.status()).targets.blocked, 1);
     await stat(path.join(originalState, "watch.lock"));
   } finally { await release(); f.controller.abort(); await worker; await f.cleanup(); }
 }, { timeout: 10_000 });
@@ -447,9 +459,11 @@ test("startup during app downtime and an offline remote waits and then preserves
     await until(async () => (await f.status()).managedTabs === 2, "offline remote namespace retained");
     assert.equal(f.tabs.get("work/tb2")!.name, "Remote Manual");
     assert.equal(f.calls.some((call) => call[1] === "read" && call[2]?.startsWith("work/")), false);
+    assert.equal((await f.status()).state, "ready");
+    assert.equal((await f.status()).targets.waiting, 1);
     f.machineState = "connected";
     f.emit();
-    await until(async () => (await f.status()).state === "ready", "remote reconnection");
+    await until(f.allTargetsActive, "remote reconnection");
     assert.equal(f.tabs.get("work/tb2")!.name, "Remote Manual");
     assert.deepEqual(f.writes, ["tb1"]);
   } finally { f.controller.abort(); await worker; await f.cleanup(); }
@@ -500,11 +514,36 @@ test("runtime cleanup failures publish sanitized failed health and release super
   const worker = runNativeWorker(options, f.controller.signal);
 
   try {
-    await until(async () => (await f.status()).state === "ready", "ready before shutdown failure");
+    await until(f.allTargetsActive, "ready before shutdown failure");
     f.controller.abort();
     await assert.rejects(worker, /Cannot close native runtime source/);
     assert.equal((await f.status()).state, "failed");
     assert.equal(JSON.stringify(await f.status()).includes("private-source-detail"), false);
     await assert.rejects(readFile(path.join(f.options.runtimeDir, "supervisor.lock")), /ENOENT/);
   } finally { f.controller.abort(); await worker.catch(() => {}); await f.cleanup(); }
+}, { timeout: 10_000 });
+
+test("provider failures do not block readiness and publish only a safe short last error", async () => {
+  const f = await fixture(["tb1"]);
+  f.beforeSuggestion = async () => {
+    throw new Error("AI request failed HTTP 401 Unauthorized API_KEY='private-provider-secret'\nTerminal context: private task text and request body must never be published");
+  };
+
+  const worker = runNativeWorker(f.options, f.controller.signal);
+
+  try {
+    await until(async () => (await f.status()).lastError?.targetId === "tb1", "provider failure recorded");
+    const health = await f.status();
+    assert.equal(health.state, "ready");
+    // A coalesced follow-up can hit the service's backoff and complete without
+    // another failed request. The last error must survive that skipped run.
+    assert.equal(health.targets.active + health.targets.waiting, 1);
+    assert.equal(health.targets.blocked, 0);
+    assert.equal(health.lastError?.reason, "Native request failed (HTTP 401)");
+    assert.ok(Number.isFinite(Date.parse(health.lastError?.timestamp ?? "")));
+    assert.equal(JSON.stringify(health).includes("private-provider-secret"), false);
+    assert.equal(JSON.stringify(health).includes("private task text"), false);
+    assert.equal(JSON.stringify(health).includes("request body"), false);
+    assert.equal(f.writes.length, 0);
+  } finally { f.controller.abort(); await worker; await f.cleanup(); }
 }, { timeout: 10_000 });

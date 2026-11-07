@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { runSetup, type SetupPrompts } from "../src/setup.ts";
+import { runNativeSetup, runSetup, type SetupPrompts } from "../src/setup.ts";
 import { renderKeybindingGuidance } from "../src/setup-plan.ts";
 import type { ModelSource } from "../src/model-source.ts";
 
@@ -383,4 +383,47 @@ test("Direct wizard derives DeepSeek suggestions from its provider profile", asy
     reasoningOptions(ui.calls).initialValue,
     "none",
   );
+});
+
+test("native wizard resolves private config and skips daemon keybindings and start hooks", async () => {
+  const ui = scriptedPrompts(["pi", "anthropic", "claude", "high", true]);
+  const saved: string[] = [];
+
+  const result = await runNativeSetup({ HOME: "/test-home", XDG_CONFIG_HOME: "/native-config", HERDR_BIN_PATH: "/never-run-daemon" }, {
+    prompts: ui.prompts,
+    probeExisting: async () => undefined,
+    sourceFactory: async () => piSource(),
+    saveSelection: async (directory) => { saved.push(directory); },
+    inspectKeybindings: async () => { throw new Error("native setup must not inspect daemon keybindings"); },
+    validate: async (env) => {
+      assert.equal(env.HERDR_PLUGIN_CONFIG_DIR, "/native-config/herdr-tab-smart-rename/native");
+
+      return "validated";
+    },
+  });
+
+  assert.equal(result.saved, true);
+  assert.deepEqual(saved, ["/native-config/herdr-tab-smart-rename/native"]);
+  assert.equal(ui.calls.filter((call) => call.kind === "confirm").length, 1);
+  assert.ok(ui.summaries.every((summary) => !summary.includes("Keybinding")));
+});
+
+test("native wizard respects config override and cancellation never starts a service", async () => {
+  const ui = scriptedPrompts([true, cancelled]);
+  let started = false;
+
+  const result = await runNativeSetup({ HOME: "/test-home", HERDR_PLUGIN_CONFIG_DIR: "/native-override" }, {
+    prompts: ui.prompts,
+    probeExisting: async (env, directory) => {
+      assert.equal(env.HERDR_PLUGIN_CONFIG_DIR, "/native-override");
+      assert.equal(directory, "/native-override");
+
+      return { version: 1, source: "pi", provider: "anthropic", model: "claude" };
+    },
+    inspectKeybindings: async () => { throw new Error("native daemon inspection"); },
+    startWorker: async () => { started = true; },
+  });
+
+  assert.deepEqual(result, { saved: false });
+  assert.equal(started, false);
 });

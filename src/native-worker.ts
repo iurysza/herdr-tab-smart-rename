@@ -11,6 +11,7 @@ import { ModelSourceNamer } from "./model-namer.ts";
 import type { Namer } from "./provider.ts";
 import { MAX_CONCURRENT_TABS } from "./service.ts";
 import { acquireLock, ensurePrivateDir } from "./storage.ts";
+import { sanitizeText } from "./text.ts";
 
 export const NATIVE_DEBOUNCE_MS = 400;
 
@@ -22,6 +23,8 @@ export interface NativeWorkerStatus {
   state: "starting" | "ready" | "waiting" | "stopping" | "failed";
   managedTabs: number;
   updatedAt: string;
+  targets: { active: number; waiting: number; blocked: number };
+  lastError?: { targetId: string; reason: string; timestamp: string };
   detail?: string;
 }
 
@@ -89,6 +92,25 @@ export function nativeWorkerOptions(args: string[], env: NodeJS.ProcessEnv = pro
   return { configDir, runtimeDir, env };
 }
 
+// Errors from commands or providers may contain echoed context or response
+// bodies. Classify them, rather than publishing arbitrary text after redaction.
+function nativeFailureReason(message: string): string {
+  const safe = sanitizeText(message);
+  const status = /\b(?:HTTP|status(?:\s*code)?)[\s:="']+([45]\d\d)\b/i.exec(safe)?.[1];
+
+  if (status) return `Native request failed (HTTP ${status})`;
+
+  if (/\b(?:unauthorized|authentication|incorrect api key|invalid api key)\b/i.test(safe)) return "AI authentication failed; check the configured provider";
+
+  if (/^AI\b/.test(safe)) return "AI request failed; check the configured provider and model";
+
+  if (/timed out waiting for lock/.test(safe)) return "Native watch lock is busy; will retry";
+
+  if (/\bread\b/i.test(safe)) return "Native context read failed; will retry";
+
+  return "Native target evaluation failed; will retry";
+}
+
 type ManagedTarget = {
   native?: NativeService;
   release?: () => Promise<void>;
@@ -118,6 +140,7 @@ export async function runNativeWorker(options: NativeWorkerOptions, signal: Abor
   let connected = false;
   let discovered = false;
   let failure: Error | undefined;
+  let lastError: NativeWorkerStatus["lastError"];
   let statusWork = Promise.resolve();
   let refreshWork = Promise.resolve();
   let refreshRunning = false;
@@ -127,16 +150,21 @@ export async function runNativeWorker(options: NativeWorkerOptions, signal: Abor
   let reconnect: ReturnType<typeof setTimeout> | undefined;
 
   const publish = (state?: NativeWorkerStatus["state"]): Promise<void> => {
-    const paused = [...targets.values()].some((target) => target.state !== "active");
+    const counts = { active: 0, waiting: 0, blocked: 0 };
+
+    for (const target of targets.values()) counts[target.state]++;
 
     const status: NativeWorkerStatus = {
       version: 1, pid: process.pid,
-      state: state ?? (connected && discovered && !paused ? "ready" : "waiting"),
+      state: state ?? (connected && discovered ? "ready" : "waiting"),
       managedTabs: [...targets.values()].filter((target) => target.release).length,
       updatedAt: new Date().toISOString(),
+      targets: counts,
     };
 
-    if (paused) status.detail = "Some native targets are waiting or blocked";
+    if (counts.waiting || counts.blocked) status.detail = "Some native targets are waiting or blocked";
+
+    if (lastError) status.lastError = lastError;
     const file = path.join(options.runtimeDir, "status.json");
     const temporary = `${file}.${process.pid}.tmp`;
 
@@ -154,6 +182,10 @@ export async function runNativeWorker(options: NativeWorkerOptions, signal: Abor
     });
 
     return statusWork;
+  };
+
+  const recordError = (targetId: string, reason: string): void => {
+    lastError = { targetId: sanitizeText(targetId), reason: sanitizeText(reason), timestamp: new Date().toISOString() };
   };
 
   const retire = async (id: string, target: ManagedTarget): Promise<void> => {
@@ -183,11 +215,28 @@ export async function runNativeWorker(options: NativeWorkerOptions, signal: Abor
       const result = await target.native.service.evaluate(id);
 
       if (!result) await retire(id, target);
-      else target.state = result.outcomes?.some((outcome) => outcome.status === "failed") ? "waiting" : "active";
+      else {
+        const failed = result.outcomes?.find((outcome) => outcome.status === "failed");
+        target.state = failed ? "waiting" : "active";
+
+        if (failed) recordError(id, nativeFailureReason(failed.reason));
+      }
     } catch (error) {
       // Never rebind a changed core during this target's lifetime. Keep its
       // original service and lock; other tabs continue independently.
       target.state = error instanceof NativeTargetError && error.kind !== "unavailable" ? "blocked" : "waiting";
+
+      const reasons = {
+        unavailable: "Native target is unavailable; will retry",
+        core_changed: "Remote core or session changed; restart to rebind",
+        machine_unknown: "Remote machine is unknown to the local core",
+        needs_update: "Remote core needs an update",
+      };
+
+      const reason = error instanceof NativeTargetError ? reasons[error.kind]
+        : nativeFailureReason(error instanceof Error ? error.message : "");
+
+      recordError(id, reason);
     }
 
     await publish();

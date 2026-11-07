@@ -21,7 +21,8 @@ import { MODEL_SOURCE_IDS, type ModelSelection, type ModelSource } from "./model
 import { loadModelSource } from "./model-sources/index.ts";
 import { HerdrPluginClient } from "./herdr-plugin-client.ts";
 import { inspectKeybindings, type KeybindingInspection } from "./setup-keybindings.ts";
-import { setupReview } from "./setup-plan.ts";
+import { setupReview, type SetupDraft } from "./setup-plan.ts";
+import { nativeConfigDirectory } from "./native-config.ts";
 import { beginSetupTransaction, type SetupTransaction } from "./setup-transaction.ts";
 
 interface Choice {
@@ -93,6 +94,7 @@ interface CollectedChoice {
 }
 
 export interface SetupDependencies {
+  backend?: "daemon" | "native";
   prompts?: SetupPrompts;
   sourceFactory?: (selection: ModelSelection, env: NodeJS.ProcessEnv) => Promise<ModelSource>;
   resolveConfigDirectory?: (env: NodeJS.ProcessEnv) => Promise<string>;
@@ -113,16 +115,17 @@ export interface SetupResult {
 export async function runSetup(
   env: NodeJS.ProcessEnv = process.env,
   {
+    backend = "daemon",
     prompts: injectedPrompts,
     sourceFactory = loadModelSource,
-    resolveConfigDirectory = resolvePluginConfigDirectory,
+    resolveConfigDirectory = backend === "native" ? async (value) => nativeConfigDirectory(value) : resolvePluginConfigDirectory,
     probeExisting = defaultProbeExisting,
     saveSelection = saveModelSelection,
     saveDirect = saveDirectProviderConfig,
     inspectKeybindings: inspect = inspectKeybindings,
     beginTransaction = (directory, options) => beginSetupTransaction(directory, options),
     validate = (setupEnv) => checkAi(setupEnv, { notify: async () => {}, report: () => {} }),
-    startWorker = async (setupEnv) => new HerdrPluginClient({ env: setupEnv }).invokeAndWait("start"),
+    startWorker = backend === "native" ? async () => {} : async (setupEnv) => new HerdrPluginClient({ env: setupEnv }).invokeAndWait("start"),
   }: SetupDependencies = {},
 ): Promise<SetupResult> {
   const prompts = injectedPrompts ?? (await defaultPrompts());
@@ -157,11 +160,16 @@ export async function runSetup(
     action = "replace";
   }
 
-  const requested = await collectKeybindingChoices(prompts);
+  let draft: SetupDraft = { selection: choice.selection, action };
 
-  if (!requested) return cancelled(prompts);
-  const keybindings = await inspect(requested, setupEnv);
-  prompts.summary(setupReview({ selection: choice.selection, action, keybindings }));
+  if (backend === "daemon") {
+    const requested = await collectKeybindingChoices(prompts);
+
+    if (!requested) return cancelled(prompts);
+    draft = { ...draft, keybindings: await inspect(requested, setupEnv) };
+  }
+
+  prompts.summary(setupReview(draft));
   const confirmed = await answer(prompts, prompts.confirm({ message: "Apply this setup?", initialValue: true }), z.boolean());
 
   if (confirmed !== true) return cancelled(prompts);
@@ -190,12 +198,18 @@ export async function runSetup(
     const parsed = z.instanceof(Error).safeParse(error);
     const detail = parsed.success ? parsed.data.message : String(error);
 
-    throw new Error(`AI configuration is valid but Smart Rename could not start. ${detail}\nRetry: herdr plugin action invoke start --plugin tab-smart-rename`);
+    const retry = backend === "native" ? "smart-rename-native install" : "herdr plugin action invoke start --plugin tab-smart-rename";
+
+    throw new Error(`AI configuration is valid but Smart Rename could not start. ${detail}\nRetry: ${retry}`);
   }
 
-  prompts.success("Smart Rename is ready");
+  prompts.success(backend === "native" ? "Smart Rename AI setup is ready" : "Smart Rename is ready");
 
   return { saved: action === "replace", selection: choice.selection };
+}
+
+export function runNativeSetup(env: NodeJS.ProcessEnv = process.env, dependencies: SetupDependencies = {}): Promise<SetupResult> {
+  return runSetup(env, { ...dependencies, backend: "native" });
 }
 
 async function defaultProbeExisting(
