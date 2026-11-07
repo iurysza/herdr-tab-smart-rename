@@ -362,6 +362,84 @@ test.skipIf(process.platform === "win32")("native watcher rejects a duplicate ow
   } finally { controller.abort(); await watching; await f.cleanup(); }
 }, { timeout: 10_000 });
 
+test.skipIf(process.platform === "win32")("local watcher retries app/document lag without stopping", async () => {
+  const f = await fixture("Manual");
+  const controller = new AbortController();
+  const core = await eventFixture(f.options.stateDir);
+
+  f.state.storedName = "Older Document Name";
+  f.state.beforeSuggestion = async () => { controller.abort(); };
+
+  try {
+    await watchNative({ ...f.options, env: { HC_BIN_PATH: core }, onReady: () => {
+      f.state.storedName = null;
+      f.state.name = "";
+    } }, controller.signal);
+    assert.equal(f.state.name, "Review Native Adapter");
+    assert.equal(f.state.writes, 1);
+  } finally { controller.abort(); await f.cleanup(); }
+}, { timeout: 10_000 });
+
+test.skipIf(process.platform === "win32")("a running local watcher survives layout lag and retries the next event", async () => {
+  const f = await fixture("Manual");
+  const controller = new AbortController();
+  const core = await eventFixture(f.options.stateDir);
+  let lagReads = 0;
+  let recovery: ReturnType<typeof setTimeout> | undefined;
+
+  await writeFile(core, `#!${process.execPath}\nconsole.log(JSON.stringify({type:'snapshot'})); setTimeout(()=>console.log(JSON.stringify({type:'doc.changed'})),1000); setInterval(()=>{},1000);\n`);
+
+  const command: NativeCommand = async (program, args, input) => {
+    if (args[0] === "connect" && f.state.storedName !== null) lagReads++;
+
+    return f.command(program, args, input);
+  };
+
+  f.state.beforeSuggestion = async () => { controller.abort(); };
+
+  try {
+    await watchNative({ ...f.options, command, env: { HC_BIN_PATH: core }, onReady: () => {
+      f.state.storedName = "Older Document Name";
+      recovery = setTimeout(() => { f.state.storedName = null; f.state.name = ""; }, 800);
+    } }, controller.signal);
+    assert.ok(lagReads > 0, "post-ready evaluation reaches the mismatched layout");
+    assert.equal(f.state.name, "Review Native Adapter");
+    assert.equal(f.state.writes, 1);
+  } finally { clearTimeout(recovery); controller.abort(); await f.cleanup(); }
+}, { timeout: 10_000 });
+
+test.skipIf(process.platform === "win32")("screen-read failure is a failed outcome and does not stop watch", async () => {
+  const f = await fixture();
+  const controller = new AbortController();
+  const core = await eventFixture(f.options.stateDir);
+  let readFails = true;
+  let failures = 0;
+
+  const command: NativeCommand = async (program, args, input) => {
+    if (args[0] === "read" && readFails) {
+      failures++;
+      throw new Error("test screen read unavailable");
+    }
+
+    return f.command(program, args, input);
+  };
+
+  try {
+    const result = await runNativeOnce({ ...f.options, command });
+
+    assert.equal(result.outcomes?.[0]?.status, "failed");
+    assert.match(result.outcomes?.[0]?.reason ?? "", /screen read unavailable/);
+    assert.equal(f.state.writes, 0);
+    f.state.beforeSuggestion = async () => { controller.abort(); };
+
+    await watchNative({ ...f.options, command, env: { HC_BIN_PATH: core }, onReady: () => {
+      readFails = false;
+    } }, controller.signal);
+    assert.equal(failures, 2, "both once and initial watch reach the real context-read boundary");
+    assert.equal(f.state.name, "Review Native Adapter");
+  } finally { controller.abort(); await f.cleanup(); }
+}, { timeout: 10_000 });
+
 test("a split native tab uses the focused agent and only reads its screen", async () => {
   const f = await fixture();
   const service = await f.service();
@@ -418,8 +496,10 @@ test("identical local and remote tab IDs never cross machines", async () => {
     await assert.rejects(new HerdrAppClient("tb1", {}, local.command).snapshot(), /different machine/);
     local.state.machine = "local";
     assert.equal((await new HerdrAppClient("tb1", {}, local.command).snapshot()).tabs.length, 1);
-    // The bare local ID is absent from a qualified remote layout: no fallback.
-    assert.equal((await new HerdrAppClient("tb1", {}, remote.command).snapshot()).tabs.length, 0);
+    // The bare local ID is absent from the qualified app topology but present
+    // in the document. Treat this as lag/mismatch, never a cross-machine fallback.
+    await assert.rejects(new HerdrAppClient("tb1", {}, remote.command).snapshot(),
+      (error: Error) => error instanceof NativeTargetError && error.kind === "unavailable");
     remote.state.machine = null;
     await assert.rejects(new HerdrAppClient("work/tb1", {}, remote.command).snapshot(), /different machine/);
     remote.state.machine = "work";

@@ -88,7 +88,7 @@ const CONFIRM_TIMEOUT_MS = 10_000;
 
 export type NativeFailureKind = "unavailable" | "machine_unknown" | "needs_update" | "core_changed";
 
-// Typed so the watcher can retry only transient remote failures.
+// Typed so watchers can retry transient availability and layout lag.
 export class NativeTargetError extends Error {
   readonly kind: NativeFailureKind;
 
@@ -174,6 +174,25 @@ export function nativeCommand(env: NodeJS.ProcessEnv): NativeCommand {
       clearTimeout(timer);
     }
   };
+}
+
+// Discovery reads topology only. Per-target snapshots still verify core identity,
+// document ownership and terminal labels before collecting context or writing.
+export async function discoverNativeTargets(env: NodeJS.ProcessEnv, command = nativeCommand(env)): Promise<NativeTarget[]> {
+  const topology = Topology.parse(JSON.parse(await command(env.HERDR_APP_BIN_PATH || "herdr-app", ["ls"])));
+  const targets = new Map<string, NativeTarget>();
+
+  for (const space of topology.spaces) {
+    for (const tab of space.tabs) {
+      let target: NativeTarget;
+
+      try { target = parseNativeTarget(tab.id); } catch { continue; }
+
+      if (target.machine === spaceMachine(space.machine)) targets.set(target.id, target);
+    }
+  }
+
+  return [...targets.values()];
 }
 
 export class HerdrAppClient {
@@ -264,10 +283,11 @@ export class HerdrAppClient {
   }
 
   private mismatch(): Error {
-    // Remote layout persistence lags app acknowledgement. Never treat it as closed.
-    return this.target.machine === null
-      ? new Error("Native layout changed or hc targets a different core; retry with matching HERDR_APP_HOME and HC_SESSION")
-      : new NativeTargetError("unavailable", "Remote native layout does not match the app yet; will retry");
+    // App acknowledgement can precede local or remote document persistence.
+    // Retrying does not permit writes until the document and labels match.
+    return new NativeTargetError("unavailable", this.target.machine === null
+      ? "Native layout changed or hc targets a different core; retry with matching HERDR_APP_HOME and HC_SESSION"
+      : "Remote native layout does not match the app yet; will retry");
   }
 
   async snapshot(): Promise<HerdrSnapshot> {
@@ -352,8 +372,8 @@ export class HerdrAppClient {
       if (focused) snap.focused_pane_id = focused.pane_id;
     }
 
-    // A disconnecting remote can drop app spaces before its document: not a close.
-    if (binding && snap.tabs.length === 0 && this.storedTab(document)) throw this.mismatch();
+    // App/core downtime or layout lag is not evidence that a tab closed.
+    if (snap.tabs.length === 0 && this.storedTab(document)) throw this.mismatch();
 
     // The alias must still name the same core after every read.
     await this.verify(binding);
