@@ -11,6 +11,7 @@ Use this reference to locate the implementation and tests for a change. Start wi
 | First-request wait for Pi and Claude Code | [service.ts](../src/service.ts) | [agent-startup.test.ts](../test/agent-startup.test.ts) |
 | Native tab lookup, raw-name ownership, terminal context, explicit tab-only writes | [herdr-app.ts](../src/herdr-app.ts) | [herdr-app.test.ts](../test/herdr-app.test.ts), opt-in [herdr-app-live.test.ts](../test/herdr-app-live.test.ts) |
 | Native CLI, event watcher, duplicate ownership and cancellation | [herdr-app-cli.ts](../src/herdr-app-cli.ts) | [herdr-app.test.ts](../test/herdr-app.test.ts), opt-in [herdr-app-live.test.ts](../test/herdr-app-live.test.ts) |
+| One native subscription, tab discovery, shared source ownership, per-target locks, health and recovery | [native-worker.ts](../src/native-worker.ts) | [native-worker.test.ts](../test/native-worker.test.ts) |
 | Snapshots, socket framing, process info, rename commands, progress markers | [herdr.ts](../src/herdr.ts) | [herdr.test.ts](../test/herdr.test.ts), [progress.test.ts](../test/progress.test.ts), [context.test.ts](../test/context.test.ts) |
 | Bounded Pi and Claude Code session reads | [pi-context.ts](../src/pi-context.ts) | [context.test.ts](../test/context.test.ts) |
 | ANSI removal and best-effort redaction | [text.ts](../src/text.ts) | [domain.test.ts](../test/domain.test.ts) |
@@ -47,9 +48,13 @@ Read [naming flow](architecture/naming-flow.md) for the call sequence and [owner
 | Herdr preflight and action-log receipts | [herdr-plugin-client.ts](../src/herdr-plugin-client.ts) | [herdr-plugin-client.test.ts](../test/herdr-plugin-client.test.ts) |
 | Registered actions and runtime commands | [herdr-plugin.toml](../herdr-plugin.toml) | [manifest.test.ts](../test/manifest.test.ts), [runtime.test.ts](../test/runtime.test.ts) |
 | Release-bound installer and version checks | [install.sh](../installer/install.sh), [render-installer.ts](../scripts/render-installer.ts), [check-release-version.ts](../scripts/check-release-version.ts) | [installer.test.ts](../test/installer.test.ts), [release-assets.test.ts](../test/release-assets.test.ts), [release.test.ts](../test/release.test.ts) |
+| Native config import, private paths, activation rollback, status, uninstall and LaunchAgent ownership | [native-install.ts](../src/native-install.ts), [native-service.ts](../src/native-service.ts), [native-config.ts](../src/native-config.ts) | [native-install.test.ts](../test/native-install.test.ts), [setup.test.ts](../test/setup.test.ts) |
+| Native source manifest, bound archive verification, staging and immutable versions | [package-native.ts](../scripts/package-native.ts), [install.sh](../installer/install.sh) | [native-package.test.ts](../test/native-package.test.ts), [installer.test.ts](../test/installer.test.ts) |
 
 ## Validation tools
 
 [CI](../.github/workflows/ci.yml) runs typecheck, lint, and tests on Linux with minimum and latest Bun, and Windows with latest Bun. [test-contained.ts](../scripts/test-contained.ts) provides macOS containment. [The lint policy](../tools/oxlint/anti-slop/UPSTREAM.md) records vendored exceptions, tested by [anti-slop-policy.test.ts](../test/anti-slop-policy.test.ts).
+
+[verify-native-e2e.ts](../scripts/verify-native-e2e.ts) separately exercises the installed native code with real frozen production dependencies, a registry-only install actor, and fake service, app/core, and model-source boundaries. [Harness policy tests](../test/native-e2e.test.ts) run offline in the normal suite. See [packaged integration verification](architecture/native-herdr-app.md#packaged-integration-verification) before running the opt-in check.
 
 This map identifies relevant test files, not proof that every branch of each module is covered. Safe commands and opt-in integration modes belong in the [development guide](../docs/development.md).
