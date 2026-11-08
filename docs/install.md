@@ -4,7 +4,21 @@ Smart Rename supports both Herdr generations. For the legacy Herdr daemon (`herd
 
 ## Native macOS app
 
-The native service needs macOS, Bun 1.2.23+, and the Herdr app (`herdr-app`) and Herdr Core (`hc`) executables on PATH. It does not need the legacy `herdr` daemon. Open the native app before installation so the worker can discover its tabs. Connected remote machines need no second installation.
+The native service needs macOS, Bun 1.2.23 or newer, and the Herdr app (`herdr-app`) and Herdr Core (`hc`) executables on PATH. It does not use the legacy `herdr` daemon. Open the Herdr app before installation. The worker must list tabs and connect to core events within 180 seconds, or the installer restores the previous activation. Connected remote machines need no second installation.
+
+[Release v0.7.0](https://github.com/iurysza/herdr-tab-smart-rename/releases/tag/v0.7.0) publishes `install.sh`, `SHA256SUMS`, and `smart-rename-native.tar.gz`. Install from that release:
+
+```sh
+curl -fsSL https://github.com/iurysza/herdr-tab-smart-rename/releases/download/v0.7.0/install.sh | sh -s -- --native
+```
+
+The installer checks the archive against the checksum bound into the script and against `SHA256SUMS` before it writes files. It checks the embedded tag, commit, and file manifest, and it rejects unsafe archive entries.
+
+To check `install.sh` before you run it, download `install.sh` and `SHA256SUMS` from that release, then run:
+
+```sh
+grep '  install.sh$' SHA256SUMS | shasum -a 256 -c - && sh install.sh --native
+```
 
 From a local checkout, run:
 
@@ -12,19 +26,11 @@ From a local checkout, run:
 sh installer/install.sh --native
 ```
 
-This packages the current checkout, binds it to the package version and Git HEAD, and installs a persistent copy. The source checkout stays unchanged. Repeating the same snapshot reuses its verified version directory. Changed source needs a new commit before replacing an already-installed snapshot with that commit ID; existing version directories are never overwritten.
-
-A release containing `smart-rename-native.tar.gz`, `install.sh`, and `SHA256SUMS` supports this one-liner:
-
-```sh
-curl -fsSL https://github.com/iurysza/herdr-tab-smart-rename/releases/latest/download/install.sh | sh -s -- --native
-```
-
-This change prepares those assets but does not publish a release. Until an approved release includes them, use the local checkout command. The command verifies the payload against the checksum bound into its installer and the release checksum manifest before writing source files. It checks the embedded tag, commit, and file manifest, and rejects unsafe archive entries.
+That command packages the current checkout, binds it to the package version and Git HEAD, and installs a persistent copy. The source checkout stays unchanged. Repeating the same snapshot reuses its verified version directory. Changed source needs a new commit before replacing an already-installed snapshot with that commit ID. Existing version directories are never overwritten.
 
 Both paths stage the source in the native data directory and run `bun install --production --frozen-lockfile --ignore-scripts`. They publish the version directory only after verification and dependency installation succeed. The native service installer then handles setup and the user LaunchAgent. It preserves the previous activation if startup fails.
 
-If native configuration is missing or invalid, setup first copies existing `model-selection.json`, `naming-prompt.md`, and `provider.env` from the conventional daemon config directory. The original files stay unchanged. A valid imported selection skips interactive setup. Otherwise, the normal model-source wizard runs without daemon keybinding prompts. A piped install uses the caller's terminal when setup needs input.
+If native configuration is missing or invalid, setup first copies existing `model-selection.json`, `naming-prompt.md`, and `provider.env` from `$XDG_CONFIG_HOME/herdr/plugins/config/tab-smart-rename`, or from `~/.config/herdr/plugins/config/tab-smart-rename` when `XDG_CONFIG_HOME` is unset. The original files stay unchanged. A valid imported selection skips interactive setup. Otherwise, the normal model-source wizard runs without daemon keybinding prompts. A piped install uses the caller's terminal when setup needs input.
 
 To choose a private configuration directory:
 
@@ -54,6 +60,30 @@ Uninstall removes only owned activation files, the service, the owned mod and th
 
 The local installer also accepts `--native --status` and `--native --uninstall`. A native-enabled release installer supports the same flags, including through `sh -s --` after curl. Status and uninstall need neither a running app nor provider availability. They never invoke the daemon. Native setup and supervision can send bounded context from eligible tabs to the selected provider, as described in [privacy and context](configuration.md#private-files-and-context).
 
+### Name one tab
+
+`smart-rename-native` accepts `status`, `uninstall`, and `install`. It does not name a tab. `ctrl-shift-r` names the focused tab.
+
+To name one explicit tab, install dependencies in a checkout and list IDs with `herdr-app ls`. A local ID starts with `tb` and continues with hexadecimal digits, such as `tb1a`. A remote ID keeps the machine prefix, such as `workstation/tb1a`. The CLI rejects a `local/` prefix. Pass the full ID. The CLI does not use the focused tab.
+
+```sh
+bun src/herdr-app-cli.ts once --tab "$TAB_ID" --config-dir "$CONFIG_DIR"
+bun src/herdr-app-cli.ts rename-now --tab "$TAB_ID" --config-dir "$CONFIG_DIR"
+bun src/herdr-app-cli.ts dry-run --tab "$TAB_ID" --config-dir "$CONFIG_DIR"
+bun src/herdr-app-cli.ts watch --tab "$TAB_ID" --config-dir "$CONFIG_DIR"
+```
+
+`$CONFIG_DIR` must be an absolute directory. The command reads the model selection there and does not rewrite it. Direct provider variables in [Direct settings](configuration.md#direct-settings) also apply.
+
+- `once` names that tab and keeps a name you set.
+- `rename-now` replaces a name you set, and only on that tab.
+- `dry-run` prints the result. It does not write a label or state.
+- `watch` names that tab until you press Ctrl+C. It keeps a name you set. The watcher keeps its subscription and retries an offline remote target.
+
+`--state-dir` sets the state base directory. For a remote tab, state and locks go under `remote/<hash>` in that directory. If an alias later points at a different core, start the command again.
+
+These commands name only the tab you pass. They do not install the login service, copy daemon transcripts, or change other tabs, space names, or pane titles.
+
 For bootstrap testing with already-rendered local release assets, set `SMART_RENAME_NATIVE_ASSET_DIR` to their absolute directory. It must contain the bound archive and checksum manifest. This skips asset downloads, not dependency installation. Contained tests replace Bun's install command and curl with local fakes to avoid network access.
 
 ## macOS and Linux
@@ -66,7 +96,7 @@ From the folder containing both files, run:
 grep '  install.sh$' SHA256SUMS | shasum -a 256 -c - && sh install.sh
 ```
 
-The checksum manifest also covers the optional native archive. The command above checks only the daemon installer you downloaded.
+The checksum manifest also covers `smart-rename-native.tar.gz`. The command above checks only `install.sh`.
 
 The installer installs its exact release through Herdr, then opens setup. Setup finds connected providers, saves your choice, and starts the worker. Herdr installs the plugin's Bun dependencies for you.
 
