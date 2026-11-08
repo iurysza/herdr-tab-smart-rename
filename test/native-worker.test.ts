@@ -226,6 +226,8 @@ test("one supervisor discovers local, remote and new tabs while preserving manua
     f.tabs.set("work/tb4", { id: "work/tb4", name: "", created: 1 });
     f.emit();
     await until(() => f.writes.includes("work/tb4"), "new remote tab discovery");
+    // The rename lands mid-evaluation; the target's lock is published only once it settles.
+    await until(f.allTargetsActive, "new remote tab supervised");
     const health = await f.status();
     assert.equal(health.version, 1);
     assert.equal(health.pid, process.pid);
@@ -354,9 +356,12 @@ test("supervisor and explicit watch share per-target locks; duplicate supervisor
 
   try {
     await until(f.allTargetsActive, "initial target ready");
-    const health = await readFile(path.join(f.options.runtimeDir, "status.json"), "utf8");
+    // The live supervisor republishes on its debounced refresh, so only its timestamp may move.
+    const published = async () => ({ ...(await f.status()), updatedAt: undefined });
+    const health = await published();
     await assert.rejects(runNativeWorker(f.options, new AbortController().signal), /timed out waiting for lock/);
-    assert.equal(await readFile(path.join(f.options.runtimeDir, "status.json"), "utf8"), health);
+    assert.deepEqual(await published(), health);
+    assert.equal(health.state, "ready");
     const explicit = { ...nativeOptions(["watch", "--tab", "work/tb2"], f.options.env), command: f.options.command, namer: { suggest: f.options.namer.suggest } };
     await assert.rejects(watchNative(explicit, new AbortController().signal), /timed out waiting for lock/);
   } finally {
@@ -460,7 +465,12 @@ test("startup during app downtime and an offline remote waits and then preserves
     f.appDown = false;
     f.emit();
     await until(() => f.writes.includes("tb1"), "local naming independent of remote outage");
-    await until(async () => (await f.status()).managedTabs === 2, "offline remote namespace retained");
+    await until(async () => {
+      const health = await f.status();
+
+      // tb1 turns active only after its rename read-back; the locked offline remote stays waiting.
+      return health.managedTabs === 2 && health.targets.active === 1 && health.targets.waiting === 1;
+    }, "offline remote namespace retained");
     assert.equal(f.tabs.get("work/tb2")!.name, "Remote Manual");
     assert.equal(f.calls.some((call) => call[1] === "read" && call[2]?.startsWith("work/")), false);
     assert.equal((await f.status()).state, "ready");
