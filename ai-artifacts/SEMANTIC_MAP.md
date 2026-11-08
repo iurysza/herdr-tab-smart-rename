@@ -49,6 +49,7 @@ Read [naming flow](architecture/naming-flow.md) for the call sequence and [owner
 | Registered actions and runtime commands | [herdr-plugin.toml](../herdr-plugin.toml) | [manifest.test.ts](../test/manifest.test.ts), [runtime.test.ts](../test/runtime.test.ts) |
 | Release-bound installer and version checks | [install.sh](../installer/install.sh), [render-installer.ts](../scripts/render-installer.ts), [check-release-version.ts](../scripts/check-release-version.ts) | [installer.test.ts](../test/installer.test.ts), [release-assets.test.ts](../test/release-assets.test.ts), [release.test.ts](../test/release.test.ts) |
 | Native config import, private paths, activation rollback, status, uninstall and LaunchAgent ownership | [native-install.ts](../src/native-install.ts), [native-service.ts](../src/native-service.ts), [native-config.ts](../src/native-config.ts) | [native-install.test.ts](../test/native-install.test.ts), [setup.test.ts](../test/setup.test.ts) |
+| In-app trigger: owned headless mod and one guarded key in herdr-app keys.json | [native-trigger.ts](../src/native-trigger.ts) | [native-install.test.ts](../test/native-install.test.ts) |
 | Native source manifest, bound archive verification, staging and immutable versions | [package-native.ts](../scripts/package-native.ts), [install.sh](../installer/install.sh) | [native-package.test.ts](../test/native-package.test.ts), [installer.test.ts](../test/installer.test.ts) |
 
 ## Validation tools

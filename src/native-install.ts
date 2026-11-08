@@ -12,6 +12,7 @@ import { runNativeSetup, type SetupResult } from "./setup.ts";
 import { beginSetupTransaction } from "./setup-transaction.ts";
 import { acquireLock } from "./storage.ts";
 import { sanitizeText } from "./text.ts";
+import { installTrigger, uninstallTrigger, type TriggerResult } from "./native-trigger.ts";
 import {
   createNativeServiceController, nativeInstallPaths, NativeInstallError, NATIVE_ENV_KEYS, NATIVE_READY_TIMEOUT_MS,
   renderNativePlist, renderNativeWrapper, validateActivation,
@@ -43,6 +44,8 @@ export interface NativeInstallResult {
   health?: NativeHealth;
   cancelled?: boolean;
   imported?: NativeConfigFile[];
+  /** The in-app key and mod (herdr-app's keys.json and mods/smart-rename). */
+  trigger?: TriggerResult;
 }
 
 export interface NativeInstallOptions {
@@ -360,7 +363,9 @@ export async function nativeInstall(
         throw new NativeInstallError("Native uninstall failed; previous activation restored");
       }
 
-      return { installed: false, service: "absent" };
+      const appHome = snapshot.activation?.env.HERDR_APP_HOME ?? env.HERDR_APP_HOME ?? path.join(nativeHome(env), ".config/herdr-app");
+
+      return { installed: false, service: "absent", trigger: await uninstallTrigger(appHome, { now: dependencies.now }) };
     }
 
     const configDir = nativeConfigDirectory(env, options.configDir ?? env.HERDR_PLUGIN_CONFIG_DIR ?? snapshot.activation?.configDir);
@@ -431,8 +436,10 @@ export async function nativeInstall(
       const health = await waitReady(controller, activation, paths, startedAt, dependencies);
       await writeAtomic(paths.activation, `${JSON.stringify(activation, null, 2)}\n`, 0o600);
       configTransaction.commit();
+      // The key reaches the service through the payload the activation points at, so it comes last.
+      const trigger = await installTrigger(activation.env.HERDR_APP_HOME!, activation, paths, { now: dependencies.now });
 
-      const result: NativeInstallResult = { installed: true, service: "running", configDir, health };
+      const result: NativeInstallResult = { installed: true, service: "running", configDir, health, trigger };
 
       if (imported.length) result.imported = imported;
 

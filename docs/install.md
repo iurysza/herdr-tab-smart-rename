@@ -1,10 +1,10 @@
 # Install or upgrade Smart Rename
 
-For the daemon plugin, use a terminal inside Herdr with Herdr 0.7.5+ and Bun 1.2.23+. The native macOS app uses the separate path below. Neither installer installs Bun or Herdr for you.
+Smart Rename supports both Herdr generations. For the legacy Herdr daemon (`herdr`), install the daemon plugin from a terminal inside Herdr with Herdr 0.7.5+ and Bun 1.2.23+. For the new Herdr app (`herdr-app`) with Herdr Core (`hc`), use the native path below. Neither installer installs Bun or Herdr for you.
 
 ## Native macOS app
 
-The native service needs macOS, Bun 1.2.23+, and the native `herdr-app` and `hc` executables on PATH. It does not need the older `herdr` daemon. Open the native app before installation so the worker can discover its tabs. Connected remote machines need no second installation.
+The native service needs macOS, Bun 1.2.23+, and the Herdr app (`herdr-app`) and Herdr Core (`hc`) executables on PATH. It does not need the legacy `herdr` daemon. Open the native app before installation so the worker can discover its tabs. Connected remote machines need no second installation.
 
 From a local checkout, run:
 
@@ -48,7 +48,9 @@ smart-rename-native status
 smart-rename-native uninstall
 ```
 
-Uninstall removes only owned activation files and the service. It keeps private configuration, naming state, and versioned source. Status reports launchd process state, worker health, target counts, and the latest safe failure summary. A ready supervisor can have offline or blocked targets. Those targets preserve their state without blocking other tabs.
+Install also adds an in-app trigger: the key `ctrl-shift-r` names the focused tab now, local or remote, and shows the result as a toast. It writes a headless mod to `$HERDR_APP_HOME/mods/smart-rename` and binds `ctrl-shift-r` to `mod.open:smart-rename` in the `global` section of `keys.json`, after saving a `keys.json.bak-<date>` copy beside it. It never changes a key you already bound: the result then reports `colliding`, and you can bind `mod.open:smart-rename` to another key yourself. A mod folder of the same name that is not ours is left alone. The trigger reclaims a name you typed for that tab, like `rename-now`.
+
+Uninstall removes only owned activation files, the service, the owned mod and that one key binding (again with a backup). It keeps private configuration, naming state, and versioned source. Status reports launchd process state, worker health, target counts, and the latest safe failure summary. A ready supervisor can have offline or blocked targets. Those targets preserve their state without blocking other tabs.
 
 The local installer also accepts `--native --status` and `--native --uninstall`. A native-enabled release installer supports the same flags, including through `sh -s --` after curl. Status and uninstall need neither a running app nor provider availability. They never invoke the daemon. Native setup and supervision can send bounded context from eligible tabs to the selected provider, as described in [privacy and context](configuration.md#private-files-and-context).
 
