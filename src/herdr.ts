@@ -18,10 +18,12 @@ const TabSchema = z.looseObject({
   workspace_id: z.string(),
   label: z.string(),
   number: z.union([z.number(), z.string()]),
+  named: z.boolean().optional(),
 });
 
 const PaneSchema = z.looseObject({
   pane_id: z.string(),
+  terminal_id: z.string().optional(),
   tab_id: z.string(),
   workspace_id: z.string(),
   label: z.string().optional(),

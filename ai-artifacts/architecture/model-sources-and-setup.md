@@ -63,6 +63,8 @@ Evidence: [provider tests](../../test/provider.test.ts), [model-namer.ts](../../
 
 ## Setup commits before worker startup
 
+This section describes daemon setup. Native installation uses `runNativeSetup` without daemon hooks and wraps configuration in an outer activation transaction. Native startup failure restores the previous configuration and service, including an imported naming prompt. See [native installation](native-herdr-app.md#verified-payload-and-user-service).
+
 Setup collects choices and shows a review before saving. Discovery may load an adapter, but cancellation before confirmation writes no settings and starts no worker. Keybinding inspection produces instructions without editing the user's Herdr configuration.
 
 ```mermaid

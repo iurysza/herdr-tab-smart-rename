@@ -52,9 +52,9 @@ Evidence: `paneIdentity`, the claim transaction, and the final transaction in [s
 
 `withStateTransaction` in [storage.ts](../../src/storage.ts) acquires `state.lock`, loads and validates `state.json`, runs the operation, persists, and releases the lock. `saveState` replaces the file through a temporary file and rename. Known state fields are validated; extra top-level fields survive through the extensible state schema.
 
-The final transaction persists an expected write before issuing the Herdr rename. It keeps the lock through that command. If the command fails, it restores and persists the previous ownership record. This ordering lets other plugin processes recognize the automatic write.
+The final transaction persists an expected write before issuing the Herdr rename. It keeps the lock through that command. If the command fails, it restores and persists the previous ownership record. This ordering lets other plugin processes recognize the automatic write. An adapter can instead return a typed skipped result. The service then restores ownership, releases its claimed attempt, and records no applied change or model success.
 
-Atomic file replacement protects the state file, not the external label. Herdr's rename command has no expected-label parameter in this adapter. A manual edit after the final snapshot but before the command can still be overwritten. The [reliability repair log](../goals/rename-reliability/dev-log.md) records that limitation and the original API inspection.
+Atomic file replacement protects the state file, not the external label. The native adapter receives the final snapshot's raw tab name and refuses a write if its additional document read sees a different name or missing tab. Its app command still has no expected-label parameter. A manual edit after that final read but before the command can still be overwritten. The daemon adapter also lacks an atomic conditional rename. The [reliability repair log](../goals/rename-reliability/dev-log.md) records that limitation and the original API inspection.
 
 State locks contain a PID and nonce. Release removes only a lock with the same nonce. A dead owner or an aged lock can be recovered; age-based recovery also means the lock is not an unlimited lease. Missing state starts empty, while invalid state data can fail validation rather than silently reset ownership.
 

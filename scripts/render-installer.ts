@@ -1,9 +1,11 @@
 import { chmod, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { nativePayloadProgram } from "./package-native.ts";
 
-const [tag, commit, destination] = process.argv.slice(2);
+const [tag, commit, destination, nativeArchive] = process.argv.slice(2);
 
 if (!tag || !commit || !destination) {
-  throw new Error("Usage: bun scripts/render-installer.ts v<version> <commit> <destination>");
+  throw new Error("Usage: bun scripts/render-installer.ts v<version> <commit> <destination> [native-archive]");
 }
 
 if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag)) {
@@ -16,9 +18,15 @@ if (!/^[0-9a-f]{40}$/i.test(commit)) {
 
 const template = await readFile(new URL("../installer/install.sh", import.meta.url), "utf8");
 
+const nativeChecksum = nativeArchive ? createHash("sha256").update(await readFile(nativeArchive)).digest("hex") : "";
+
+const quotedProgram = `'${nativePayloadProgram.replaceAll("'", "'\\''")}'`;
+
 const rendered = template
   .replaceAll("__RELEASE_TAG__", tag)
-  .replaceAll("__RELEASE_COMMIT__", commit);
+  .replaceAll("__RELEASE_COMMIT__", commit)
+  .replaceAll("__NATIVE_PAYLOAD_SHA256__", nativeChecksum)
+  .replaceAll("__NATIVE_PAYLOAD_PROGRAM__", quotedProgram);
 
 if (rendered.includes("__RELEASE_TAG__") || rendered.includes("__RELEASE_COMMIT__")) {
   throw new Error("Installer rendering left release placeholders");

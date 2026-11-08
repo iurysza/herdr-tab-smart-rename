@@ -62,6 +62,38 @@ SMART_RENAME_LIVE_TEST=1 bun test test/herdr-live.test.ts
 
 The tests use a local fake provider, not a billed model. They cover pane closure during inference, manual-label protection, target scope, and failure cleanup. The default contained runner intentionally cannot reach a real Herdr socket.
 
+## Live native-app checks
+
+The native app is a separate runtime. Do not link the daemon plugin to test it. With the native app open, run:
+
+```sh
+SMART_RENAME_NATIVE_LIVE_TEST=1 bun test test/herdr-app-live.test.ts
+```
+
+This opt-in test creates and closes one `Tab Rename Scratch` tab in the selected native space. It uses a localhost fake provider, exercises the actual native CLI, rejects a late model result after a manual edit, preserves a numeric manual name and checks failure cleanup. It also verifies that other tab names and the original selection stay unchanged. No real provider credentials or daemon writes are used.
+
+Set `SMART_RENAME_NATIVE_EVIDENCE_DIR` to retain screenshots and command results in a chosen directory. The test waits for core terminal shutdown after closing the tab. Finished core records remain intact.
+
+For the remote scenario, set `MACHINE` to an already-connected, non-temporary core profile with an existing native-app space. The test uses a POSIX scratch shell in `/tmp` and `/bin/cat`. It does not establish, replace or disconnect a remote connection.
+
+```sh
+SMART_RENAME_NATIVE_REMOTE_LIVE_TEST=1 \
+SMART_RENAME_NATIVE_REMOTE_MACHINE="$MACHINE" \
+bun test test/herdr-app-live.test.ts
+```
+
+Remote mode creates one owned tab, runs the same CLI safeguards and verifies a real watcher rename. Scratch-only metadata changes supply the two stable observations required by the naming policy. Provider fixtures run here on localhost. Existing tabs and agents stay untouched; the original space, tab and pane selection return after cleanup.
+
+Mocked tests cover disconnect and core-replacement races. Do not interrupt a shared remote connection to test them.
+
+Run the mocked native client and watcher tests without touching a live app:
+
+```sh
+bun scripts/test-contained.ts test/herdr-app.test.ts
+```
+
+The full contained suite includes them. Live tests remain skipped unless explicitly enabled.
+
 ## Before committing
 
 ```sh

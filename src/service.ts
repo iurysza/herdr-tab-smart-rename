@@ -54,12 +54,14 @@ export interface ServiceDependencies {
     pane: HerdrPane,
     env?: NodeJS.ProcessEnv,
   ): Promise<PaneContext>;
+  // Native adapters compare expectedLabel with the raw tab name before writing.
   rename(
     kind: "workspace" | "tab" | "pane",
     id: string,
     label: string,
     env?: NodeJS.ProcessEnv,
-  ): Promise<void>;
+    expectedLabel?: string,
+  ): Promise<void | { status: "skipped"; reason: string }>;
 }
 
 export interface EvaluateOptions {
@@ -86,6 +88,8 @@ interface ServiceOptions {
   dryRun?: boolean;
   progress?: Progress;
   dependencies?: Partial<ServiceDependencies>;
+  targetKinds?: readonly RenameChange["kind"][];
+  transcriptAgents?: readonly string[];
 }
 
 interface PaneContextCache {
@@ -199,11 +203,18 @@ export function reconcileSnapshot(
 
   for (const tab of snap.tabs) {
     const label = progressBase(tab.label) ?? tab.label;
+
+    // Native documents distinguish cleared names from manual numeric names.
+    if (tab.named === false && !state.tabs[tab.tab_id]?.expectedLabel) {
+      state.tabs[tab.tab_id] = { manual: false, observedLabel: label };
+      continue;
+    }
+
     state.tabs[tab.tab_id] = reconcileItem(
       state.tabs[tab.tab_id],
       label,
-      isDefaultLabel(label, tab.number),
-      true,
+      tab.named === undefined ? isDefaultLabel(label, tab.number) : !tab.named,
+      tab.named === undefined,
     );
   }
 
@@ -249,6 +260,8 @@ export class AutoNameService {
   readonly #dryRun: boolean;
   readonly #progress: Progress | undefined;
   readonly #dependencies: ServiceDependencies;
+  readonly #targetKinds: readonly RenameChange["kind"][];
+  readonly #transcriptAgents: readonly string[];
 
   constructor({
     stateFile = null,
@@ -258,6 +271,8 @@ export class AutoNameService {
     dryRun = false,
     progress,
     dependencies = {},
+    targetKinds = ["workspace", "tab", "pane"],
+    transcriptAgents = ["pi", "claude"],
   }: ServiceOptions) {
     this.#stateFile = stateFile;
     this.#stateLock = stateLock;
@@ -266,6 +281,8 @@ export class AutoNameService {
     this.#dryRun = dryRun;
     this.#progress = dryRun ? undefined : progress;
     this.#dependencies = { ...defaultDependencies, ...dependencies };
+    this.#targetKinds = targetKinds;
+    this.#transcriptAgents = transcriptAgents;
   }
 
   async initialize(initial?: HerdrSnapshot | null): Promise<HerdrSnapshot> {
@@ -497,6 +514,9 @@ export class AutoNameService {
       const targets: RenameTarget[] = [];
       const scope = options.resetKind;
 
+      if (scope && !this.#targetKinds.includes(scope))
+        throw new Error(`This backend cannot rename ${scope} targets`);
+
       if (!scope || scope === "workspace")
         targets.push({ kind: "workspace", id: workspace.workspace_id });
 
@@ -518,15 +538,17 @@ export class AutoNameService {
         );
       }
 
+      const supported = targets.filter((target) => this.#targetKinds.includes(target.kind));
+
       if (scope) {
-        for (const target of targets) {
+        for (const target of supported) {
           const collection = records(state, target.kind);
           collection[target.id] = resetOwnership(collection[target.id]);
           state.evaluations[target.id] = randomUUID();
         }
       }
 
-      return { tab, workspace, targets, snap, state: structuredClone(state) };
+      return { tab, workspace, targets: supported, snap, state: structuredClone(state) };
     });
 
     if (!initial) return null;
@@ -616,7 +638,7 @@ export class AutoNameService {
           context = details.context;
           focused = details.paneContexts.find((p) => p.focused);
           agent = Boolean(details.focusedPane?.agent);
-          transcriptAgent = ["pi", "claude"].includes(
+          transcriptAgent = this.#transcriptAgents.includes(
             details.focusedPane?.agent ?? "",
           );
           sessionPane = details.focusedPane;
@@ -635,7 +657,7 @@ export class AutoNameService {
           context = details.context;
           focused = details.paneContexts[0];
           agent = true;
-          transcriptAgent = ["pi", "claude"].includes(pane.agent ?? "");
+          transcriptAgent = this.#transcriptAgents.includes(pane.agent ?? "");
           sessionPane = pane;
           sourcePanes = [pane];
         }
@@ -749,6 +771,13 @@ export class AutoNameService {
           }
 
           const suggestion = await pending;
+
+          if (suggestion.discarded) {
+            outcome.reason = suggestion.reason;
+            await transaction(releaseAttempt);
+            continue;
+          }
+
           label = suggestion.tab;
           outcome.reason = suggestion.reason;
           modelAnswered = true;
@@ -806,12 +835,29 @@ export class AutoNameService {
               await persist();
 
               try {
-                await this.#dependencies.rename(
+                const refused = await this.#dependencies.rename(
                   target.kind,
                   target.id,
                   label,
                   this.#env,
+                  target.kind === "tab"
+                    ? latest.tabs.find((tab) => tab.tab_id === target.id)?.label
+                    : current,
                 );
+
+                if (refused) {
+                  if (previous) collection[target.id] = previous;
+                  else delete collection[target.id];
+                  releaseAttempt(state);
+                  outcome.status = refused.status;
+                  outcome.reason = refused.reason;
+
+                  if (target.kind === "workspace") result.candidate.workspace = null;
+                  else if (target.kind === "tab") result.candidate.tab = null;
+                  else result.candidate.panes![target.id] = null;
+
+                  return;
+                }
               } catch (error) {
                 if (previous) collection[target.id] = previous;
                 else delete collection[target.id];

@@ -4,16 +4,18 @@ import type { KeybindingInspection } from "./setup-keybindings.ts";
 export interface SetupDraft {
   readonly selection: ModelSelection;
   readonly action: "keep" | "replace";
-  readonly keybindings: KeybindingInspection;
+  readonly keybindings?: KeybindingInspection;
 }
 
 export function setupReview(draft: SetupDraft): string {
-  return [
+  const lines = [
     `AI: ${selectionLabel(draft.selection)}`,
     `Configuration: ${draft.action}`,
-    "Keybinding guidance (read-only):",
-    renderKeybindingGuidance(draft.keybindings),
-  ].join("\n");
+  ];
+
+  if (draft.keybindings) lines.push("Keybinding guidance (read-only):", renderKeybindingGuidance(draft.keybindings));
+
+  return lines.join("\n");
 }
 
 export function renderKeybindingGuidance(

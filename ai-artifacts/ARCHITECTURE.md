@@ -1,8 +1,16 @@
 # Architecture overview
 
-Smart Rename is a local Herdr plugin executed directly by Bun. A background worker and short-lived CLI actions share `AutoNameService`, which chooses names and protects manual labels. Model sources suggest text; the service decides whether that text may become a label.
+Smart Rename runs directly in Bun. The daemon plugin and native-app backend share `AutoNameService`, which chooses names and protects manual labels. Model sources suggest text; the service decides whether that text may become a label.
 
 [Knowledge base](README.md) · [Naming glossary](CONTEXT.md) · [Code and test map](SEMANTIC_MAP.md)
+
+## Native herdr app
+
+The native backend is opt-in through [herdr-app-cli.ts](../src/herdr-app-cli.ts). It uses the same naming service with tab-only capabilities and a separate state directory. [herdr-app.ts](../src/herdr-app.ts) discovers native tabs, reads core terminal context and writes names with `herdr-app do tab.rename`. It never sends native IDs to the older daemon. Local and machine-qualified remote targets share the same policy. Remote context and layout reads go through the local core broker; ownership state is isolated by the remote core's permanent identity.
+
+The optional [native supervisor](../src/native-worker.ts) discovers all eligible local and connected remote tabs through one event subscription. Per-target services reuse foreground ownership and watch-lock namespaces while borrowing one model source. [The native installer](../src/native-install.ts) owns the user service and activation rollback. [The shell bootstrap](../installer/install.sh) verifies and stages a bound source payload before invoking it.
+
+[Native-app architecture](architecture/native-herdr-app.md) explains targeting, shared-source lifetime, readiness, verified installation, and the contained packaged check. The existing daemon plugin remains the default path described below.
 
 ## Running processes and external systems
 

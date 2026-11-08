@@ -18,7 +18,35 @@ An agent reviewing authentication can show `Review Auth Changes`. A test run can
 https://github.com/user-attachments/assets/0c9d1ff9-58c5-4b87-a505-74fcb62e29b1
 
 
-## Install on macOS or Linux
+## Use the native herdr app
+
+The native herdr app uses `herdr-app` and `hc`, not the older `herdr` daemon. The native app and the Sheprd companion can both be named `Herdr.app`. Check `herdr-app --version` and `hc --version` rather than inferring the product from its bundle name.
+
+For automatic naming across local and connected remote tabs, use the optional [native macOS service installer](./docs/install.md#native-macos-app). From a local checkout, run `sh installer/install.sh --native`. The release one-liner needs a release containing the native payload; this change does not publish one. The native installer imports existing model selection and naming policy without contacting the daemon.
+
+From a checkout with dependencies installed, find a native tab ID with `herdr-app ls`. Pass that ID explicitly. Local IDs look like `tb…`; remote IDs include their machine prefix, such as `workstation/tb…`.
+
+```sh
+bun src/herdr-app-cli.ts rename-now --tab "$TAB_ID" --config-dir "$CONFIG_DIR"
+```
+
+`CONFIG_DIR` is your existing Smart Rename private model configuration directory. The native entry point reads that selection and prompt without rewriting them. You can also configure Direct through the documented `SMART_RENAME_*` environment variables.
+
+`rename-now` deliberately reclaims a manual tab name. Use `once` to preserve manual names, or `dry-run` to preview eligible changes without writing labels or state. `watch` runs in the foreground until Ctrl+C and preserves manual names:
+
+```sh
+bun src/herdr-app-cli.ts watch --tab "$TAB_ID" --config-dir "$CONFIG_DIR"
+```
+
+The native backend changes only the selected tab, locally or on an already-connected remote machine. Keep the full machine prefix for remote targets. Other tabs, space names, pane titles and the daemon worker stay unchanged.
+
+The naming process and provider configuration stay on this computer. Remote targets use the local core's existing connection, not a second Smart Rename installation. A model request sends the selected tab's bounded context to your configured provider. The foreground commands do not install or copy daemon transcripts, remote credentials, a background service or a layout mod.
+
+Remote state and locks use the target core's permanent identity. For remote targets, `--state-dir` selects a base directory containing a private `remote/<hash>` subdirectory. Offline targets keep their ownership state; `watch` retries through the existing event subscription and recovery sweep. An alias pointing to a different core requires a restart.
+
+See [native-app architecture and limits](./ai-artifacts/architecture/native-herdr-app.md) for ownership, state isolation and the remaining manual-edit race.
+
+## Install the daemon plugin on macOS or Linux
 
 You need Herdr 0.7.5+ and Bun 1.2.23+ installed. Pi and OpenCode are optional.
 

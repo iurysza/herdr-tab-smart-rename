@@ -26,7 +26,8 @@ Keep `reason` short. Never expose hidden reasoning or quote sensitive context. I
 A label must:
 
 - describe the task, not its actor or incidental tool;
-- match the primary language of the user requests: use concise Chinese (2–12 characters) if requests are in Chinese; 2–4 Title Case words in that language if it is written with letter case (Latin, Cyrillic, Greek); otherwise 2–4 Title Case English words;
+- write the label in English, regardless of the language of the user requests;
+- use 2–4 Title Case words;
 - capitalize every word except these lowercase connectors, which do not count toward the four: <!-- connectors -->a, an, and, for, in, of, on, to, with, e, ou, o, um, uma, de, do, da, dos, das, em, no, na, nos, nas, ao, pelo, pela, para, por, com, sem, sobre, y, un, una, del, el, la, los, las, en, al, con, sin, et, à, du, des, le, les, au, aux, dans, pour, avec, sur, und, der, die, dem, den, von, mit, zu, im, auf, bei, für, über, ed, di, il, su, per, nel, della<!-- /connectors -->;
 - stay under 30 characters;
 - omit project, app, agent, model, and provider prefixes;
@@ -34,9 +35,7 @@ A label must:
 
 Include a project or tool name only when it is the task object and omission would change the meaning.
 
-Good (Chinese): `修复认证问题`, `修复 MCP 故障`, `同步代码分支`, `清理系统进程`.
-Good (English): `Review Auth Changes`, `Repair Tab Ownership`, `Run Tests`, `View API Logs`.
-Good (Portuguese): `Revisar Ação do Usuário`, `Configurar Sessão`, `Apagar Forks e Ligar Worker`.
+Good: `Review Auth Changes`, `Repair Tab Ownership`, `Run Tests`, `View API Logs`.
 
 Bad: `Kimi Auth Review`, `Pi Coding Agent`, a project name alone, a one-word label, or specificity unsupported by evidence.
 
@@ -68,8 +67,8 @@ The model does not simulate or decide the rules below.
 - **Safety:** context is sanitized and capped at 4,500 serialized characters; environment values are excluded; common credential shapes are redacted best-effort.
 - **First request:** automatic model naming for Pi and Claude Code tabs and panes waits for a readable user request; startup banners are not task evidence. Existing labels remain unchanged while waiting. Explicit actions and deterministic process labels bypass this gate; agents without transcript support retain terminal-based naming.
 - **Churn control:** events are debounced; a 60-second sweep catches silent task changes; unchanged successes are skipped; background model attempts wait 10 minutes per target; explicit actions bypass those gates.
-- **Retries:** the first request of each agent session skips the 10-minute wait. A failed call retries after 30 seconds, doubling up to 10 minutes. A model that declines to name retries only when the context changes. An answer discarded because its source changed does not count as an attempt.
-- **Validation:** invalid JSON, unchanged labels, and labels outside the word, length, or format rules are rejected.
+- **Retries:** the first request of each agent session skips the 10-minute wait. A failed call retries after 30 seconds, doubling up to 10 minutes. A model that declines to name retries only when the context changes. An answer discarded because its source changed or its label contains non-Latin characters does not count as an attempt.
+- **Validation:** invalid JSON, unchanged labels, and labels outside the word, length, or format rules are rejected. Model labels must use Latin script, ASCII digits, and supported punctuation. Latin accents and their combining marks are allowed. Non-Latin labels are discarded without consuming the cooldown, even with a custom naming prompt.
 
 - **Concurrency:** model calls run outside the shared state lock. Each write rechecks ownership, target existence, and source-pane identity. New explicit requests supersede older work. Independent target failures are reported separately.
 - **Closure:** stale results from closed or replaced panes are discarded. Already-sent model requests may still complete. Closed naming records are pruned from fresh snapshots.
