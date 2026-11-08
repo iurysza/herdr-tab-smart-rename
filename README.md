@@ -32,6 +32,8 @@ bun src/herdr-app-cli.ts rename-now --tab "$TAB_ID" --config-dir "$CONFIG_DIR"
 
 `CONFIG_DIR` is your existing Smart Rename private model configuration directory. The native entry point reads that selection and prompt without rewriting them. You can also configure Direct through the documented `SMART_RENAME_*` environment variables.
 
+The native installer also binds `ctrl-shift-r` in the app to name the focused tab now, through a small owned mod; see [the install guide](./docs/install.md#native-macos-app). It skips the key if you already use it.
+
 `rename-now` deliberately reclaims a manual tab name. Use `once` to preserve manual names, or `dry-run` to preview eligible changes without writing labels or state. `watch` runs in the foreground until Ctrl+C and preserves manual names:
 
 ```sh

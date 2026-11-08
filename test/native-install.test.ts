@@ -4,7 +4,7 @@ import { test as bunTest } from "bun:test";
 const test = process.platform === "win32" ? bunTest.skip : bunTest;
 
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, readlink, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { nativeInstall, nativeInstallMain, nativeInstallOptions, type NativeInstallOptions } from "../src/native-install.ts";
@@ -303,7 +303,11 @@ test("status and uninstall work without app/core binaries, provider config or re
     assert.equal(await fileExists(f.paths.plist), false);
     assert.equal(await fileExists(f.paths.activation), false);
     assert.equal(await fileExists(path.join(f.paths.runtimeDir, "status.json")), true);
-    assert.deepEqual(await nativeInstall("uninstall", { env: f.env }, f.dependencies), { installed: false, service: "absent" });
+    const repeated = await nativeInstall("uninstall", { env: f.env }, f.dependencies);
+    assert.equal(repeated.installed, false);
+    assert.equal(repeated.service, "absent");
+    assert.equal(repeated.trigger?.mod, "absent");
+    assert.equal(repeated.trigger?.key, "no-keys-file");
   } finally { await f.cleanup(); }
 });
 
@@ -696,5 +700,114 @@ test("status accepts the earlier minimal version-one worker health schema", asyn
     const result = await nativeInstall("status", { env: f.env }, f.dependencies);
     assert.equal(result.service, "running");
     assert.equal(result.health?.state, "ready");
+  } finally { await f.cleanup(); }
+});
+
+// The in-app trigger: one key in herdr-app's keys.json opens a headless owned mod.
+import { z } from "zod";
+import { installTrigger, renderTriggerMod, TRIGGER_ACTION, TRIGGER_KEY, triggerModDirectory } from "../src/native-trigger.ts";
+
+const KeysFileSchema = z.record(z.string(), z.record(z.string(), z.string()));
+
+type KeysFile = z.infer<typeof KeysFileSchema>;
+
+async function keysFixture(f: Awaited<ReturnType<typeof fixture>>, keys: KeysFile | null) {
+  await mkdir(f.env.HERDR_APP_HOME, { recursive: true });
+  const file = path.join(f.env.HERDR_APP_HOME, "keys.json");
+
+  if (keys) await writeFile(file, `${JSON.stringify(keys, null, 2)}\n`);
+
+  return { file, read: async () => KeysFileSchema.parse(JSON.parse(await readFile(file, "utf8"))) };
+}
+
+test("install writes the trigger mod and binds a free key once, with a backup of the person's keys", async () => {
+  const f = await fixture();
+
+  try {
+    const keys = await keysFixture(f, { global: { "cmd-t": "tab.new" }, terminal: { "cmd-c": "terminal.copy" } });
+    const first = await f.install();
+    assert.equal(first.trigger?.mod, "installed");
+    assert.equal(first.trigger?.key, "added");
+    assert.ok(first.trigger?.backup?.startsWith(`${keys.file}.bak-`));
+    assert.deepEqual(await keys.read(), { global: { "cmd-t": "tab.new", [TRIGGER_KEY]: TRIGGER_ACTION }, terminal: { "cmd-c": "terminal.copy" } });
+    assert.equal(await readFile(first.trigger!.backup!, "utf8"), `${JSON.stringify({ global: { "cmd-t": "tab.new" }, terminal: { "cmd-c": "terminal.copy" } }, null, 2)}\n`);
+    const directory = triggerModDirectory(f.env.HERDR_APP_HOME);
+    const activation = await f.activation();
+    const rendered = renderTriggerMod(activation, f.paths);
+    assert.equal(await readFile(path.join(directory, "main.js"), "utf8"), rendered["main.js"]);
+    assert.equal(await readFile(path.join(directory, "mod.json"), "utf8"), rendered["mod.json"]);
+    assert.ok(rendered["main.js"].includes(`"${path.join(f.paths.current, "src/run-bun.sh")}"`));
+    assert.ok(rendered["main.js"].includes(`"--config-dir",${JSON.stringify(f.paths.configDir)}`));
+    assert.ok(rendered["main.js"].includes(`"HERDR_APP_HOME=${f.env.HERDR_APP_HOME}"`));
+    assert.equal(rendered["main.js"].includes("secret"), false);
+    assert.equal(rendered["main.js"].includes("daemon-tab-do-not-inherit"), false);
+
+    const second = await f.install(f.versions[1]);
+    assert.equal(second.trigger?.key, "already-bound");
+    assert.equal(second.trigger?.backup, undefined);
+    assert.equal((await readdir(f.env.HERDR_APP_HOME)).filter((name) => name.startsWith("keys.json.bak-")).length, 1);
+    assert.equal(await fileExists(f.invoked), false);
+  } finally { await f.cleanup(); }
+});
+
+test("install never overwrites a person's binding of the trigger key or a foreign mod of the same name", async () => {
+  const f = await fixture();
+
+  try {
+    const keys = await keysFixture(f, { global: { [TRIGGER_KEY]: "pane.split:right" } });
+    const directory = triggerModDirectory(f.env.HERDR_APP_HOME);
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, "main.js"), "export default class Mine {}\n");
+    const result = await f.install();
+    assert.equal(result.installed, true);
+    assert.equal(result.trigger?.key, "colliding");
+    assert.equal(result.trigger?.mod, "foreign");
+    assert.deepEqual(await keys.read(), { global: { [TRIGGER_KEY]: "pane.split:right" } });
+    assert.equal(await readFile(path.join(directory, "main.js"), "utf8"), "export default class Mine {}\n");
+    assert.equal(await fileExists(path.join(directory, "mod.json")), false);
+    assert.equal((await readdir(f.env.HERDR_APP_HOME)).some((name) => name.startsWith("keys.json.bak-")), false);
+
+    const removed = await nativeInstall("uninstall", { env: f.env }, f.dependencies);
+    assert.equal(removed.trigger?.mod, "foreign");
+    assert.equal(removed.trigger?.key, "absent");
+    assert.deepEqual(await keys.read(), { global: { [TRIGGER_KEY]: "pane.split:right" } });
+    assert.equal(await readFile(path.join(directory, "main.js"), "utf8"), "export default class Mine {}\n");
+  } finally { await f.cleanup(); }
+});
+
+test("install reports a missing or invalid keys file and still writes the mod", async () => {
+  const f = await fixture();
+
+  try {
+    await keysFixture(f, null);
+    const missing = await f.install();
+    assert.equal(missing.trigger?.key, "no-keys-file");
+    assert.equal(missing.trigger?.mod, "installed");
+    assert.equal(await fileExists(path.join(triggerModDirectory(f.env.HERDR_APP_HOME), "main.js")), true);
+    await writeFile(path.join(f.env.HERDR_APP_HOME, "keys.json"), "{ not json");
+    const invalid = await installTrigger(f.env.HERDR_APP_HOME, await f.activation(), f.paths, { now: () => 0 });
+    assert.equal(invalid.key, "invalid-keys-file");
+    assert.equal(await readFile(path.join(f.env.HERDR_APP_HOME, "keys.json"), "utf8"), "{ not json");
+  } finally { await f.cleanup(); }
+});
+
+test("uninstall removes the owned mod and only our key binding, keeping every other key", async () => {
+  const f = await fixture();
+
+  try {
+    const keys = await keysFixture(f, { global: { "cmd-t": "tab.new" }, "layout:mine": { "cmd-shift-s": "mine.settle" } });
+    await f.install();
+    assert.equal((await keys.read()).global![TRIGGER_KEY], TRIGGER_ACTION);
+    const result = await nativeInstall("uninstall", { env: f.env }, f.dependencies);
+    assert.equal(result.trigger?.mod, "removed");
+    assert.equal(result.trigger?.key, "removed");
+    assert.ok(result.trigger?.backup);
+    assert.deepEqual(await keys.read(), { global: { "cmd-t": "tab.new" }, "layout:mine": { "cmd-shift-s": "mine.settle" } });
+    assert.equal(await fileExists(triggerModDirectory(f.env.HERDR_APP_HOME)), false);
+    assert.equal((await readdir(f.env.HERDR_APP_HOME)).filter((name) => name.startsWith("keys.json.bak-")).length, 2);
+
+    const again = await nativeInstall("uninstall", { env: f.env }, f.dependencies);
+    assert.equal(again.trigger?.mod, "absent");
+    assert.equal(again.trigger?.key, "absent");
   } finally { await f.cleanup(); }
 });
