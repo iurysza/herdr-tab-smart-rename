@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.6.6...v0.7.0) (2026-11-08)
+
+
+### Features
+
+* **native:** add an in-app key to name the focused tab now ([#67](https://github.com/iurysza/herdr-tab-smart-rename/issues/67)) ([bd5a8dd](https://github.com/iurysza/herdr-tab-smart-rename/commit/bd5a8dd3d8344f98321790356949160531f1d3dc))
+
 ## [0.6.6](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.6.5...v0.6.6) (2026-10-22)
 
 
