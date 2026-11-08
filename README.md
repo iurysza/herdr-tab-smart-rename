@@ -11,6 +11,11 @@ An agent reviewing authentication can show `Review Auth Changes`. A test run can
 - Name known commands without an AI call. Use a model to interpret other tasks.
 - Reuse connected Pi or OpenCode providers, or supply an OpenAI-compatible API key.
 
+Smart Rename supports both Herdr generations:
+
+- The new Herdr app (`herdr-app`) with Herdr Core (`hc`), through the [native service](#use-the-native-herdr-app). It names local and connected remote tabs and adds the `ctrl-shift-r` key.
+- The legacy Herdr daemon (`herdr`), through the [daemon plugin](#install-the-daemon-plugin-on-macos-or-linux).
+
 ## Demo
 
 
@@ -20,7 +25,7 @@ https://github.com/user-attachments/assets/0c9d1ff9-58c5-4b87-a505-74fcb62e29b1
 
 ## Use the native herdr app
 
-The native herdr app uses `herdr-app` and `hc`, not the older `herdr` daemon. The native app and the Sheprd companion can both be named `Herdr.app`. Check `herdr-app --version` and `hc --version` rather than inferring the product from its bundle name.
+The new Herdr app uses `herdr-app` and Herdr Core (`hc`), not the legacy `herdr` daemon. The Herdr app and the Sheprd companion can both be named `Herdr.app`. Check `herdr-app --version` and `hc --version` rather than inferring the product from its bundle name.
 
 For automatic naming across local and connected remote tabs, use the optional [native macOS service installer](./docs/install.md#native-macos-app). From a local checkout, run `sh installer/install.sh --native`. The release one-liner needs a release containing the native payload; this change does not publish one. The native installer imports existing model selection and naming policy without contacting the daemon.
 
@@ -50,7 +55,7 @@ See [native-app architecture and limits](./ai-artifacts/architecture/native-herd
 
 ## Install the daemon plugin on macOS or Linux
 
-You need Herdr 0.7.5+ and Bun 1.2.23+ installed. Pi and OpenCode are optional.
+This path is for the legacy Herdr daemon (`herdr`). You need Herdr 0.7.5+ and Bun 1.2.23+ installed. Pi and OpenCode are optional.
 
 Run this from a Herdr terminal:
 

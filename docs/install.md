@@ -1,10 +1,10 @@
 # Install or upgrade Smart Rename
 
-For the daemon plugin, use a terminal inside Herdr with Herdr 0.7.5+ and Bun 1.2.23+. The native macOS app uses the separate path below. Neither installer installs Bun or Herdr for you.
+Smart Rename supports both Herdr generations. For the legacy Herdr daemon (`herdr`), install the daemon plugin from a terminal inside Herdr with Herdr 0.7.5+ and Bun 1.2.23+. For the new Herdr app (`herdr-app`) with Herdr Core (`hc`), use the native path below. Neither installer installs Bun or Herdr for you.
 
 ## Native macOS app
 
-The native service needs macOS, Bun 1.2.23+, and the native `herdr-app` and `hc` executables on PATH. It does not need the older `herdr` daemon. Open the native app before installation so the worker can discover its tabs. Connected remote machines need no second installation.
+The native service needs macOS, Bun 1.2.23+, and the Herdr app (`herdr-app`) and Herdr Core (`hc`) executables on PATH. It does not need the legacy `herdr` daemon. Open the native app before installation so the worker can discover its tabs. Connected remote machines need no second installation.
 
 From a local checkout, run:
 
