@@ -473,3 +473,143 @@ test("fenced JSON permits surrounding prose but still rejects invalid names and 
     else await assert.rejects(namer.suggest(context));
   }
 });
+
+const FALLBACK_ENV = {
+  SMART_RENAME_PROVIDER: "ollama",
+  SMART_RENAME_BASE_URL: "http://localhost:11434/v1",
+  SMART_RENAME_MODEL: "qwen3.5:4b",
+  SMART_RENAME_API_KEY: "primary-test-key",
+  SMART_RENAME_TIMEOUT_MS: "10000",
+};
+
+test("fallback is off unless configured", async () => {
+  const config = await loadProviderConfig(FALLBACK_ENV);
+  const requests: CompletionRequest[] = [];
+  const lines: string[] = [];
+
+  assert.equal(config.fallback, undefined);
+
+  const namer = new AiSdkNamer(FALLBACK_ENV, async (request) => {
+    requests.push(request);
+    throw new Error("connect ECONNREFUSED");
+  }, (line) => lines.push(line));
+
+  await assert.rejects(namer.suggest(context), /^Error: AI request failed \(ollama\/qwen3\.5:4b\): connect ECONNREFUSED$/);
+  assert.equal(requests.length, 1);
+  assert.deepEqual(lines, []);
+});
+
+test("fallback settings must be complete", async () => {
+  await assert.rejects(
+    loadProviderConfig({ ...FALLBACK_ENV, SMART_RENAME_FALLBACK_BASE_URL: "https://ai-gateway.vercel.sh/v1" }),
+    /SMART_RENAME_FALLBACK_MODEL is required/,
+  );
+  await assert.rejects(
+    loadProviderConfig({ ...FALLBACK_ENV, SMART_RENAME_FALLBACK_BASE_URL: "https://gateway.example/v1", SMART_RENAME_FALLBACK_MODEL: "flash" }),
+    /SMART_RENAME_FALLBACK_API_KEY is required/,
+  );
+  await assert.rejects(
+    loadProviderConfig({ ...FALLBACK_ENV, SMART_RENAME_FALLBACK_BASE_URL: "https://gateway.example/v1", SMART_RENAME_FALLBACK_MODEL: "flash", SMART_RENAME_FALLBACK_API_KEY: "fallback-test-key", SMART_RENAME_FALLBACK_REASONING_EFFORT: "off" }),
+    /SMART_RENAME_FALLBACK_REASONING_EFFORT must be none, low, medium, or high/,
+  );
+});
+
+test("fallback is used once when the primary fails or returns an invalid label", async () => {
+  const fixture = await tempConfig();
+
+  try {
+    await writeFile(
+      fixture.file,
+      [
+        ...Object.entries(FALLBACK_ENV).map(([name, value]) => `${name}=${value}`),
+        "SMART_RENAME_FALLBACK_BASE_URL=https://ai-gateway.vercel.sh/v1/",
+        "SMART_RENAME_FALLBACK_MODEL=deepseek/deepseek-v4-flash",
+        "SMART_RENAME_FALLBACK_API_KEY=fallback-test-key",
+        "SMART_RENAME_FALLBACK_REASONING_EFFORT=low",
+      ].join("\n"),
+    );
+
+    for (const primaryResult of [new Error("Operation timed out"), '{"tab":"bad","reason":"bad"}']) {
+      const requests: CompletionRequest[] = [];
+      const lines: string[] = [];
+
+      const namer = new AiSdkNamer(fixture.env, async (request) => {
+        requests.push(request);
+
+        if (request.config.provider === "ollama") {
+          if (primaryResult instanceof Error) throw primaryResult;
+
+          return primaryResult;
+        }
+
+        return '{"tab":"Repair Socket Reconnect","reason":"current task"}';
+      }, (line) => lines.push(line));
+
+      assert.deepEqual(await namer.suggest(context), { tab: "Repair Socket Reconnect", reason: "current task" });
+      assert.deepEqual(requests.map((request) => request.config.provider), ["ollama", "fallback"]);
+
+      assert.deepEqual(requests[1]?.config, {
+        provider: "fallback",
+        baseURL: "https://ai-gateway.vercel.sh/v1",
+        model: "deepseek/deepseek-v4-flash",
+        apiKey: "fallback-test-key",
+        timeoutMs: 10_000,
+        reasoningEffort: "low",
+      });
+      assert.equal(requests[0]?.system, requests[1]?.system);
+      assert.equal(lines.length, 2);
+      assert.match(lines[0] ?? "", /^AI request failed \(ollama\/qwen3\.5:4b\): .+; trying fallback fallback\/deepseek\/deepseek-v4-flash$/);
+      assert.equal(lines[1], "named by fallback fallback/deepseek/deepseek-v4-flash");
+    }
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("fallback is skipped when the primary succeeds and keeps known provider defaults", async () => {
+  const env = {
+    ...FALLBACK_ENV,
+    SMART_RENAME_FALLBACK_BASE_URL: "https://api.openai.com/v1",
+    SMART_RENAME_FALLBACK_MODEL: "gpt-5.6-luna",
+    SMART_RENAME_FALLBACK_API_KEY: "fallback-test-key",
+  };
+
+  const config = await loadProviderConfig(env);
+
+  assert.equal(config.fallback?.provider, "openai");
+  assert.equal(config.fallback?.reasoningEffort, "medium");
+
+  const requests: CompletionRequest[] = [];
+  const lines: string[] = [];
+
+  const namer = new AiSdkNamer(env, async (request) => {
+    requests.push(request);
+
+    return '{"tab":"Repair Socket Reconnect","reason":"current task"}';
+  }, (line) => lines.push(line));
+
+  assert.equal((await namer.suggest(context)).tab, "Repair Socket Reconnect");
+  assert.equal(requests.length, 1);
+  assert.deepEqual(lines, ["named by ollama/qwen3.5:4b"]);
+});
+
+test("fallback failure reports both errors without either key", async () => {
+  const env = {
+    ...FALLBACK_ENV,
+    SMART_RENAME_FALLBACK_BASE_URL: "https://gateway.example/v1",
+    SMART_RENAME_FALLBACK_MODEL: "flash",
+    SMART_RENAME_FALLBACK_API_KEY: "fallback-test-key",
+  };
+
+  const namer = new AiSdkNamer(env, async (request) => {
+    throw new Error(`401 Authorization failed for ${request.config.apiKey}`);
+  }, () => {});
+
+  const failure = await namer.suggest(context).then(
+    () => { throw new Error("Expected both providers to fail"); },
+    (cause) => z.instanceof(Error).parse(cause),
+  );
+
+  assert.match(failure.message, /^AI request failed \(ollama\/qwen3\.5:4b\): 401 .+; fallback AI request failed \(fallback\/flash\): 401 /);
+  assert.doesNotMatch(failure.message, /primary-test-key|fallback-test-key/);
+});
