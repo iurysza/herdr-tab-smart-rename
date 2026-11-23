@@ -10,6 +10,7 @@ import { decodeSuggestion } from "./effect/model-output.ts";
 import {
   DEFAULT_DIRECT_PROVIDER_ID,
   directProviderProfile,
+  directProviderProfiles,
 } from "./provider-registry.ts";
 import { sanitizeText } from "./text.ts";
 
@@ -48,7 +49,10 @@ const ProviderConfigSchema = z.object({
   apiKey: z.string().min(1),
 });
 
-export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
+export type ProviderConfig = z.infer<typeof ProviderConfigSchema> & {
+  /** Optional second provider, tried once when the primary request fails. */
+  fallback?: ProviderConfig;
+};
 
 export interface Namer {
   suggest(context: NamingContext): Promise<NameSuggestion>;
@@ -189,6 +193,58 @@ function configError(error: z.ZodError): Error {
   return new Error(messages.get(field ?? "") ?? "AI provider configuration is invalid");
 }
 
+function fallbackConfigError(error: z.ZodError): Error {
+  const field = error.issues[0]?.path[0];
+
+  const names = new Map<PropertyKey, string>([
+    ["baseURL", "SMART_RENAME_FALLBACK_BASE_URL must be an HTTP(S) URL without credentials"],
+    ["model", "SMART_RENAME_FALLBACK_MODEL is required"],
+    ["apiKey", "SMART_RENAME_FALLBACK_API_KEY is required"],
+    ["reasoningEffort", "SMART_RENAME_FALLBACK_REASONING_EFFORT must be none, low, medium, or high"],
+  ]);
+
+  return new Error(names.get(field ?? "") ?? "Fallback provider configuration is invalid");
+}
+
+function fallbackProviderConfig(
+  primary: ProviderConfig,
+  processEnv: NodeJS.ProcessEnv,
+  fileEnv: Record<string, string>,
+): ProviderConfig | null {
+  const read = (name: string): string => processEnv[name] || fileEnv[name] || "";
+  const baseURL = read("SMART_RENAME_FALLBACK_BASE_URL").replace(/\/$/, "");
+  const model = read("SMART_RENAME_FALLBACK_MODEL");
+  const apiKey = read("SMART_RENAME_FALLBACK_API_KEY");
+
+  if (!baseURL && !model && !apiKey) return null;
+
+  // A known endpoint keeps its provider quirks, such as OpenAI's token field.
+  const profile = directProviderProfiles().find((item) => item.defaultBaseURL === baseURL);
+
+  const reasoningEffort =
+    read("SMART_RENAME_FALLBACK_REASONING_EFFORT") ||
+    profile?.defaultReasoningEffort ||
+    "";
+
+  const input = {
+    provider: profile?.id ?? "fallback",
+    baseURL,
+    model,
+    timeoutMs: primary.timeoutMs,
+    apiKey,
+  };
+
+  if (reasoningEffort) Object.assign(input, { reasoningEffort });
+
+  if (primary.promptPath) Object.assign(input, { promptPath: primary.promptPath });
+
+  const parsed = ProviderConfigSchema.safeParse(input);
+
+  if (!parsed.success) throw fallbackConfigError(parsed.error);
+
+  return parsed.data;
+}
+
 export async function loadProviderConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ProviderConfig> {
@@ -239,7 +295,9 @@ export async function loadProviderConfig(
 
   if (!parsed.success) throw configError(parsed.error);
 
-  return parsed.data;
+  const fallback = fallbackProviderConfig(parsed.data, env, fileEnv);
+
+  return fallback ? { ...parsed.data, fallback } : parsed.data;
 }
 
 export async function loadNamingPrompt(config: ProviderConfig, env?: NodeJS.ProcessEnv): Promise<string>;
@@ -307,6 +365,17 @@ export interface CompletionRequest {
 
 type Complete = (request: CompletionRequest) => Promise<string>;
 
+type Log = (message: string) => void;
+
+/** The worker sends stderr to worker.log. */
+function logToStderr(message: string): void {
+  console.error(`${new Date().toISOString()} ${message}`);
+}
+
+function providerName(config: ProviderConfig): string {
+  return `${config.provider}/${config.model}`;
+}
+
 export function transformOpenAiRequestBody(
   body: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -349,18 +418,48 @@ export async function completeWithAiSdk(request: CompletionRequest): Promise<str
 export class AiSdkNamer implements Namer {
   readonly #env: NodeJS.ProcessEnv;
   readonly #complete: Complete;
+  readonly #log: Log;
 
   constructor(
     env: NodeJS.ProcessEnv = process.env,
     complete: Complete = completeWithAiSdk,
+    log: Log = logToStderr,
   ) {
     this.#env = env;
     this.#complete = complete;
+    this.#log = log;
   }
 
   async suggest(context: NamingContext): Promise<NameSuggestion> {
     const config = await loadProviderConfig(this.#env);
     const system = await loadNamingPrompt(config, this.#env);
+    const fallback = config.fallback;
+    const primary = await this.#request(config, context, system);
+
+    if (!fallback || Exit.isSuccess(primary)) {
+      if (fallback) this.#log(`named by ${providerName(config)}`);
+
+      return this.#settle(primary, config);
+    }
+
+    const primaryError = this.#failure(primary, config);
+    this.#log(`${primaryError.message}; trying fallback ${providerName(fallback)}`);
+    const second = await this.#request(fallback, context, system);
+
+    if (Exit.isSuccess(second)) {
+      this.#log(`named by fallback ${providerName(fallback)}`);
+
+      return second.value;
+    }
+
+    throw new Error(`${primaryError.message}; fallback ${this.#failure(second, fallback).message}`);
+  }
+
+  #request(
+    config: ProviderConfig,
+    context: NamingContext,
+    system: string,
+  ): Promise<Exit.Exit<NameSuggestion, Error>> {
     const complete = this.#complete;
 
     const program = Effect.tryPromise({
@@ -376,16 +475,24 @@ export class AiSdkNamer implements Namer {
       catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
     }).pipe(Effect.timeout(Duration.millis(config.timeoutMs)), Effect.flatMap(decodeSuggestion));
 
-    return Exit.match(await Effect.runPromiseExit(program), {
-      onFailure: (cause) => {
-        const failure = Cause.squash(cause);
-        const parsed = z.instanceof(Error).safeParse(failure);
-        const message = parsed.success ? parsed.data.message : String(failure || "provider request failed");
-        const detail = sanitizeText(message.replaceAll(config.apiKey, "[redacted]")).slice(0, 400) || "provider request failed";
+    return Effect.runPromiseExit(program);
+  }
 
-        throw new Error(`AI request failed (${config.provider}/${config.model}): ${detail}`);
+  #settle(exit: Exit.Exit<NameSuggestion, Error>, config: ProviderConfig): NameSuggestion {
+    return Exit.match(exit, {
+      onFailure: () => {
+        throw this.#failure(exit, config);
       },
       onSuccess: (suggestion) => suggestion,
     });
+  }
+
+  #failure(exit: Exit.Exit<NameSuggestion, Error>, config: ProviderConfig): Error {
+    const failure = Exit.isFailure(exit) ? Cause.squash(exit.cause) : "provider request failed";
+    const parsed = z.instanceof(Error).safeParse(failure);
+    const message = parsed.success ? parsed.data.message : String(failure || "provider request failed");
+    const detail = sanitizeText(message.replaceAll(config.apiKey, "[redacted]")).slice(0, 400) || "provider request failed";
+
+    return new Error(`AI request failed (${providerName(config)}): ${detail}`);
   }
 }

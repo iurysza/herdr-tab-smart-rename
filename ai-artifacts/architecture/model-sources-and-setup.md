@@ -31,7 +31,7 @@ flowchart TD
 
 The selected-source cache is keyed by the full selection. A change closes the previous source before loading another. Returning to Direct also closes the active optional source. The serial request queue in [model-namer.ts](../../src/model-namer.ts) prevents overlapping suggestions from closing each other's adapter.
 
-A selected-source error is reported as a failure. There is no automatic fallback to another source or provider. [Model routing tests](../../test/model-namer.test.ts) verify default Direct behavior, selection propagation, failure handling, and source closure.
+A selected-source error is reported as a failure. There is no automatic fallback to another source. Direct alone can retry once with an optional fallback provider from `provider.env`, through the same request path and validation ([provider tests](../../test/provider.test.ts)). [Model routing tests](../../test/model-namer.test.ts) verify default Direct behavior, selection propagation, failure handling, and source closure.
 
 ## Credential and tool boundaries
 
