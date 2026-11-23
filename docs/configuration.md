@@ -111,9 +111,9 @@ An optional second OpenAI-compatible provider. When the main request fails, time
 | `SMART_RENAME_FALLBACK_BASE_URL` | Fallback OpenAI-compatible endpoint |
 | `SMART_RENAME_FALLBACK_MODEL` | Fallback model ID |
 | `SMART_RENAME_FALLBACK_API_KEY` | Fallback API key |
-| `SMART_RENAME_FALLBACK_REASONING_EFFORT` | Optional. Same values as `SMART_RENAME_REASONING_EFFORT` |
+| `SMART_RENAME_FALLBACK_REASONING_EFFORT` | Optional. `none`, `low`, `medium`, or `high`. An empty value uses the file, then the matched profile default. |
 
-The first three must be set together. An endpoint that matches a registered profile, such as `https://api.openai.com/v1`, keeps that profile's request handling and default reasoning effort. With a fallback set, a failure can take up to twice `SMART_RENAME_TIMEOUT_MS`, and the worker log records which provider named each label.
+The first three must be set together. An endpoint that matches a registered profile, such as `https://api.openai.com/v1`, keeps that profile's request handling and default reasoning effort. With a fallback set, a failure can take up to twice `SMART_RENAME_TIMEOUT_MS`. The daemon worker log records which provider named each label. The native service sends stderr to `/dev/null`.
 
 ## Private files and context
 

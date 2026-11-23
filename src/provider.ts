@@ -222,9 +222,8 @@ function fallbackProviderConfig(
   const profile = directProviderProfiles().find((item) => item.defaultBaseURL === baseURL);
 
   const reasoningEffort =
-    processEnv.SMART_RENAME_FALLBACK_REASONING_EFFORT ??
-    fileEnv.SMART_RENAME_FALLBACK_REASONING_EFFORT ??
-    profile?.defaultReasoningEffort ??
+    read("SMART_RENAME_FALLBACK_REASONING_EFFORT") ||
+    profile?.defaultReasoningEffort ||
     "";
 
   const input = {

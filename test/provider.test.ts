@@ -593,6 +593,53 @@ test("fallback is skipped when the primary succeeds and keeps known provider def
   assert.deepEqual(lines, ["named by ollama/qwen3.5:4b"]);
 });
 
+test("empty fallback reasoning effort falls through to the file and profile default", async () => {
+  const fixture = await tempConfig();
+
+  try {
+    const fallback = [
+      "SMART_RENAME_FALLBACK_BASE_URL=https://api.openai.com/v1",
+      "SMART_RENAME_FALLBACK_MODEL=gpt-5.6-luna",
+      "SMART_RENAME_FALLBACK_API_KEY=fallback-test-key",
+    ];
+
+    await writeFile(
+      fixture.file,
+      [
+        ...Object.entries(FALLBACK_ENV).map(([name, value]) => `${name}=${value}`),
+        ...fallback,
+        "SMART_RENAME_FALLBACK_REASONING_EFFORT=low",
+      ].join("\n"),
+    );
+
+    const fromFile = await loadProviderConfig({
+      ...fixture.env,
+      SMART_RENAME_FALLBACK_REASONING_EFFORT: "",
+    });
+
+    assert.equal(fromFile.fallback?.reasoningEffort, "low");
+
+    await writeFile(
+      fixture.file,
+      [
+        ...Object.entries(FALLBACK_ENV).map(([name, value]) => `${name}=${value}`),
+        ...fallback,
+        "SMART_RENAME_FALLBACK_REASONING_EFFORT=",
+      ].join("\n"),
+    );
+
+    const fromProfile = await loadProviderConfig({
+      ...fixture.env,
+      SMART_RENAME_FALLBACK_REASONING_EFFORT: "",
+    });
+
+    assert.equal(fromProfile.fallback?.provider, "openai");
+    assert.equal(fromProfile.fallback?.reasoningEffort, "medium");
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("fallback failure reports both errors without either key", async () => {
   const env = {
     ...FALLBACK_ENV,
