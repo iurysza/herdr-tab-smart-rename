@@ -12,6 +12,32 @@ import type { Namer } from "./provider.ts";
 import { MAX_CONCURRENT_TABS } from "./service.ts";
 import { acquireLock, ensurePrivateDir } from "./storage.ts";
 import { sanitizeText } from "./text.ts";
+import { z } from "zod";
+
+// Windows refuses to replace a file another process is reading (EPERM/EACCES/EBUSY); the reader lets go within milliseconds.
+const TRANSIENT_FS_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+const ErrorCodeSchema = z.object({ code: z.string() });
+
+function errnoCode(cause: unknown): string | undefined {
+  const parsed = ErrorCodeSchema.safeParse(cause);
+
+  return parsed.success ? parsed.data.code : undefined;
+}
+
+async function retryTransient<T>(operation: () => Promise<T>, attempts = 5): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      const code = errnoCode(error);
+
+      if (attempt >= attempts || !code || !TRANSIENT_FS_CODES.has(code)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10 * attempt));
+    }
+  }
+}
+
 
 export const NATIVE_DEBOUNCE_MS = 400;
 
@@ -171,13 +197,14 @@ export async function runNativeWorker(options: NativeWorkerOptions, signal: Abor
     statusWork = statusWork.then(async () => {
       try {
         await writeFile(temporary, `${JSON.stringify(status)}\n`, { mode: 0o600 });
-        await chmod(temporary, 0o600);
-        await rename(temporary, file);
+        await retryTransient(() => chmod(temporary, 0o600));
+        await retryTransient(() => rename(temporary, file));
       } finally {
         await rm(temporary, { force: true });
       }
-    }).catch(() => {
-      failure = new Error("Cannot write native runtime status");
+    }).catch((cause: unknown) => {
+      const code = errnoCode(cause);
+      failure = new Error(code ? `Cannot write native runtime status (${code})` : "Cannot write native runtime status");
       stop();
     });
 
