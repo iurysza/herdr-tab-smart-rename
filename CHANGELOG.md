@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.7.0...v0.8.0) (2026-11-23)
+
+
+### Features
+
+* **provider:** retry once with an optional fallback provider ([#73](https://github.com/iurysza/herdr-tab-smart-rename/issues/73)) ([961cb2b](https://github.com/iurysza/herdr-tab-smart-rename/commit/961cb2b057bf0cde809076523fb9e0e823578305))
+
+
+### Bug Fixes
+
+* **native:** retry status publish on transient Windows file errors ([#76](https://github.com/iurysza/herdr-tab-smart-rename/issues/76)) ([41f326e](https://github.com/iurysza/herdr-tab-smart-rename/commit/41f326e5ecbc69bb17febd2b5feea6fa451df34c))
+
 ## [0.7.0](https://github.com/iurysza/herdr-tab-smart-rename/compare/v0.6.6...v0.7.0) (2026-11-08)
 
 
